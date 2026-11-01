@@ -84,3 +84,51 @@
 - BarcodeDetector 纯类零 Electron 依赖；判定全基于事件自身 timestamp（无 setTimeout/debounce，G13）
 - 细节规则（实测锁行为）：修饰键（Shift 等）不打断序列（兼容配置大小写转换的扫码枪）；其他控制键（Tab 等）打断序列；间隔恰 50ms 仍连发、51ms 重置
 - bridge 薄壳三件事：过滤 type==='keyDown'、feed、命中后 onBarcode 回调 + send('scanner:barcode')；bridge/main 装配与 preload onBarcode 暴露留给 T11
+
+## Task 3 共享契约层落地记录（2026-11-01）
+
+### tsconfig / 结构
+- tsconfig.node.json 与 tsconfig.web.json 的 include 均已加入 `src/shared/**/*.ts`——主/渲染两侧 typecheck 都覆盖 shared（Task 1 脚手架未包含，本任务补上）
+- 目录：`src/shared/types/{domain,ipc,index}.ts`（barrel 统一 import）+ `src/shared/receipt/{char-grid,template-schema,default-template}.ts`；测试 `tests/unit/shared/`（4 文件 49 用例）
+
+### char-grid 数学约定（T4 生成器 / T12 预览直接消费，签名已冻结）
+- `PAPER_COLUMNS = { '58mm': 32, '80mm': 48 }`；`stringWidth(s)`（全角=2 半角=1）、`truncateToGrid(s, cols)`、`padLine(s, cols, align='left')`
+- 宽字符判定区间：0x1100-0x115F / 0x2E80-0xA4CF / 0xA960-0xA97F / 0xAC00-0xD7A3 / 0xF900-0xFAFF / 0xFE10-0xFE19 / 0xFE30-0xFE6F / 0xFF00-0xFF60 / 0xFFE0-0xFFE6 / 0x1F300-0x1F64F / 0x1F680-0x1F6FF / 0x1F900-0x1FAFF / 0x20000-0x3FFFD；emoji（含代理对区）宽 2
+- **U+FE0E/U+FE0F（变体选择符）宽 0**：'✌️'（U+270C+VS16）= 1（U+270C 是 East Asian Ambiguous 半角，别按宽 2 测试）
+- 全部函数按 code point 迭代（`for...of`）——UTF-16 代理对安全，emoji 截断不产生孤立代理
+- **padLine 不截断超宽输入**（纯 pad 语义）——T4/T12 必须「先 truncateToGrid 再 padLine」同一顺序组合，保证双渲染同源
+- padLine center 奇数余量**左少右多**（floor(pad/2)）
+
+### 模板 schema / 默认模板
+- ReceiptTemplate 段落制：header: Section[] / items: ItemsSection / totals: TotalLine[] / footer: Section[] / cutPaper；Section 为扁平联合（type: 'text'|'image'|'divider' + content?/align?/size?/bold?）
+- `interpolateVariables` 用 **function replacer**——vars 值含 `$&`/`` $` ``/`$1` 等 replace 元字符按字面插入，不被二次解释（有测试锁定）
+- ReceiptVars：金额/数量都是**已格式化字符串**（'12.00'）——分→元格式化由渲染编排层在组装 vars 时完成（G1：模板层零金额运算）；index signature `[key: string]: string | undefined`（可选 named 字段 companyFooter 兼容写法，TS2411 坑）
+- 默认模板金额符号用**全角 '￥'（U+FFE5，GBK 0xA3A4）**——半角 '¥'（U+00A5）在 EUC-CN 无映射会触发 D20 降级 '?'
+- DEFAULT_TEMPLATES: Record<PaperWidth, ReceiptTemplate>（'58mm'/'80mm' 两变体同构）
+
+### typed IPC
+- `IpcChannels`：channel → { req, res }；**req: void 表示无参通道**——TypedInvoke 用条件 tuple `...args: req extends void ? [] : [req]` 实现「void 通道调用不传实参」（编译期强制）
+- `IPC_CHANNEL_NAMES = [...] as const satisfies readonly (keyof IpcChannels)[]`——satisfies 保证常量 ⊆ 通道键；反向一致性由测试里 Equal<keyof IpcChannels, (typeof IPC_CHANNEL_NAMES)[number]> 编译期断言锁定
+- `createTypedInvoke(invoke)`：纯函数转发 + cast（renderer 拿 preload 暴露的裸 invoke 包装成 TypedInvoke，G8 无魔法字符串路径）
+- 通道清单 24 个（products 5 / sales 4 / purchases 2 / reports 3 / printing 3 / templates 5 / settings 2），与计划 Task 3 一致；handler 实现留给 Wave 2 各任务
+
+### 并行环境
+- Wave 1b 并行期间全量 `npm test` 会看到他人任务 TDD RED 阶段测试 FAIL（如 T7 printing 通道 Cannot find module）——**按文件路径归责，验收只看自己目录**；commit 只 add 自己的文件
+
+## Task 2 DB 基础设施落地记录（S1 spike 结论，2026-11-01 实证）
+
+### S1 spike：通过（无需 fallback）
+- better-sqlite3@13.0.3 在 **Electron 44.10.1 主进程内**（内嵌 Node 24.22.1，注意与本机 node v22.22.1 ABI 不同也无碍）require 加载成功，零 rebuild
+- 原因：v13 起 N-API（ABI 稳定跨 Node/Electron）+ prebuilds/ 随 npm 包（linux-x64/win32-x64 全平台）
+- in-memory 表 CRUD（含中文）正常；无 NODE_MODULE_VERSION 错误
+- fallback 链（12.x + install-app-deps / node:sqlite）**未触发**
+- Linux 下 Electron userData = `~/.config/<name>`（非 ~/.local/share——计划 QA 场景原文笔误，以 app.getPath('userData') 实测为准）
+
+### 工程结论（后续任务复用）
+- better-sqlite3 v13 **不自带 TS 类型**且未装 @types（依赖锁定）：`src/main/db/better-sqlite3.d.ts` 提供最小 ambient 声明（`import Database from 'better-sqlite3'` + `Database.Database` 实例类型）。后续任务直接用，勿重复声明
+- SQL 迁移文件经 **vite `?raw` import 内联进主进程 bundle**（`*.sql?raw`，声明在 src/main/db/migrations.d.ts）：vitest / electron-vite dev / build 三环境均验证 OK——打包 asar 后无需运行时读 .sql 文件
+- `require('electron')` 懒加载（函数体内、非顶部 import）使含 electron 依赖的模块可被 vitest 纯 Node 环境导入；rolldown CJS 输出下正常工作
+- `PRAGMA user_version = N` 在事务内可回滚：迁移器每步 `db.transaction(() => { db.exec(sql); db.pragma('user_version = N') })`，失败自动回滚不留半成品 schema
+- WAL 持久化在 DB 文件头：独立连接（readonly 亦可）读 `PRAGMA journal_mode` 返回 'wal'，QA 验证即用此法
+- 迁移幂等机制 = user_version 守卫（001_init.sql 逐字抄计划、无 IF NOT EXISTS，重启靠版本号跳过）
+- fixture seed：`tests/fixtures/seed.ts`（4 商品 → 进货+24/+18/+30 → 手工+6 → 销售-2/-1，审计链 6 条流水，前后库存衔接可断言）——T8/T9/T10/T13/T14 测试直接复用

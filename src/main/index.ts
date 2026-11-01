@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
+import { initDatabase } from './db/database'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -47,6 +48,8 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
+    initDatabase()
+
     createWindow()
 
     // macOS dock 激活时无窗则重建
