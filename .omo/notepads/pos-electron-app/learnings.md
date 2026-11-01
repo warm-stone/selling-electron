@@ -185,3 +185,20 @@
 - tsconfig.node.json 的 `tests/**/*.ts` 会 typecheck E2E 文件（好事）；vitest include 已限定 tests/unit/**，smoke.spec.ts 不会被 vitest 误收
 - el-menu 侧边导航：`router` 属性 + `:default-active="computed(route.path)"` 即可路由联动高亮；深色定制走 `--el-menu-*` 令牌（bg/text/hover-bg/active-color/item-height）
 - @element-plus/icons-vue 是 element-plus 的依赖（传递可用，未加直接依赖）
+
+## Task 4 ESC/POS 生成器落地记录（2026-11-01）
+
+### ★ node-thermal-printer 库字节 quirk 三连（真机联调与后续任务必读）
+- **cut() 不发计划契约的 `1d 56 42 00`**：库 cut() = `1b 64 04`（ESC d 4 走纸）×2 + `1d 56 00`（m=0 无走纸全切）+ 再 init（追加 `1b 40`）——生成器按契约直发 `1d 56 42 00`（GS V 66 0，走纸 0 单位后全切）+ 前置 2×LF
+- **printImageBuffer 光栅头 m 字节固定 0x30**（epson.js `Buffer.from([0x1d,0x76,0x30,48])`，48=0x30 非规范值 0-3）：经 scratch 打印机产出光栅字节后 patch `raster[3]=0x00`（Epson 规范正常尺寸），再 add 进主管线——golden 断言锁定 `1d 76 30 00`
+- **setTextSize 有十六进制拼装 bug**（`Buffer.from(`${h}${w}`,'hex')`，(1,1)→0x11=2×2 倍率）：尺寸一律用 setTextNormal/DoubleHeight/DoubleWidth/QuadArea（ESC ! 族）；`1d 21 00`（GS ! 归一）与 `1b 40`（ESC @，.d.ts 未暴露 initHardware）按规范字节直发常量
+- **构造时不传 characterSet**（否则 `1b 52 0f` 会排在 `ESC @` 之前）：显式 `add(HW_INIT)` → `setCharacterSet(CHINA)` 得到计划顺序 `1b 40 1b 52 0f` 开头
+
+### 生成器工程结论（T15/T16/T12 直接消费）
+- **breakLine 必须 NONE**：库 print() 的 `_fold` 按 UTF-16 码元数折叠，会把 char-grid 已对齐的网格行折断；行折叠全部交给 shared char-grid（padLine/truncateToGrid，先降级→再 truncate→再 pad 顺序）
+- **GBK 降级必须在交给 ThermalPrinter 之前**：库 append() 对 iconv 产生 '?' 的字符会遍历全部代码页找映射（EUC-JP/Big5 命中时**插入代码页切换指令**污染 GBK 流）——degradeToGbk 用 iconv 'EUC-CN' roundtrip 判定（与打印链路同 codec 零偏差；EUC-CN 覆盖 GBK 大集，'镕' roundtrip true，'¥'U+00A5/'𠀀' false→'?'）
+- **vars.logoBuffer 类型形态**：ReceiptVars 索引签名 `string|undefined` 容不下 Buffer，TS2411 禁止接口扩展改宽——escpos-generator.ts 独立声明 `ReceiptPrintVars`（索引 `string|Buffer|undefined`）；ReceiptVars 对象可直接赋值给它；interpolateVariables 调用点单次收窄 cast（ReceiptPrintVars→ReceiptVars 合法）
+- **SaleReceiptData 为 display-ready**：items 的数量/单价/小计均为已格式化字符串（T15 组装，G1：生成器零金额运算）；单号/时间等走 vars 插槽
+- items 列宽（ITEM_COLUMN_WIDTHS）：58mm 12/4/8/8、80mm 24/4/10/10（和=PAPER_COLUMNS）；名称左对齐+截断，数量/单价/小计右对齐
+- **golden .bin 再生机制**：`GOLDEN_UPDATE=1 npx vitest run tests/unit/printing/escpos-generator.test.ts`（describe.skipIf 门控）重写 tests/fixtures/golden/*.bin + .omo/evidence/task-4-sample-receipt.bin；**光栅字节=f(像素) 与 pngjs deflate 无关 → golden 跨 zlib/Node 版本稳定**；pngjs 无自带类型 → 测试侧 createRequire + 最小接口消费
+- 每段落自含完整状态块（GS! 归一 + ESC! 字号 + bold + 对齐；段落尾显式关粗体）——字节流对段落重排鲁棒，不依赖前段残留态

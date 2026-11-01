@@ -1,0 +1,37 @@
+════ Task 4 — ESC/POS 生成器 golden 字节矩阵验证 ════
+日期: 2026-11-01 21:26:01
+
+── 命令: npx vitest run tests/unit/printing/ ──
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  6 passed (6)
+      Tests  69 passed | 1 skipped (70)
+   Start at  21:26:02
+   Duration  1.23s (tests 59%, import 21%, transform 14%, worker 6%)
+
+
+── 证据样例 .bin（80mm 默认模板 + 样例销售，GOLDEN_UPDATE 路径生成）──
+文件: .omo/evidence/task-4-sample-receipt.bin (373 bytes)
+
+── xxd 检查前 32 字节 ──
+00000000: 1b40 1b52 0f1d 2100 1b21 101b 4501 1b61  .@.R..!..!..E..a
+00000010: 01d6 d0ce c4b2 e2ca d4ca d5d2 f80a 1b45  ...............E
+
+── QA 场景断言：头部含 1b40（ESC @），字节流含 1b520f（中文页）──
+head-4-bytes = 1b401b52 (期望 1b401b52 → ESC @ + ESC R 15 开头)
+✓ 以 1b 40 开头，紧随 1b 52 0f（中文页）
+✓ 含 1d 56 42 00（GS V 66 0 切纸）
+✓ 无 1d 76 30 00 光栅（默认模板无 Logo，符合预期）
+✓ 含 GBK 中文字节 d6d0 cec4 b2e2 cad4 cad5 d2f8（中文测试收银）
+
+── golden .bin 基准（提交入库，字节级 diff 锁定）──
+43fcb5d21b98b89d943dd9b65a0fdabd  tests/fixtures/golden/receipt-58mm-default.bin
+ab89781786ae79cf64bbdcbe5d57fac2  tests/fixtures/golden/receipt-80mm-with-logo.bin
+dcf878936fa39e7bbfa196049688c804  .omo/evidence/task-4-sample-receipt.bin
+
+── 矩阵维度覆盖 ──
+{58mm, 80mm} × {bold on/off} × {doubleHeight/Width/quad/normal} × {left/center/right} × {Logo 有/无} × {cutPaper on/off} = 27 用例（另 GBK 降级/幂等/golden diff）
