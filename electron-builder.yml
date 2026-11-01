@@ -1,0 +1,41 @@
+# electron-builder 打包配置（Task 20）
+# 目标：Windows NSIS 安装包（CI windows-latest 产出，Linux 本地用 --dir 冒烟）
+#
+# 决策记录（详见 .omo/notepads/pos-electron-app/learnings.md「Task 20」）：
+# - asarUnpack 不配置：better-sqlite3 v13 为 N-API（免 rebuild，S1 spike 实证），asar 内 .node
+#   可直接加载——Linux --dir 产物冒烟（首启建库 pos.db）通过后锁定此决策
+# - icon 不配置：使用 Electron 默认图标（electron-builder 警告并回退默认，不失败）；
+#   本任务不做设计向 icon（任务简报约束）
+# - files 仅列 out/**：package.json 与 node_modules 生产依赖（electron-vite
+#   externalizeDeps 默认开启，主进程 bundle 运行时 require 生产依赖）由
+#   electron-builder 在任何情况下自动追加
+# - npmRebuild: false：跳过 @electron/rebuild——better-sqlite3 v13 是 N-API +
+#   prebuilds/ 全平台预编译随包（含 win32-x64.node，S1 spike 实证免 rebuild）；
+#   Linux 上 --win nsis 会因 node-gyp 不支持交叉编译而失败，CI windows-latest
+#   上则徒增 VS 源码编译耗时——prebuilds 原样打包即正确（asar 冒烟实证：
+#   --dir 产物跑的就是 prebuilds/linux-x64.node）
+appId: com.selling-electron.pos
+productName: 销存系统
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+asar: true
+npmRebuild: false
+win:
+  target:
+    - nsis
+nsis:
+  # 引导式安装器（非一键）：允许用户自选安装目录
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # elevate helper 仅供 electron-updater 提权升级使用——本项目不配置自动更新
+  # （锁定清单），且其 rcedit 后处理在 Linux 上需 wine；置 false 后 Linux 也可
+  # 完整产出 NSIS 安装包（CI windows-latest 同配置零差异）
+  packElevateHelper: false
+  # 安装器界面语言：简体中文（zh-CN → NSIS SimpChinese）
+  installerLanguages:
+    - zh-CN
+  language: '2052' # LCID(2052) = zh-CN
+  artifactName: ${productName}-${version}-setup.${ext}
