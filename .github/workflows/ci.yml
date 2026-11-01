@@ -6,7 +6,39 @@ on:
   pull_request:
 
 jobs:
+  # ── job 1：质量门（typecheck + vitest + Playwright E2E，windows-latest 目标平台）──
   test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # postinstall（install-electron）随 npm ci 自动补齐 Electron 二进制，
+      # 勿在此追加下载步骤
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # windows-latest 自带交互式桌面会话，Playwright _electron 直接驱动
+      # 应用自带 Electron 二进制（无需 playwright install 下载浏览器、无需 xvfb）。
+      # E2E globalSetup 内部执行 npm run build（驱动构建产物而非 dev server）。
+      - name: E2E tests (Playwright _electron)
+        run: npm run test:e2e
+
+  # ── job 2：NSIS 安装包构建（质量门通过后）──
+  build:
+    needs: test
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -21,12 +53,39 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      # electron-builder 只打包现有产物，须先构建 out/
+      - name: Build app (electron-vite)
+        run: npm run build
 
-      - name: Unit tests
+      # electron-builder.yml：npmRebuild=false（better-sqlite3 v13 N-API prebuilds
+      # 免 rebuild）；win32 平台无 wine 依赖（uninstaller 提取走本机 exec）
+      - name: Package NSIS installer
+        run: npx electron-builder --win nsis
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis-installer
+          path: release/*.exe
+          if-no-files-found: error
+
+  # ── job 3：Linux 双平台交叉验证（G11：无 Windows-only 依赖的纯逻辑层）──
+  linux-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # vitest 全量（services/repos/生成器/检测器/导出器均为纯逻辑）；
+      # spooler 等 Windows-only API 走 mock/skip（G11），Linux 上同绿
+      - name: Unit tests (cross-platform)
         run: npm test
-
-      # _electron 用应用自带 Electron 二进制，无需 playwright install 下载浏览器
-      - name: E2E tests (Playwright _electron)
-        run: npm run test:e2e
