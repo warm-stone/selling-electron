@@ -1,0 +1,22 @@
+# Task 9 进货事务回滚矩阵证据（vitest 2026-11-01）
+
+## 运行命令
+```
+npx vitest run tests/unit/services/purchase.service.test.ts
+```
+
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+   Start at  21:56:38
+   Duration  771ms (tests 54%, import 26%, transform 15%, worker 5%)
+
+
+## 回滚断言要点（测试源码见 tests/unit/services/purchase.service.test.ts）
+- 第二个 item 的 productId 不存在 → throws /商品不存在/
+- 断言 purchase_orders 0 行、purchase_items 0 行、stock_movements 0 行、两商品 stock 不变
+- 快照不可变：SQL UPDATE products 改名后 getDetail 仍返回旧名称/条码（不 join products）
