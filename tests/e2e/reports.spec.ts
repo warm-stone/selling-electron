@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 import { test, expect } from '@playwright/test'
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { Workbook } from 'exceljs'
@@ -107,8 +108,8 @@ function prevCalendarMonth(): string {
 
 const PREV_MONTH = prevCalendarMonth()
 
-/** 导出目录（T17 钩子）：/tmp/opencode 下按次隔离（预批准临时区） */
-const EXPORT_DIR = mkdtempSync(join('/tmp/opencode', 'e2e-exports-'))
+/** 导出目录（T17 钩子）：系统临时目录下按次隔离（跨平台——G11：禁硬编码 POSIX 路径，Windows 无 /tmp） */
+const EXPORT_DIR = mkdtempSync(join(tmpdir(), 'e2e-exports-'))
 const EVIDENCE_DIR = '.omo/evidence'
 
 let app: LaunchedApp

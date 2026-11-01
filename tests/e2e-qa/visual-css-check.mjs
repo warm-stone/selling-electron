@@ -7,10 +7,11 @@
 import { _electron } from 'playwright'
 import Database from 'better-sqlite3'
 import { mkdtempSync, statSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const EVIDENCE = '.omo/evidence/final-qa'
-const userDataDir = mkdtempSync(join('/tmp/opencode', 'qa-visual-css-'))
+const userDataDir = mkdtempSync(join(tmpdir(), 'qa-visual-css-'))
 
 const app = await _electron.launch({
   args: ['.'],

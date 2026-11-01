@@ -5,6 +5,7 @@
 import type { ElectronApplication, Page } from 'playwright'
 import { appendFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import net from 'node:net'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export { launchApp, closeApp, waitForRoute, type LaunchedApp } from '../e2e/helpers'
@@ -44,9 +45,9 @@ export function todayYmd(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-/** 隔离导出目录（T17 钩子 E2E_EXPORT_DIR） */
+/** 隔离导出目录（T17 钩子 E2E_EXPORT_DIR）——系统临时目录（跨平台，G11） */
 export function makeExportDir(): string {
-  return mkdtempSync(join('/tmp/opencode', 'qa-exports-'))
+  return mkdtempSync(join(tmpdir(), 'qa-exports-'))
 }
 
 /** SPA 路由离开再回来（等价刷新，规避 file:// 重载竞态——T8 learnings） */

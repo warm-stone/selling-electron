@@ -6,6 +6,7 @@
  */
 import { _electron } from 'playwright'
 import { existsSync, mkdirSync, mkdtempSync, appendFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const EVIDENCE = '.omo/evidence/final-qa'
@@ -17,7 +18,7 @@ if (!existsSync(exe)) {
   process.exit(1)
 }
 
-const userDataDir = mkdtempSync(join('/tmp/opencode', 'qa-packaged-'))
+const userDataDir = mkdtempSync(join(tmpdir(), 'qa-packaged-'))
 mkdirSync(EVIDENCE, { recursive: true })
 
 const app = await _electron.launch({
