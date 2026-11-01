@@ -1,0 +1,59 @@
+
+> selling-electron@0.1.0 build
+> electron-vite build
+
+vite v8.3.5 building ssr environment for production...
+transforming...
+✓ 32 modules transformed.
+rendering chunks...
+out/main/index.js  70.30 kB
+
+✓ built in 149ms
+vite v8.3.5 building ssr environment for production...
+transforming...
+✓ 2 modules transformed.
+rendering chunks...
+out/preload/index.js  3.69 kB
+
+✓ built in 41ms
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+out/renderer/index.html                                        0.73 kB
+out/renderer/assets/PlaceholderPage-DWklUpT6.css               0.32 kB
+out/renderer/assets/PurchasesView-B1R4caRY.css                 0.92 kB
+out/renderer/assets/ProductsView-DBqIR192.css                  2.53 kB
+out/renderer/assets/ReceiptPreviewDemoView-D8XYQgNr.css        2.94 kB
+out/renderer/assets/SettingsView-DxJuJ7UK.css                  4.99 kB
+out/renderer/assets/index-CYBNrWtR.css                       363.34 kB
+out/renderer/assets/PosView-dL57jFAU.js                        0.48 kB
+out/renderer/assets/ReportsView-DhXpzLwu.js                    0.50 kB
+out/renderer/assets/SalesHistoryView-oPbPfqIb.js               0.52 kB
+out/renderer/assets/TemplateEditorView-C6yYpDmo.js             0.53 kB
+out/renderer/assets/PlaceholderPage-D2WGuTDx.js                1.36 kB
+out/renderer/assets/PurchasesView-BKBJEnxl.js                 13.93 kB
+out/renderer/assets/ProductsView-BFIXeLkH.js                  14.68 kB
+out/renderer/assets/SettingsView-whlnCDzF.js                  19.43 kB
+out/renderer/assets/ReceiptPreviewDemoView-CYeYF0Xg.js        21.59 kB
+out/renderer/assets/_plugin-vue_export-helper-B14GKj1c.js    170.13 kB
+out/renderer/assets/message-BhOHYR0I.js                      223.17 kB
+out/renderer/assets/index-ClP_cASF.js                      1,995.17 kB
+
+✓ built in 2.50s
+
+Running 11 tests using 1 worker
+
+  ✓   1 tests/e2e/products.spec.ts:115:7 › 商品管理全链路 › 新增商品 → 列表出现（金额分→元显示） (1.8s)
+  ✓   2 tests/e2e/products.spec.ts:134:7 › 商品管理全链路 › 搜索过滤：条码前缀命中 / 无匹配空态 / 清空恢复 (1.3s)
+  ✓   3 tests/e2e/products.spec.ts:154:7 › 商品管理全链路 › 编辑库存 100→80：行更新 + DB 流水 {change:-20, before:100, after:80, source:manual} (1.1s)
+  ✓   4 tests/e2e/products.spec.ts:180:7 › 商品管理全链路 › 重复条码新增：错误提示「条码已存在」，弹窗保留 (978ms)
+  ✓   5 tests/e2e/products.spec.ts:195:7 › 商品管理全链路 › 负库存标红（D2：允许，行 class stock-negative） (1.0s)
+  ✓   6 tests/e2e/products.spec.ts:214:7 › 商品管理全链路 › 删除（无引用）：确认弹窗明示库存废弃 → 行消失 (418ms)
+  ✓   7 tests/e2e/products.spec.ts:228:7 › 商品管理全链路 › 删除（带历史引用）：弹窗含引用数文案，快照行保留且 product_id 置 NULL (1.9s)
+  ✓   8 tests/e2e/products.spec.ts:280:7 › 商品管理全链路 › 分页：每页 20 条，翻页正确 (614ms)
+  ✓   9 tests/e2e/smoke.spec.ts:32:7 › 应用骨架冒烟：导航与路由 › 侧边导航渲染 7 个中文菜单项 (329ms)
+  ✓  10 tests/e2e/smoke.spec.ts:40:7 › 应用骨架冒烟：导航与路由 › userData 已隔离到临时目录（不污染真实用户数据） (31ms)
+  ✓  11 tests/e2e/smoke.spec.ts:46:7 › 应用骨架冒烟：导航与路由 › 点击导航逐项切换路由，未实现路由保持空态占位 (1.3s)
+
+  11 passed (21.9s)

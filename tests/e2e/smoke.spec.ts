@@ -12,6 +12,12 @@ const NAV_ITEMS = [
   { path: '/template-editor', label: '小票模板' },
   { path: '/settings', label: '系统设置' }
 ]
+
+/**
+ * 已替换占位的业务路由（页面内容验收由各任务的专属 E2E spec 覆盖；
+ * 各任务落地时在此追加自己的路由，占位断言只对未实现路由生效）。
+ */
+const IMPLEMENTED_ROUTES = new Set(['/purchases', '/products', '/settings'])
 test.describe.serial('应用骨架冒烟：导航与路由', () => {
   let app: LaunchedApp
 
@@ -37,14 +43,16 @@ test.describe.serial('应用骨架冒烟：导航与路由', () => {
     expect(existsSync(app.userDataDir)).toBe(true)
   })
 
-  test('点击导航逐项切换路由，空态占位可见', async () => {
+  test('点击导航逐项切换路由，未实现路由保持空态占位', async () => {
     const { page } = app
     for (const { path, label } of NAV_ITEMS) {
       await page.locator('.el-menu-item').filter({ hasText: label }).click()
       await waitForRoute(page, path)
-      await expect(page.locator('.placeholder-page__title')).toHaveText(label)
-      await expect(page.locator('.el-empty')).toBeVisible()
-      await expect(page.locator('.el-empty')).toContainText('建设中')
+      if (!IMPLEMENTED_ROUTES.has(path)) {
+        await expect(page.locator('.placeholder-page__title')).toHaveText(label)
+        await expect(page.locator('.el-empty')).toBeVisible()
+        await expect(page.locator('.el-empty')).toContainText('建设中')
+      }
     }
     // 回收银台（应用主页）截图留证
     await page.locator('.el-menu-item').filter({ hasText: '收银台' }).click()
