@@ -1488,7 +1488,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(reports): 日/月报统计服务（剔除作废+跨午夜）`
 
-- [ ] 15. 打印编排集成（结账→预览→打印全流程 + 失败恢复 + 重打）
+- [x] 15. 打印编排集成（结账→预览→打印全流程 + 失败恢复 + 重打）
 
   **What to do**:
   - `src/main/printing/print.service.ts` 补全编排层：
@@ -1565,7 +1565,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(printing): 打印编排集成（结账→预览→打印→失败恢复→重打）`
 
-- [ ] 16. 小票模板编辑器（表单配置 + 实时预览 + CRUD）
+- [x] 16. 小票模板编辑器（表单配置 + 实时预览 + CRUD）
 
   **What to do**:
   - `src/main/db/repositories/template.repo.ts`：list/getByDefault/create/update/delete/setDefault（config_json 存取）
@@ -1721,7 +1721,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(export): txt/xlsx/docx 导出器`
 
-- [ ] 18. 报表 UI + 导出集成
+- [x] 18. 报表 UI + 导出集成
 
   **What to do**:
   - `ReportsView.vue`：Tabs（日报/月报）：
