@@ -17,7 +17,7 @@ const NAV_ITEMS = [
  * 已替换占位的业务路由（页面内容验收由各任务的专属 E2E spec 覆盖；
  * 各任务落地时在此追加自己的路由，占位断言只对未实现路由生效）。
  */
-const IMPLEMENTED_ROUTES = new Set(['/purchases', '/products', '/settings'])
+const IMPLEMENTED_ROUTES = new Set(['/purchases', '/products', '/settings', '/sales-history'])
 test.describe.serial('应用骨架冒烟：导航与路由', () => {
   let app: LaunchedApp
 

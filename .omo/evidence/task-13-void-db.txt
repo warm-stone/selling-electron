@@ -1,0 +1,19 @@
+Task 13 作废回滚 DB 断言（E2E 直读隔离 userData/pos.db）
+作废目标: 20261031-0002 (id=2, 可乐 ×1)
+
+[sales] status=voided voided_at=2026-11-01 22:34:58（期望 voided + 非空时间）
+[products] 作废前 stock: 可乐=10 雪碧=8
+[products] 作废后 stock: 可乐=11 雪碧=8（期望 +1 / 不变）
+[stock_movements] source=void:
+[
+  {
+    "product_id": 1,
+    "change_qty": 1,
+    "before_stock": 10,
+    "after_stock": 11,
+    "source": "void",
+    "source_id": 2
+  }
+]
+
+断言结果: 全部通过（PASS）

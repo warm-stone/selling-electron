@@ -379,3 +379,26 @@
 - **实证细节**：隐藏的是外层 `.el-select__popper`（display:none + 0x0），`.el-select-dropdown__item` 本体永远 display:block——item 级 visibility 判定全靠边界框传递；popper 在 select 挂载时即 teleport（DOM 顺序=挂载顺序，与打开顺序无关）
 - **✅ 终极方案：aria-controls 锚点域**——每行 select 的内部 `input[aria-controls]` 静态精确指向本下拉的 listbox（`UL.el-select-dropdown__list`）元素 id：**click 前读 `getAttribute('aria-controls')`**（静态属性，不依赖展开态）→ `page.locator('#' + id + ' .el-select-dropdown__item', { hasText })` 圈定本域 → toBeVisible 等打开动画非零框 → .first().click()。零时序/零残留歧义，多行动态表格（动态行内嵌 select）唯一可靠模式
 - 证据链：debug spec 两轮 DOM dump（popper/popperIdx/popperDisplay/aria-controls 归属）实证全部中间态；修复后 purchases 5/5 两轮 + 全量 25/25 全绿
+
+## Task 13 销售记录查询落地记录（2026-11-01）
+
+### ★ sales:list 分页契约现状（T15/后续报表消费前必读）
+- **T10 IPC 未暴露 page 参数**：service.list(query, page=1) 有分页形参，但 sales.ipc.ts 透传时固定 page=1 → 单次最多返回 SALE_PAGE_SIZE=50 条（repo 层常量）。T13 按"只消费 T10"约束走**本地分页 20/页**（slice）；已知边界：单筛选窗口 >50 条时尾部不可见，真正服务端分页需 T3 契约 + T10 IPC 扩 page 字段（记录待 F4 审计）
+- 日期筛选语义（实测确认）：repo `date(created_at) >= from AND <= to` **两端 inclusive**，传 'YYYY-MM-DD'，created_at 是 localtime——E2E 直插昨日/今日 created_at 后按此断言无歧义
+
+### ★ Element Plus locale 中文化（全应用生效，T8/T9/T19 E2E 回归全绿）
+- `app.use(ElementPlus, { locale: zhCn })`（import 路径 `element-plus/es/locale/lang/zh-cn`）——el-pagination total 文案默认英文 'Total 3'，配置后 '共 3 条'；message-box/empty 等内置文案同源中文化
+- E2E 断言 Element Plus **内置**文案前先确认 locale（自定义文案/显式传 prop 的按钮文本不受影响）
+
+### el-date-picker daterange 的 E2E 交互定式（T18 报表日期筛选直接复用）
+- **shortcuts 是唯一稳定路径**：组件配 shortcuts（今天/昨天/最近 7 天/最近 30 天）→ E2E 点 `.el-picker-panel__shortcut` 完成范围选择，**零日历面板操作**（无 popper 残留/渐隐动画/跨月翻页问题——el-select 四轮踩坑的同族风险全部绕开）
+- shortcuts 同时是 POS 历史查询的真实高频入口（生产与测试双赢，不是 test-only hack）
+- value-format="YYYY-MM-DD" 下 v-model 直接是 `[string, string]`，shortcuts value 返回 Date[] 由组件内部 format
+
+### 重打占位模式（T15 接管契约）
+- `window.api.printing as unknown as { preview?: (saleId) => Promise<unknown> }` optional chaining 调用：preload 未暴露时 `?.()` 得 undefined 不抛错 → console.log 占位 + ElMessage.info('打印功能集成中')；**方法存在则透传调用（错误如实显示）**——T15 实装 preview 后按钮零改动自然升级
+- E2E 双 toast 陷阱：两次点击占位按钮 3s 内会叠 2 个 `.el-message--info` → strict violation；只对一次点击断言 toast，另一次仅断言 enabled
+
+### 明细行精确断言（el-table 行内 td 列序定位）
+- `.el-table__row td.nth(n)` 按列序断言（数量/单价/小计），比行级 containsText 强（避免 '300' 撞条码子串之类的假阳性）；列序 = template 中 el-table-column 声明序
+- 双击行用 `row.locator('td').first().dblclick()`（单号格无交互元素，避开行内按钮误触）
