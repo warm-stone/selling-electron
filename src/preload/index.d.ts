@@ -1,5 +1,8 @@
 import type {
+  AppSettings,
   CheckoutItem,
+  IpcChannels,
+  Product,
   PurchaseInputItem,
   PurchaseOrderWithItems,
   Sale,
@@ -27,12 +30,68 @@ export interface PurchasesApi {
   }) => Promise<PurchaseOrderWithItems[]>
 }
 
+/**
+ * 商品列表行：Product + 删除影响计数。运行时为契约 products:list res
+ * `Product[]` 的结构超集（通道封闭约束下 UI 删除弹窗引用数的获取途径）。
+ * 与 src/preload/index.ts 的同名声明保持结构同步。
+ */
+export interface ProductRow extends Product {
+  /** 关联的 sale_items + purchase_items 行数（删除弹窗「N 条历史单据」文案用） */
+  willOrphan: number
+}
+
+export interface ProductsApi {
+  list: (keyword?: string) => Promise<ProductRow[]>
+  create: (req: {
+    barcode: string | null
+    name: string
+    default_price_cents: number | null
+    stock: number
+  }) => Promise<Product>
+  update: (req: {
+    id: number
+    name: string
+    default_price_cents: number | null
+  }) => Promise<Product>
+  updateStock: (req: { id: number; stock: number }) => Promise<Product>
+  delete: (id: number) => Promise<{ ok: true; willOrphan: number }>
+}
+
+export interface SettingsApi {
+  get: () => Promise<AppSettings>
+  set: (patch: Partial<AppSettings>) => Promise<AppSettings>
+  uploadLogo: () => Promise<{ logo_path: string | null }>
+  getLogoDataUrl: () => Promise<{ data_url: string | null }>
+}
+
+/** 测试打印请求：AppSettings 的打印子集（设置页「打印设置」卡片当前表单值） */
+export type PrintTestRequest = Pick<
+  AppSettings,
+  'printer_channel' | 'printer_name' | 'tcp_host' | 'tcp_port' | 'com_port'
+>
+
+export interface PrintingApi {
+  printers: () => Promise<{ name: string; is_default: boolean }[]>
+  testPrint: (req: PrintTestRequest) => Promise<{ ok: boolean; error?: string }>
+}
+
+/** 报表导出（Task 17）：file_path null = 用户取消。T14 将追加 daily/monthly。 */
+export interface ReportsApi {
+  export: (
+    req: IpcChannels['reports:export']['req']
+  ) => Promise<IpcChannels['reports:export']['res']>
+}
+
 export interface PosApi {
   ping: () => string
   /** 底层 IPC 入口：经 shared/types/ipc.ts 的 createTypedInvoke 包装使用（G8） */
   invoke: (channel: string, payload?: unknown) => Promise<unknown>
   sales: SalesApi
   purchases: PurchasesApi
+  products: ProductsApi
+  settings: SettingsApi
+  printing: PrintingApi
+  reports: ReportsApi
 }
 
 declare global {

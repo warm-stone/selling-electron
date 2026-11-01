@@ -1,8 +1,12 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db/database'
+import { registerReportsExportIpc } from './ipc/reports-export.ipc'
+import { registerPrintingIpc } from './ipc/printing.ipc'
+import { registerProductsIpc } from './ipc/products.ipc'
 import { registerPurchasesIpc } from './ipc/purchases.ipc'
 import { registerSalesIpc } from './ipc/sales.ipc'
+import { registerSettingsIpc } from './ipc/settings.ipc'
 
 // ── E2E 数据隔离（Task 6）：测试进程通过环境变量注入临时 userData，避免污染真实用户数据 ──
 // 必须在 app ready 前设置；正常 dev/生产环境不注入该变量，零影响
@@ -57,8 +61,12 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     const db = initDatabase()
+    registerProductsIpc(db)
     registerSalesIpc(db)
     registerPurchasesIpc(db) // Task 9：进货管理（IPC 统一装配模式）
+    registerReportsExportIpc(db) // Task 17：报表导出（仅 reports:export；T14 后续注册 reports:daily/monthly）
+    registerSettingsIpc(db) // Task 19：系统设置（店铺信息/打印配置/Logo）
+    registerPrintingIpc() // Task 19：打印设置（打印机枚举 + 测试打印）
 
     createWindow()
 

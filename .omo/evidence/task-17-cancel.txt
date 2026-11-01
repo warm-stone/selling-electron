@@ -1,0 +1,15 @@
+=== Task 17 QA Scenario 3: 取消保存（mock dialog -> 无文件写入）===
+日期: 2026-11-01 21:54:49
+
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 7 skipped (10)
+   Start at  21:54:52
+   Duration  1.96s (import 77%, tests 17%, transform 5%, worker 1%)
+
+
+断言: canceled -> resolve null / 零 fs 写入(writeFile mock 未被调用) / 不打开文件夹 / 不抛错

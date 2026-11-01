@@ -228,3 +228,26 @@
 - `checkout` 返回 `SaleDetail`（头+items 快照行，全整数分）= 任务规格的 SaleReceiptData 实质；IPC 契约 `res: Sale` 是其超集，items 字段透传给 renderer（T15 组装 vars 时再格式化分→元）
 - 同车重复商品（不同价）service 不合并且逐行落库——合并（D16）是 renderer 购物车职责，service 保持无状态直传
 - preload/index.ts 出现并行混编（T9 purchases 段落 + 本任务 sales 段落同文件）——共享装配文件按"谁的段落谁保证 typecheck"归责，commit 时如实提交整文件（对方段落已过 typecheck 才提交）
+
+## Task 17 导出器落地记录（2026-11-01）
+
+### ★ exceljs 4.4.0 三坑（T18 E2E / 后续报表导出复用必读）
+- **无默认导出**：index.d.ts 全部顶层命名导出 → `import { Workbook } from 'exceljs'`（不要 `import ExcelJS from`）；其 d.ts 顶部 `declare interface Buffer extends ArrayBuffer` 遮蔽全局 Buffer——`writeBuffer()` 返回值可直接 `Buffer.from(x)`，但 **`xlsx.load()` 入参需 `as unknown as ArrayBuffer` cast**（Node Buffer 非 ArrayBuffer 子类型，类型不容、运行时无碍）
+- **writeBuffer 产物含 docProps 创建时间戳（毫秒级）→ 同秒两次调用字节也不同**（实证：same-second equal=false）——xlsx round-trip 断言必须基于 load 回读，**永远不要对 xlsx 产物做字节 diff/golden**
+- numFmt 逐格设置：`addRow([...])` 后 `getCell(\`D${sheet.rowCount}\`).numFmt = '0.00'`（rowCount 含表头自增）；金额值 `cents / 100` 写为数值 + numFmt，单元格保持可再计算类型（G1 边界格式化）
+
+### ★ TS 判别联合解构陷阱（本任务踩过：vitest 全绿但 tsc 报错）
+- `const { report } = input` 解构发生在判别收窄**之前** → 解构变量永远是联合类型；`if (input.kind === 'daily')` 只收窄 `input` 本身，**不影响已解构的 `report`**——分支内必须写 `input.report.sales`
+- 教训：**vitest 绿 ≠ typecheck 绿**（vite 转译不做类型检查）——验收必须双跑 `npx vitest run` + `npx tsc --noEmit`
+
+### 导出子系统结构（T18 消费）
+- `ReportExportInput` 判别联合（kind: daily|monthly + period + title + report）：exporter 纯函数（零 dialog/fs），export.service 编排（DI 注入 showSaveDialog/writeFile/revealInFolder——electron 懒加载 require，vitest 零依赖可测；取消路径断言零写入靠 writeFile 注入而非 mock fs）
+- **E2E_EXPORT_DIR 钩子**：env 存在时跳过 dialog 直写 `${dir}/${日报2026-11-01.xlsx}` 并返回路径、**不 reveal**（CI 不弹资源管理器）；正常路径零影响（分支仅 env 存在时进入）；默认 writeFile 含 mkdir -p → E2E 目录无需预建
+- txt：UTF-8 BOM（EF BB BF）+ **CRLF** 行尾（Windows 记事本双保险）；列对齐复用 char-grid padLine（先 truncate 再 pad 同源顺序），对齐不变量测试=全部明细行 stringWidth 相同
+- docx 9.15.1：ESM+CJS 双发（named import 直接用）；Table borders 一步到位（top/bottom/left/right/insideHorizontal/insideVertical 全给 `{ style: SINGLE, size: 4 }`）；jszip 解压断言 document.xml 子串（CJK/数字无转义问题）
+- 文件名/标题约定：`{日报|月报}{period}.{txt|xlsx|docx}`、标题 `{period} 销售报表`（period: 日报 yyyy-MM-dd / 月报 yyyy-MM）；状态列 completed→已完成
+
+### IPC 注册统一模式（Wave 2a 首个落地实例，T14 及后续 reports 域任务照此）
+- `registerReportsExportIpc(db)` 独立文件 `src/main/ipc/reports-export.ipc.ts`（T14 后续注册 reports:daily/monthly 在**另一文件**——避免并行冲突）；index.ts 锚定 `const db = initDatabase()` 注册块逐行追加
+- 参数校验抽纯函数 `parseReportsExportRequest(req: unknown)`（throw 带字段名的可诊断错误）+ electron 懒加载 require（函数体内）→ ipc 文件可被 vitest 纯 Node 导入单测
+- preload 双文件同步：`index.ts` 实现 + `index.d.ts` 类型（renderer window.api 类型源）——两处都要加；用 `IpcChannels['通道']['req'|'res']` 索引类型防契约漂移
