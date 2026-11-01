@@ -1,3 +1,6 @@
+/// <reference lib="dom" />
+// page.evaluate 回调在浏览器执行（location/getComputedStyle 等 DOM 全局）；
+// tsconfig.node.json 无 DOM lib，经 lib 指令为当前文件注入（零 tsconfig 改动）
 import { test, expect } from '@playwright/test'
 import { stringWidth } from '../../src/shared/receipt/char-grid'
 import { ITEM_COLUMN_WIDTHS } from '../../src/shared/receipt/item-columns'

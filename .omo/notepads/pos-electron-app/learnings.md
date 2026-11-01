@@ -367,3 +367,8 @@
 ### 共享装配文件的"先提交者代持"现象（Wave 并行实测）
 - T10 提交 index.ts/preload 时把工作区当时的**全部**注册行与命名空间（含我 T19 已写入的 registerSettingsIpc/registerPrintingIpc/settings/printing 段）一并提交——共享文件无领地边界，先提交者代持后来者的已写入行；F4 审计 diff 归因时需对照本记录（T19 的共享文件改动被 7072aa9 吸收，任务专属 commit 仅含新文件）
 - smoke.spec.ts 的 `IMPLEMENTED_ROUTES` Set 机制（T9 建立）是占位断言的唯一扩展点——后到任务追加自己的路由即可（本任务追加 '/settings'）
+
+### Task 12 fix：E2E spec DOM 全局类型（2026-11-01）
+- **`/// <reference lib="dom" />` 文件级注入**：tests/e2e/*.spec.ts 的 `page.evaluate` 回调（location/getComputedStyle 等 DOM 全局）在浏览器执行，但 tsconfig.node.json 无 DOM lib——文件顶部 lib 三斜线指令为**单个文件**注入 DOM 声明（零 tsconfig/归属改动；Playwright 官方类型同款机制）。备选 rejected：改 evaluate 写法（回调必然用 DOM 全局，不可移）、tsconfig 拆分（动全局归属）
+- **typecheck `&&` 短路假绿**：`typecheck:node && typecheck:web` 在 node 侧失败时 web 侧不跑——并行任务提交时只看到自己侧的错误（T8 提交时 ProductsView 的 web 侧错误被短路掩盖，node 侧修复后暴露 11 个）。**提交门禁必须 `npm run typecheck` 整链通过（exit 0），不能只看自己侧**
+- **views → shared 相对路径是 3 级**（`../../../shared/...`）；4 级只适用于 components/receipt/ 的深度。同款层级坑第二次出现（T12 demo 页 → T8 ProductsView import type 路径）——**`import type` 编译期擦除使 build/E2E 完全无感，只有 vue-tsc 才暴露**（运行时零影响，纯类型层修复）

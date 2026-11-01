@@ -3,7 +3,7 @@ import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue'
-import type { Product } from '../../../../shared/types'
+import type { Product } from '../../../shared/types'
 
 /**
  * 商品管理页（Task 8）：搜索（防抖 300ms）+ 新增/编辑（元↔分边界转换）+
