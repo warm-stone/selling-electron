@@ -8,3 +8,7 @@ dist/
 coverage/
 *.local
 .DS_Store
+
+# playwright
+test-results/
+playwright-report/

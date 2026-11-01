@@ -14,7 +14,7 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node -e \"console.log('E2E（Playwright _electron）基建由 Task 6 搭建')\""
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@vue/test-utils": "^2.5.1",

@@ -159,3 +159,29 @@
 
 ### 队列实现要点（PrintQueue）
 - **串行队列死锁防线**：`this.queueTail = run.then(()=>{},()=>{})`（队尾吞失败）+ 返回原 `run` 给调用方 —— 前序 job 双败后队列必须继续，这是"队列死锁"失败指示器的根因解法
+
+## Task 6 E2E 基建落地记录（S5 spike 结论，2026-11-01 实证）
+
+### 启动方案决策：驱动 build 产物，不用 dev server
+- `_electron.launch({ args: ['.'] })` → 读 package.json main → out/main/index.js（构建产物）
+- **方案**：`playwright.config.ts` 的 `globalSetup` 里 `execSync('npm run build', { stdio: 'inherit' })`；package.json 的 test:e2e 只需 `playwright test`（先 build 后测的链路收在 config 内，一处可控）
+- dev server 方案需先起 electron-vite dev 再等 HMR 就绪，链路长、时序不稳，弃用
+- **无需 `npx playwright install`**：_electron 用应用自带 Electron 二进制（postinstall install-electron 保证）；无浏览器项目也无需 projects 配置
+
+### userData 隔离（全部后续 E2E 依赖）
+- main/index.ts **顶部**（app ready 前）检查 `process.env['E2E_USER_DATA_DIR']` → `app.setPath('userData', dir)`；正常 dev/生产不注入则零影响
+- helpers.launchApp()：`mkdtempSync(join(tmpdir(), 'pos-e2e-'))` + `env: { ...process.env, E2E_USER_DATA_DIR }`
+- **权威断言在应用内**：`electronApp.evaluate(({ app }) => app.getPath('userData'))` === 临时目录——比文件系统侧比对更硬
+- 实测隔离成立：整轮 E2E 前后真实 userData tree-hash 逐字节一致；隔离 temp 目录产出完整 Chromium 状态树 + pos.db 90KB（T2 initDatabase 落库于隔离目录）
+
+### 坑：并行任务同仓库时隔离验证的归因
+- 复跑 E2E 时发现真实 userData 有写入——实际是并行任务 T2 的 dev 实例（时间窗早于 E2E 启动 39s+；真实目录残留其 SingletonLock → PID，E2E 干净退出则锁被移除）
+- 隔离验证必须：① 记录精确时间窗（globalSetup build 完成时间 + 截图 mtime）② 无并行实例时复跑比对 tree-hash ③ SingletonLock 残留可归因进程
+
+### Playwright/Electron 其他要点
+- **强制串行**：`workers: 1` + `fullyParallel: false`（单实例锁 + 窗口焦点互扰）；spec 内 `test.describe.serial` + beforeAll 共享一次 launch（一次启动 ≈3s，省时且窗口状态连续）
+- hash 路由等待：`page.waitForURL((url) => url.hash === '#' + path)` 精确匹配（createWebHashHistory 下稳定）
+- `import { _electron } from 'playwright'`——playwright 是 @playwright/test 的依赖（已 hoist），无需加依赖
+- tsconfig.node.json 的 `tests/**/*.ts` 会 typecheck E2E 文件（好事）；vitest include 已限定 tests/unit/**，smoke.spec.ts 不会被 vitest 误收
+- el-menu 侧边导航：`router` 属性 + `:default-active="computed(route.path)"` 即可路由联动高亮；深色定制走 `--el-menu-*` 令牌（bg/text/hover-bg/active-color/item-height）
+- @element-plus/icons-vue 是 element-plus 的依赖（传递可用，未加直接依赖）

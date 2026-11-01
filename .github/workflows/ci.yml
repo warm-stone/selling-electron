@@ -26,3 +26,7 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      # _electron 用应用自带 Electron 二进制，无需 playwright install 下载浏览器
+      - name: E2E tests (Playwright _electron)
+        run: npm run test:e2e
