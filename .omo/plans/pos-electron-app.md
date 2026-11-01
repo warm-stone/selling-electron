@@ -560,7 +560,7 @@ Max Concurrent: 6（Wave 1b/2a）
   - Files: 全部脚手架文件
   - Pre-commit: `npm run typecheck && npm test`
 
-- [ ] 2. DB 基础设施 + ER schema + 迁移执行器（含 better-sqlite3 v13 spike 决策点）
+- [x] 2. DB 基础设施 + ER schema + 迁移执行器（含 better-sqlite3 v13 spike 决策点）
 
   **What to do**:
   - **S1 spike（必须最先做）**：安装 `better-sqlite3@^13.0.3`，在 electron-vite 的主进程最小集成里 `require('better-sqlite3')` 建 in-memory 表跑 CRUD → dev 运行验证。**决策点**：若 v13 N-API 在 Electron 44 加载失败（NODE_MODULE_VERSION 错误）→ fallback 顺序：(a) 锁 `better-sqlite3@12.x` + `electron-builder install-app-deps`；(b) `node:sqlite`（DatabaseSync）。决策写入 commit message 与代码注释
@@ -637,7 +637,7 @@ Max Concurrent: 6（Wave 1b/2a）
   - Message: `feat(db): better-sqlite3 连接、迁移执行器与 ER 全量 schema`
   - Pre-commit: `npm run typecheck && npm test`
 
-- [ ] 3. 共享契约层：DTO + typed IPC + 模板 schema + 默认模板
+- [x] 3. 共享契约层：DTO + typed IPC + 模板 schema + 默认模板
 
   **What to do**:
   - `src/shared/types/`：全部领域 DTO（TS interface）：`Product`、`CartItem`、`Sale`、`SaleItem`、`PurchaseOrder`、`PurchaseItem`、`StockMovement`、`DailyReport`、`MonthlyReport`、`PrintTemplate`、`Settings`；金额字段命名统一 `*_cents: number`
@@ -782,7 +782,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(printing): ESC/POS 纯函数生成器（GBK 编码+golden 测试）`
 
-- [ ] 5. 扫码枪检测器（纯函数 + before-input-event 桥）
+- [x] 5. 扫码枪检测器（纯函数 + before-input-event 桥）
 
   **What to do**:
   - `src/main/scanner/barcode-detector.ts`：**纯函数/纯类** `BarcodeDetector`：`feed(event: KeyEvent): string | null`：
@@ -855,7 +855,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(scanner): 扫码枪检测器（纯函数+IME 兼容桥）`
 
-- [ ] 6. UI 骨架 + Playwright E2E 基建
+- [x] 6. UI 骨架 + Playwright E2E 基建
 
   **What to do**:
   - `src/renderer/src/router/`：7 路由（/pos、/products、/purchases、/sales-history、/reports、/template-editor、/settings）+ 侧边导航布局（Element Plus `el-menu`，图标+中文标签：收银台/商品管理/进货管理/销售记录/报表统计/小票模板/系统设置）
@@ -928,7 +928,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(ui): 应用骨架布局路由与 E2E 基建`
 
-- [ ] 7. 打印通道层（PrintChannel 抽象 + spooler/tcp/serial + 枚举 + 串行队列）
+- [x] 7. 打印通道层（PrintChannel 抽象 + spooler/tcp/serial + 枚举 + 串行队列）
 
   **What to do**:
   - `src/main/printing/channels/print-channel.ts`：接口 `interface PrintChannel { name: string; send(bytes: Uint8Array): Promise<void>; }` + `listSystemPrinters(): Promise<PrinterInfo[]>`（封装 `win.webContents.getPrintersAsync()`，Linux/无窗口环境返回空数组不抛错——G11 可 mock）
