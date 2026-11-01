@@ -1,0 +1,38 @@
+Task 20 NSIS Linux 本地产出尝试（2026-11-01）
+================================================
+尝试链（三轮迭代，全部记录）：
+
+[第 1 轮] npx electron-builder --win nsis（默认配置）
+  ⨯ node-gyp does not support cross-compiling native modules from source.
+  → @electron/rebuild 尝试为 win32 从源码重建 better-sqlite3（node-gyp 不支持交叉编译）
+  → 修复：electron-builder.yml 加 npmRebuild: false
+     依据：better-sqlite3 v13 = N-API + prebuilds/ 全平台预编译随包（win32-x64.node
+     物理存在，S1 spike 实证免 rebuild）——asar 冒烟的 --dir 产物跑的就是 prebuilds 原件
+
+[第 2 轮] npmRebuild: false 后
+  ✓ "skipped dependencies rebuild reason=npmRebuild is set to false"
+  ✓ packaging platform=win32 → release/win-unpacked/销存系统.exe（Windows 侧二进制名=productName ✓）
+  ✓ "default Electron icon is used"（警告不失败，符合配置决策）
+  ✓ building target=nsis → release/销存系统-0.1.0-setup.exe 产出
+     $ file release/销存系统-0.1.0-setup.exe
+       PE32 executable for MS Windows 4.00 (GUI), Intel i386,
+       Nullsoft Installer self-extracting archive, 5 sections
+  ⨯ elevate.exe 的 rcedit 后处理 spawn wine ENOENT
+  → 修复：nsis.packElevateHelper: false（elevate helper 仅供 electron-updater 提权
+     升级；本项目锁定清单禁止自动更新，语义正确）
+
+[第 3 轮] packElevateHelper: false 后
+  ✓ NSIS stub 安装包照常产出（销存系统-0.1.0-setup.exe，PE32 确认）
+  ⨯ 仍 spawn wine ENOENT —— 失败点后移至「uninstaller 提取」步骤
+
+根因（源码实证 app-builder-lib 26.18.0）：
+  NsisTarget.js 构建流程：makensis 产 stub installer（无需 wine，Linux 原生）→
+  运行安装器一次提取 uninstaller（销存系统-0.1.0-setup__uninstaller.exe）→
+  再产最终安装器。
+  WineVm.js：process.platform !== "win32" 时走 getWineToolset()（需 wine）；
+  === "win32" 时直接 exec 目标 —— CI windows-latest 零 wine 依赖。
+
+★ 决策：Linux 本地不装 wine（重量级环境变更，非权威产出路径），记录「CI 产出」：
+  - 本地已实证：NSIS 配置（artifactName/中文 productName/nsis 段）被正确消费
+    （setup.exe stub 产出 + PE32 确认）+ --dir asar 冒烟通过
+  - 最终安装包权威产出环境 = CI windows-latest（win32 分支免 wine + 免 VS 源码编译）

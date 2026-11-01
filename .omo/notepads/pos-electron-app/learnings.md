@@ -551,3 +551,34 @@
 
 ### T16 交叉闭环实测（打印链路消费默认模板的端到端证明）
 - T16 的 template-editor.spec 末用例（设默认→结账预览含特征行）在本次全量 E2E 63/63 中 PASS——证明打印编排真实消费 DB 默认模板（非硬编码），且 T15/T16 并行改动在合并态下互洽
+
+## Task 20 CI/NSIS 打包落地记录（2026-11-01 实证）
+
+### ★ electron-builder 26.18.0 Linux 产 NSIS 的 wine 真相（任务简报预判修正）
+- **"24+ 任何平台可产 NSIS 无需 wine"不完全成立**：makensis（stub 安装包）确实 Linux 原生零 wine（本地产出 销存系统-0.1.0-setup.exe PE32 确认）；但 **uninstaller 提取步骤**（makensis 产 stub → 运行一次安装器提取 `__uninstaller.exe` → 再产最终安装器）在非 win32 走 `WineVmManager → getWineToolset()`（需 wine）
+- **win32 上零 wine 依赖**（WineVm.js 源码：`process.platform === "win32"` 直接 exec 目标）→ CI windows-latest 打包干净
+- **决策**：本地 Linux 不装 wine（重量级环境变更 + 非权威产出路径），记录「CI 产出」；本地以 --dir asar 冒烟 + NSIS stub 产出（PE32 确认）作为配置正确性实证
+
+### ★ npmRebuild:false + packElevateHelper:false（两个反默认值配置，勿"修复"回 true）
+- **npmRebuild 默认 true 会跑 @electron/rebuild**：Linux 上 `--win` 目标对 better-sqlite3 报 `node-gyp does not support cross-compiling native modules from source`（@electron/rebuild 不识别 v13 的 node-gyp-build 风格 prebuilds/ 静态目录，尝试源码重建）；而 v13 N-API + prebuilds 全平台随包（win32-x64.node 物理存在，S1）→ `npmRebuild: false` 语义与事实双正确（CI windows 上还免掉 VS 源码编译耗时）
+- **packElevateHelper 默认 true 会打包 elevate.exe**：其 rcedit 后处理在 Linux 需 wine；该 helper 仅供 electron-updater per-machine 提权升级（本项目锁定清单禁止自动更新）→ `false` 语义正确且解锁 Linux NSIS stub 产出
+
+### smartUnpack 与 asarUnpack 决策（勿加 asarUnpack）
+- electron-builder **smartUnpack 自动**把 `.node` 原生文件 unpack 到 `app.asar.unpacked/`（无需配置 asarUnpack）——asar 头 overlay：`asar listPackage` 仍列出 prebuilds/*.node 路径，物理文件在 unpacked
+- better-sqlite3 v13 加载链（lib/binding.js 源码）：`fs.existsSync(prebuilds/<platform>-<arch>.node)`（Electron fs patch 支持 asar 内路径）→ `require(filename)` → **Electron 自动把 asar 内 .node 重定向到 app.asar.unpacked 副本**（N-API 无 ABI 问题）
+- **实证**：--dir 产物启动冒烟（E2E_USER_DATA_DIR 隔离）→ pos.db 出现（user_version=1、WAL、8 表）= asar 内 better-sqlite3 全链路加载成功 → asarUnpack 不配置决策锁定
+
+### files 配置行为（官方 d.ts 原文实证）
+- 自定义 `files: [out/**]` 时默认 `**/*` **不**追加，但 **`package.json` 与 `**/node_modules/**/*`（仅生产依赖）任何情况都自动追加**——electron-vite externalizeDeps（主进程运行时 require 生产依赖）下打包正确的前提
+
+### 打包产物命名与 userData
+- **Linux --dir 二进制名 = package.json name**（selling-electron，非 productName——PlatformSpecificBuildOptions L107 注释：Linux 用 productName 是 breaking change 故特例）；**win-unpacked/NSIS 安装侧 = productName**（销存系统）
+- asar 内 package.json **不注入 productName**（实测 name=selling-electron, productName=undefined）→ Electron app.name = name → **userData = %APPDATA%\selling-electron\**（Windows）/ ~/.config/selling-electron（Linux）——真机清单/README 数据位置按此写
+
+### 生僻字 GBK 行为实测（清单第 8 项预期的事实依据）
+- '龘'（U+9F98）/ '堃'（U+5803）：GBK 内（fd93/88d2）→ **正常打印不降级**；'𠀀'（U+20000）/ '✔'（U+2714）：GBK 外 → '?'——清单用 𠀀𡈽（降级）+ 龘（不降级）双锚点，勿想当然按"生僻=降级"写
+
+### 其他
+- actionlint 从 GitHub releases 下载单二进制即用（v1.7.7）：本仓库 ci.yml 校验 exit=0
+- electron-builder 无 icon：`default Electron icon is used` 警告不失败（platformPackager getOrConvertIcon 源码）——"默认 icon"决策实证
+- CI job2 必须先 `npm run build`（electron-builder 只打包现有 out/，不会自跑构建）

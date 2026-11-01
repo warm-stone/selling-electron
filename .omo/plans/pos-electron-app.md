@@ -1858,7 +1858,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(settings): 系统设置页（打印机/店铺/Logo）`
 
-- [ ] 20. Windows CI 完善 + NSIS 打包 + 真机验证清单
+- [x] 20. Windows CI 完善 + NSIS 打包 + 真机验证清单
 
   **What to do**:
   - `electron-builder` 配置（`electron-builder.yml` 或 package.json build 段）：appId/productName（中文产品名如 '销存系统'）、win.target nsis、nsis.oneClick=false（允许选目录）、`asarUnpack`（若 better-sqlite3 v13 需要——按 Task 2 spike 结论）、artifactName 含版本

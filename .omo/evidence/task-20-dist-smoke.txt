@@ -1,0 +1,26 @@
+Task 20 electron-builder --dir asar 冒烟（Linux，2026-11-01）
+==============================================================
+$ npx electron-builder --dir    → exit=0（release/linux-unpacked）
+
+产物结构：
+  release/linux-unpacked/selling-electron        （Linux 可执行名=package name）
+  release/linux-unpacked/resources/app.asar      （asar 主包）
+  release/linux-unpacked/resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/*.node
+    ↑ electron-builder smartUnpack 自动 unpack 全部 8 平台 prebuild .node（无需手动 asarUnpack）
+
+better-sqlite3 v13 加载链（lib/binding.js 源码实证）：
+  fs.existsSync(asar 内 prebuilds/<platform>-<arch>.node) → require(filename)
+  → Electron 运行时自动把 asar 内 .node 重定向到 app.asar.unpacked 副本
+  → N-API 无 ABI 问题（learnings S1）
+
+冒烟（启动打包产物，E2E_USER_DATA_DIR 隔离）：
+  PASS: pos.db created
+  user_version = 1
+  journal_mode = wal
+  tables = print_templates, products, purchase_items, purchase_orders,
+           sale_items, sales, settings, sqlite_sequence, stock_movements
+  （8 张用户表齐全；进程存活无崩溃；stderr 空）
+
+★ 决策锁定：electron-builder.yml 不配置 asarUnpack
+  理由：① smartUnpack 已自动 unpack 全部 prebuild .node ② 首启建库链路实证
+  （require better-sqlite3 → initDatabase → 迁移 → WAL）在打包产物上完整通过
