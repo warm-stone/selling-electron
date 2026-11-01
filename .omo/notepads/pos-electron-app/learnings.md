@@ -251,3 +251,96 @@
 - `registerReportsExportIpc(db)` 独立文件 `src/main/ipc/reports-export.ipc.ts`（T14 后续注册 reports:daily/monthly 在**另一文件**——避免并行冲突）；index.ts 锚定 `const db = initDatabase()` 注册块逐行追加
 - 参数校验抽纯函数 `parseReportsExportRequest(req: unknown)`（throw 带字段名的可诊断错误）+ electron 懒加载 require（函数体内）→ ipc 文件可被 vitest 纯 Node 导入单测
 - preload 双文件同步：`index.ts` 实现 + `index.d.ts` 类型（renderer window.api 类型源）——两处都要加；用 `IpcChannels['通道']['req'|'res']` 索引类型防契约漂移
+
+## Task 9 进货管理落地记录（2026-11-01）
+
+### 进货事务模式（T10/T13/T14 可参照）
+- **order_no 序列全 SQL 侧**：`strftime('%Y%m%d','now','localtime')` 同语句内做前缀与 COUNT 过滤（`LIKE strftime(...) || '-%'`）——与 created_at 默认值同源同钟，午夜零竞态；序列号 `String(n+1).padStart(4,'0')`；purchase 与 sales 序列天然独立（COUNT 只查本表）
+- **快照/库存/流水全在事务内逐行串行**：每行 SELECT products(name/barcode/stock) → INSERT purchase_items(快照列) → UPDATE stock=stock+qty → INSERT movements(before=SELECT 时 stock, after=before+qty, source='purchase', source_id=orderId)——productId 缺失在 SELECT 处抛错即整单回滚（better-sqlite3 throw 自动回滚）
+- **IPC 层 req 防御**：`service.createPurchase(req?.items ?? [], req?.note)`——req 整个 undefined 时靠 service 空数组校验兜底（"至少需要一行商品"）
+- **service 校验分两层**：结构校验（正整数/非空数组）在事务外快速失败；存在性校验天然在事务内（SELECT 不到即抛）
+
+### ★ Element Plus el-select E2E 双坑（T11/T13/T16 表单类 E2E 必读）
+- **关闭态 dropdown 的 DOM 残留**：el-select 选中后 popper 只是隐藏不销毁——`.el-select-dropdown__item` 定位 + `.first()` 会命中**隐藏 dropdown 的同名选项**（"element is not visible" 死等 30s）
+- **`:visible` 伪类也不可靠**：实测 `:visible` 解析到的元素 click 时仍判 not visible（多个 popper 共存时解析/判定不同步）
+- **正解：`page.getByRole('option', { name: /关键字/ })`**——a11y 树只含展开 dropdown 的选项，天然过滤 DOM 残留；type-filter+Enter 键盘流实测**不可靠**（fill('可乐')+Enter 后 select 显示残留输入文本而非选中值）
+- 动态行表格操作模式：`.el-table__row` nth 定位行 + 行内 `.el-input-number input` first()/nth(1) 区分数量/成本列
+
+### ★ E2E 检测 handler 是否已注册（并行任务自适应）
+- **主进程 `ipcMain.listenerCount()` 探测不到 `handle()` 注册的 handler**（handle 走内部 _invoke_handlers，不进 listeners 链）——实测用 listenerCount 判定"未注册"再 handle 会炸 "Attempted to register a second handler"
+- **正解：renderer 侧探测**——`window.api.invoke('products:list', {})` resolve=已有 handler；reject 且 message 含 "No handler registered"=未注册（preload 必须暴露裸 invoke 做探测底座）
+- E2E 预置商品用 better-sqlite3 直插 dbPath（WAL 多连接，主进程下条语句即见）；E2E 侧只读断言同理（只读打开也行，写后记得 close）
+
+### E2E 共享工作树的现实
+- 并行任务（T12 等）的半成品会实时阻塞 `npm run build`（globalSetup 必跑）——重试即可（对方写完就恢复）；不要动对方文件
+- smoke.spec 的占位断言已结构性演进：新增 `IMPLEMENTED_ROUTES` 集合（各任务替换占位后追加自己的路由），占位断言只对未实现路由生效
+
+## Task 12 HTML 小票预览落地记录（2026-11-01）
+
+### G7 契约缺口闭合（issues.md Task 4 两条待办清零）
+- `src/shared/receipt/item-columns.ts`：ITEM_COLUMN_WIDTHS（58mm 12/4/8/8、80mm 24/4/10/10）+ `buildItemLine(name, qty, price, subtotal, paperWidth, degrade?)`（组合顺序冻结：**降级→truncate→pad**）+ ReceiptItemLine/SaleReceiptData display-ready 类型上提
+- **降级注入设计**：TextDegrader 默认恒等——renderer 无 iconv（G8 零 Node 依赖），GBK 降级由调用方注入：escpos-generator 传 degradeToGbk，预览默认恒等。**GBK 内业务文本两侧行集完全一致**；GBK 外字符（生僻字/emoji）预览原样渲染 vs 打印 '?'（宽度差 1 的已知几何差异，组件注释已文档化）
+- escpos-generator.ts 仅改 import 来源 + re-export（ITEM_COLUMN_WIDTHS/类型），T4 golden .bin **字节零变化**（159 用例回归全绿）；composeItemRow 删除，renderItems 直调 buildItemLine(..., degradeToGbk)
+
+### 金额格式化定案（T15/T18 直接消费）
+- `src/shared/utils/money.ts`：formatMoney（整数分→'12.50'，**恰好 2 位小数、无千分位**）+ parseMoneyToCents（'12.5'/'12' 容忍、trim、千分位/全角/3 位小数→NaN）
+- **坑：formatMoney(-0.5) 伪负零**——sign 判断必须在 Math.trunc **之后**（-0.5 trunc → -0，-0 < 0 为 false；先判符号得 '-0.00'）。有测试锁定
+- parse 实现为整数十进制搬移（intPart + dec.padEnd(2,'0') 拼接后 Number），零浮点运算（G1）
+
+### vitest 组件测试接线（方案与计划原文的偏差）
+- **vitest 5.0.5 已移除 environmentMatchGlobs**（vitest 3 deprecated → 移除；node_modules/vitest dist 全域无此配置项）——计划推荐的 `environmentMatchGlobs: [['tests/unit/components/**', 'jsdom']]` 不可用
+- 实际方案：**文件级 docblock `// @vitest-environment jsdom`**（vitest 5 官方替代）+ vitest.config.ts 顶层加 `plugins: [vue()]`（**.vue SFC 编译必需**，对纯 .ts 测试零副作用）；jsdom@30 为唯一 devDependencies 新增
+- **tsconfig 归属**：tests/unit/components/** 从 tsconfig.node.json exclude、加入 tsconfig.web.json include——组件测试 import .vue + @vue/test-utils DOM 类型属 web 侧（node 侧无 DOM lib 会炸；与 E2E 被 node include 的先例相反，因为 Playwright 类型自带 lib dom reference 而 @vue/test-utils 不带）
+
+### @vue/test-utils 坑（同源断言的关键细节）
+- **`el.text()` 会 trim**——pad 空格全部丢失；提取行文本必须用 `el.element.textContent`（原生，不受 CSS/工具处理影响）
+- **scoped CSS 在 mount 中不注入**——getComputedStyle 断言（white-space: pre / fontFamily / fontWeight）必须放 E2E（真实构建产物 CSS 生效）；单测只断言 class/文本/几何
+- td 间文本干净：Vue 3 whitespace: 'condense' 会删除元素间空白节点，`<td v-for>` 拼接的 textContent 无杂质 → tr.textContent === buildItemLine 整行（同源断言成立的前提）
+
+### 测试侧坑（第二次犯，记死）
+- **中文测试标题内的引号**：单引号字符串里写 `'?（宽 1）'` → esbuild/oxc PARSE_ERROR（内层 ' 提前终止字符串）——标题含引号时改双引号或去引号
+- **UTF-16 slice ≠ 显示宽度切片**：BMP 中文每字符 1 码元、显示宽 2——`line.slice(0, 24)` 取的是 24 码元（显示宽 48）。列片段断言必须用按 stringWidth 累计的 sliceByWidth 辅助（或 slice(n, -m) 负索引取中段）
+
+### 预览组件几何模型（T15/T16 消费必读）
+- **双尺度模型**：容器宽 = 纸张物理宽（80mm→307px、58mm→221px，96dpi 圆整，E2E ±5px 断言锚点）；墨迹区 = PAPER_COLUMNS × 6px（12px 字号下 NSimSun 全角 12/半角 6）——墨迹窄于纸宽（288/192px），左起渲染模拟 ESC/POS 物理起点，纸宽留右边距（拟真）
+- **同源语义分层**：items 行 = buildItemLine（字符级同源，可从生成字节流 GBK 解码逐行找到——组件测试已锁）；text/total 行 = 预览 pad+truncate 模拟打印机 ESC a 物理对齐的**几何**（Epson 居中偏移 floor((n-w)/2) 与 padLine center 左空格数一致），打印侧 println 原文由打印机固件做对齐——两侧字符内容同源（trim 后相等），pad 空格是 HTML 侧的几何载体
+- 倍宽/倍高：transform scale（doubleHeight→scaleY(2) 起锚 `${align} top` + margin-bottom 1.35em 布局补偿防叠压；doubleWidth→scaleX(2)；quad→scale(2)）；容器 overflow: hidden 模拟真机纸宽物理边界（倍宽溢出截断）
+- divider = border-top dashed（视觉等效打印侧 '-'×cols 的虚线观感，不占 receipt-line 文本集）；cutPaper = 底部虚线 + ✂ 示意（HTML 不切纸）；image 段落收 `logoUrl?: string`（dataURL——Buffer 不跨 IPC）
+- ReceiptVars 维持 T3 冻结契约（纯字符串）：Logo 走独立 prop，不扩 vars 索引类型
+
+### demo 路由
+- `#/receipt-preview-demo`（router 注册但**不进侧边菜单**——URL 直达，菜单约束在路由文件注释中声明防误加回）；E2E 用 `page.evaluate(() => location.hash = ...)` + waitForRoute 导航
+- demo vars 的 total/itemCount 用 parseMoneyToCents+formatMoney 组装（display-ready 约定的活样例）
+
+## Task 8 商品管理落地记录（2026-11-01）
+
+### ★ 删除商品的 FK 约束决策（DDL 与 D15 的落地点，T9-T11 消费）
+- 计划 DDL 的 `stock_movements.product_id INTEGER NOT NULL REFERENCES products(id)` 无 ON DELETE 动作 → foreign_keys=ON 下删除有任何流水的商品必然 SQLITE_CONSTRAINT_FOREIGNKEY
+- **落地决策**：repo.delete 单事务 = 断链（`UPDATE sale_items/purchase_items SET product_id = NULL`，应用层等价 ON DELETE SET NULL，快照行与快照字段原样保留——G4）→ `DELETE FROM stock_movements WHERE product_id = ?`（NOT NULL 无法断链，流水随商品清除）→ `DELETE FROM products`
+- willOrphan = 断链前 sale_items + purchase_items 关联行数（删除弹窗「N 条历史单据」文案）
+
+### willOrphan 的获取途径（通道封闭约束下的模式）
+- T3 契约 24 通道封闭、禁动 shared/，但 UI 删除弹窗需在删除前拿到引用数 → **list 返回行做运行时结构超集**：`(Product & { willOrphan })[]`（子查询聚合，契约 res `Product[]` 的合法超集）
+- preload 侧 `ProductRow` 双份定义（index.ts 实现 + index.d.ts 类型权威）——TS 同名 .ts/.d.ts 模块冲突无法单源 import；两处注释互指，改动需同步
+- T11 收银台消费 products:list 拿到的行也带 willOrphan（超集无害）
+
+### E2E 并发 build 竞态（多任务并行时 E2E 共享仓库的关键坑）
+- **page.reload() 会 ERR_FILE_NOT_FOUND**：其他并行任务的 E2E globalSetup 触发 `npm run build`，out/ 重建瞬间（clean→写文件）file:// 重载撞空窗——同 spec 首跑全绿复跑挂，纯时序
+- **规避**：需要"刷新页面数据"时走 SPA 路由离开再回来（点别的菜单→点回），组件重挂载即重新拉数据，零文件重载
+- Element Plus el-pagination 页码是 `li.number` **不是 button**——`getByRole('button', { name: '2' })` 永远超时；用 `.el-pager li.number` 定位
+- el-table 行排序 id DESC（新创建在前）时，翻页断言的"第 2 页首行"是第 5 条而非第 6 条
+
+### IPC 错误消息链路（T9-T19 通用）
+- service 抛 `XxxServiceError`（code + 中文 message）→ Electron invoke 序列化后 renderer 收到的 message 带前缀 `Error invoking remote method 'products:create': Error: 条码已存在`
+- renderer 侧剥除：`raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)` → 纯中文消息进 ElMessage.error（E2E 断言 `.el-message--error` 含原文案）
+
+### 并行任务同文件冲突实录
+- **index.ts 多任务同锚点 Edit 撞行**：T8/T9/T10 同时把 `initDatabase()` 改成 `const db = initDatabase()`，磁盘合并出残缺行 `const db =     const db = initDatabase()`（TS1109）——修复=恢复正常行并保留各任务的 registerXxxIpc(db)
+- **smoke.spec.ts 占位断言**：T9 先建立了模块级 `IMPLEMENTED_ROUTES = new Set([...])` 机制（测试体引用它）——后到任务应**复用该 Set 追加自己的路由**，不要另起IMPLEMENTED_VIEWS 之类平行机制（会 noUnusedLocals 报错）
+- preload 段落化追加安全；goods.spec 单文件归责验收不变
+
+### 商品业务细节（复用给 T11 收银台）
+- service.create：初始库存非 0 会写一条流水（before=0, after=stock, source='manual'）——审计链起点；初始 0 不写（无噪音）
+- updateStock 同值调整也写流水（change_qty=0，留"人工确认"痕迹）
+- 搜索：name LIKE %kw%（子串）+ barcode LIKE kw%（前缀，走索引）；LIKE 通配符 `escapeLike` 转义（%/_/\ 按字面）；SQLite TEXT 比较大小写敏感（= 精确匹配 abc≠ABC）但 LIKE 对 ASCII 不敏感
+- 元↔分边界转换（UI 层）：`Math.round(yuan * 100)` 入分（3.5*100=350.00000000000006 必须 round）；`(cents / 100).toFixed(2)` 显示（cent 精度恒两位小数，toFixed 无边界风险）

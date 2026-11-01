@@ -1,0 +1,17 @@
+# Task 12 同源一致性测试证据（同源渲染 58/80mm + G7 契约闭合）
+# 生成时间: 2026-11-01 21:56:07
+# 命令: npx vitest run tests/unit/components/ tests/unit/shared/ tests/unit/printing/
+# 范围: 组件同源断言(21) + shared 新增契约(41) + T4 golden 回归(字节零变化)
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  13 passed (13)
+      Tests  180 passed | 1 skipped (181)
+   Start at  21:55:49
+   Duration  11.10s (environment 28%, transform 24%, import 22%, tests 22%, worker 5%)
+

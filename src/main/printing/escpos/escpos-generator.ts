@@ -19,11 +19,15 @@ import { BreakLine, CharacterSet, PrinterTypes, ThermalPrinter } from 'node-ther
 
 import {
   PAPER_COLUMNS,
-  padLine,
-  truncateToGrid,
-  type LineAlign,
-  type PaperWidth
+  type LineAlign
 } from '../../../shared/receipt/char-grid'
+import {
+  buildItemLine,
+  ITEM_COLUMN_WIDTHS,
+  type ItemColumnWidths,
+  type ReceiptItemLine,
+  type SaleReceiptData
+} from '../../../shared/receipt/item-columns'
 import {
   interpolateVariables,
   type ReceiptTemplate,
@@ -37,28 +41,7 @@ import { degradeToGbk } from './gb2312-encoder'
 // ═════════════════════ 数据契约（打印侧） ═════════════════════
 
 /**
- * 小票明细行（display-ready：数量/单价/小计均为**已格式化字符串**，
- * 由打印编排层 T15 在组装时完成整数分 → 元的格式化——与 ReceiptVars
- * 同一约定，模板/生成器层零金额运算，G1）。
- */
-export interface ReceiptItemLine {
-  /** 商品名（快照；GBK 外字符在本生成器内降级为 '?'） */
-  name: string
-  /** 数量（已格式化，如 '2'） */
-  quantity: string
-  /** 单价（元，已格式化，如 '3.50'） */
-  unitPrice: string
-  /** 小计（元，已格式化） */
-  subtotal: string
-}
-
-/** 小票打印数据（明细行集合；单号/时间等经 vars 插槽传入） */
-export interface SaleReceiptData {
-  items: ReceiptItemLine[]
-}
-
-/**
- * ReceiptVars 的打印侧扩展形态：额外携带 `logoBuffer`（PNG Buffer）。
+ * 小票变量插槽的打印侧扩展形态：额外携带 `logoBuffer`（PNG Buffer）。
  * ReceiptVars 的字符串索引签名（T3 冻结契约）容不下 Buffer，TS2411 也不允许
  * 接口扩展改宽索引类型，故在此独立声明；普通 ReceiptVars 对象可直接赋值给它。
  */
@@ -76,28 +59,11 @@ export interface ReceiptPrintVars {
   [key: string]: string | Buffer | undefined
 }
 
-// ═════════════════════ items 四列网格（G7） ═════════════════════
-
-/** items 表四列的网格列宽（名称左对齐，数量/单价/小计右对齐） */
-export interface ItemColumnWidths {
-  name: number
-  qty: number
-  price: number
-  subtotal: number
-}
-
-/**
- * items 表列宽（name + qty + price + subtotal = PAPER_COLUMNS）。
- * ⚠️ G7 契约缺口：HTML 预览（T12）须用同一组常量——本模块在主进程侧，
- * renderer 无法 import；已记录 .omo/notepads/pos-electron-app/issues.md，
- * T12 落地前应将此常量上提到 src/shared/receipt/。
- */
-export const ITEM_COLUMN_WIDTHS: Record<PaperWidth, ItemColumnWidths> = {
-  // 58mm：12 + 4 + 8 + 8 = 32 列
-  '58mm': { name: 12, qty: 4, price: 8, subtotal: 8 },
-  // 80mm：24 + 4 + 10 + 10 = 48 列
-  '80mm': { name: 24, qty: 4, price: 10, subtotal: 10 }
-}
+// items 四列网格契约（列宽/明细行 display-ready 类型/buildItemLine 组合语义）
+// 已上提 src/shared/receipt/item-columns.ts（Task 12，G7 契约缺口闭合）——
+// 此处 re-export 维持本模块既有导入面（HTML 预览与 golden 测试同源消费 shared）。
+export { ITEM_COLUMN_WIDTHS }
+export type { ItemColumnWidths, ReceiptItemLine, SaleReceiptData }
 
 // ═════════════════════ 指令常量（规范字节直发） ═════════════════════
 
@@ -201,42 +167,24 @@ async function renderSection(
 
 function renderItems(printer: ThermalPrinter, template: ReceiptTemplate, sale: SaleReceiptData): void {
   const section = template.items
-  const widths = ITEM_COLUMN_WIDTHS[template.paperWidth]
   resetBodyState(printer)
   if (section.showHeader ?? true) {
     printer.println(
-      composeItemRow(
+      buildItemLine(
         section.nameLabel ?? '商品',
         section.qtyLabel ?? '数量',
         section.priceLabel ?? '单价',
         section.subtotalLabel ?? '小计',
-        widths
+        template.paperWidth,
+        degradeToGbk
       )
     )
   }
   for (const item of sale.items) {
-    printer.println(composeItemRow(item.name, item.quantity, item.unitPrice, item.subtotal, widths))
+    printer.println(
+      buildItemLine(item.name, item.quantity, item.unitPrice, item.subtotal, template.paperWidth, degradeToGbk)
+    )
   }
-}
-
-/**
- * 组合一行 items 网格行：先降级（GBK 外字符 → '?'）→ 再 truncate → 再 pad，
- * 拼接后恰为 PAPER_COLUMNS 宽（打印侧几何自洽；与 HTML 预览共用 shared
- * char-grid 同一顺序组合——G7）。
- */
-function composeItemRow(
-  name: string,
-  qty: string,
-  price: string,
-  subtotal: string,
-  w: ItemColumnWidths
-): string {
-  return (
-    padLine(truncateToGrid(degradeToGbk(name), w.name), w.name) +
-    padLine(truncateToGrid(degradeToGbk(qty), w.qty), w.qty, 'right') +
-    padLine(truncateToGrid(degradeToGbk(price), w.price), w.price, 'right') +
-    padLine(truncateToGrid(degradeToGbk(subtotal), w.subtotal), w.subtotal, 'right')
-  )
 }
 
 // ─────────────────────── totals 行 ───────────────────────

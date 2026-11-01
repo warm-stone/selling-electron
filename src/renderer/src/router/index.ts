@@ -39,6 +39,12 @@ const routes: RouteRecordRaw[] = [
     name: 'settings',
     component: () => import('@renderer/views/SettingsView.vue')
   },
+  // 小票预览 demo：开发/E2E 调试页（不进侧边菜单，URL 直达）
+  {
+    path: '/receipt-preview-demo',
+    name: 'receipt-preview-demo',
+    component: () => import('@renderer/views/ReceiptPreviewDemoView.vue')
+  },
   // 兜底：未知路径回收银台
   { path: '/:pathMatch(.*)*', redirect: '/pos' }
 ]
