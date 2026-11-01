@@ -1352,7 +1352,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(receipt): HTML 小票预览组件（同源渲染 58/80mm）`
 
-- [ ] 13. 销售记录查询（列表 + 明细 + 重打入口）
+- [x] 13. 销售记录查询（列表 + 明细 + 重打入口）
 
   **What to do**:
   - `SalesHistoryView.vue`：日期范围筛选（el-date-picker type=daterange，默认今天）+ 状态筛选（全部/已完成/已作废）+ 表格（单号/时间/商品数/合计/状态[voided 红 tag]/操作[查看明细、作废(仅 completed)、重打小票]）+ 分页
@@ -1422,7 +1422,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(history): 销售记录查询与明细`
 
-- [ ] 14. 报表统计 service（日/月聚合 + 剔除作废 + 跨午夜）
+- [x] 14. 报表统计 service（日/月聚合 + 剔除作废 + 跨午夜）
 
   **What to do**:
   - `src/main/db/repositories/report.repo.ts`：
