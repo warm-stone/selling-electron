@@ -605,3 +605,11 @@
 - **幂等测试的细节**：migrator"二次迁移"用例保留 `first.close()` 内联（顺序重开语义不漂移），仅 second 走 openDbs 登记——close 不能双调（better-sqlite3 对已关连接再 close 会 throw）
 - **顺带排查结论**：tests/e2e 与 e2e-qa **均无 rmSync**（temp userData 目录用后不删）——electronApp.close() 后立即 rm 的 Chromium 句柄延迟风险不存在；serial.channel 的 fs 流在 send 内 `stream.end()` 已关
 - **验收矩阵**：`npm test`（423+1 skip）+ `TZ=UTC npm test`（CI 时区，顺防时区 flaky 复发）+ `npm run typecheck` 三绿；断言语义零改动（只动 teardown/连接生命周期）
+
+## Windows CI 跨平台坑（第二批，2026-11-02 实证）
+
+### mkdtemp 硬编码 /tmp/opencode → os.tmpdir()（G11 违规实例）
+- Windows 无 `/tmp`：`join('/tmp/opencode', ...)` 被解析为当前盘根 `D:\tmp\opencode`（不存在）→ mkdtemp ENOENT
+- 触发面：tests/e2e/reports.spec.ts + tests/e2e-qa/{qa-helpers,visual-css-check.mjs,packaged-smoke.mjs}——统一改 `join(tmpdir(), ...)`（node:os）
+- 判别方法：unit 测试里 mock 字符串路径（stub writeFile 不落盘）无害（export.service.test 的 '/tmp/opencode/saved' 即此类，CI vitest 过为证）；**实际执行 mkdtempSync/mkdirSync/writeFileSync 的才必须跨平台**
+- 教训：**一切实际触文件系统的临时路径一律 os.tmpdir()**——G11 的'禁硬编码路径'不止分隔符，还有 POSIX 绝对路径本身
