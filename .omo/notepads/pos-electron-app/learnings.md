@@ -344,3 +344,26 @@
 - updateStock 同值调整也写流水（change_qty=0，留"人工确认"痕迹）
 - 搜索：name LIKE %kw%（子串）+ barcode LIKE kw%（前缀，走索引）；LIKE 通配符 `escapeLike` 转义（%/_/\ 按字面）；SQLite TEXT 比较大小写敏感（= 精确匹配 abc≠ABC）但 LIKE 对 ASCII 不敏感
 - 元↔分边界转换（UI 层）：`Math.round(yuan * 100)` 入分（3.5*100=350.00000000000006 必须 round）；`(cents / 100).toFixed(2)` 显示（cent 精度恒两位小数，toFixed 无边界风险）
+
+## Task 19 系统设置页落地记录（2026-11-01）
+
+### settings KV 序列化约定（T15/T16 消费）
+- KV 值一律 TEXT：字符串原样存；**可空字段 null ≡ ''**（双向归一，清除路径即存空串）；tcp_port 存十进制串（非数字/越界读取时归 null）；auto_cut 存 '1'/'0'；**脏 printer_channel 读写两侧均回落 spooler**（rowsToAppSettings/appSettingsPatchToKv 双向 round-trip 测试锁定）
+- `AppSettings` → `PrintSettings`（T7 getChannel 参数）key 逐字一致可直接喂；ipc 薄层 toPrintSettings 入参放宽 Partial（invoke 运行时边界防御）
+- auto_cut **不参与打印决策**（模板 cutPaper 优先——计划决策），设置页仅文案说明 + 仅作新建默认模板初始值参考
+
+### ipc 薄层可测性模式（T2 懒 require 复用）
+- `registerXxxIpc` 函数体内 `require('electron')`（非顶部 import）→ 模块级纯映射/常量（rowsToAppSettings/appSettingsPatchToKv/importLogoFile/readLogoDataUrl/TEST_PRINT_BYTES）可在 vitest 纯 Node 导入单测；与 T9/T10 顶部 import 的 ipc 文件并存，两种形态按需选用（需要单测纯逻辑时用懒 require）
+
+### Logo 文件流（文件系统 + 路径引用，非 DB BLOB）
+- 上传 = dialog 选 png → **覆盖式复制** `userData/logos/logo.png`（固定单文件名）→ settings.logo_path 写路径；取消 → 返回当前 logo_path（renderer 比较前后值判取消，不误报 toast）
+- `settings:getLogoDataUrl` 通道：主进程读文件转 dataURL（renderer 无任意文件读权限）；mime 固定 image/png（dialog filters 已限定）；**文件缺失/不可读 → null 优雅降级不抛错**；userData 运行时取 app.getPath（E2E 隔离目录兼容）
+
+### E2E 技巧（原生对话框可测化）
+- **`electronApp.evaluate` 里替换 `electron.dialog.showOpenDialog = async () => ({ canceled:false, filePaths:[注入路径] })`** → 原生文件对话框场景全链路可 E2E（主进程 handler 持有 electron 单例对象引用，运行时补丁生效；懒 require 析构的 `dialog` 同样指向该单例）
+- mock 打印 server 复用 T7 模式（127.0.0.1:19910）：收 chunk 后 `socket.on('end', () => socket.end())` 回 FIN 才触发 TcpChannel 的 close resolve
+- 测试打印字节契约（与 T4 逐段对齐）：`1b40` init + `1b6101` 居中 + 'test' ASCII + `0a0a` 走纸 + `1d564200` 全切——E2E 断言 hex contains
+
+### 共享装配文件的"先提交者代持"现象（Wave 并行实测）
+- T10 提交 index.ts/preload 时把工作区当时的**全部**注册行与命名空间（含我 T19 已写入的 registerSettingsIpc/registerPrintingIpc/settings/printing 段）一并提交——共享文件无领地边界，先提交者代持后来者的已写入行；F4 审计 diff 归因时需对照本记录（T19 的共享文件改动被 7072aa9 吸收，任务专属 commit 仅含新文件）
+- smoke.spec.ts 的 `IMPLEMENTED_ROUTES` Set 机制（T9 建立）是占位断言的唯一扩展点——后到任务追加自己的路由即可（本任务追加 '/settings'）

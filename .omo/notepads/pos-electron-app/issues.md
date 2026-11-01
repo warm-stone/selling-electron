@@ -13,3 +13,7 @@
 ## Task 9（已按领地规则处理，留档）
 - [已处理] **T8 product.repo 在 Task 9 开工时不存在（并行未产出）**——按任务指示在 purchase.repo 内自写 products 读取 SQL（SELECT id,name,barcode,stock WHERE id=?，仅事务内快照用）；T8 后来已落地 products.ipc/products:list（E2E 自适应探测走真实 handler，stub 分支未触发）
 - [已处理] **preload 裸 invoke 由 Task 9 补齐**——T10 的段落模式未暴露裸 invoke，Task 3 契约设计（createTypedInvoke 需要裸 invoke 作输入）缺口由本任务补：`api.invoke(channel, payload)`（G8 边界入口，必须经 createTypedInvoke 包装使用）；后续任务如需契约通道（如 products:list）可直接复用
+
+## Task 19（T15 消费提示 + 共享验收现状）
+- [ ] **共享质量门被 T12 已提交文件挡住（归责 T12）**——`tests/e2e/receipt-preview.spec.ts` 存在 4 个 TS2304 DOM 全局错误（location/getComputedStyle，该文件被 tsconfig.node.json 收编但用浏览器全局）——当前全量 `npm run typecheck` 无法全绿；T19 自有文件零错误（按文件路径归责验证），F2 审计时需 T12 补 DOM lib 引用或局部声明
+- [ ] **T15 打印编排消费 T19 产物的方式**：settings:get 的 AppSettings 直接喂 T7 `getChannel`（key 逐字一致）；logoBuffer 从 settings.logo_path 读文件（勿再走 dataURL）；vars.shopName/shopPhone/receiptNote 从 settings 组装（本任务数据源就绪）；**auto_cut 不进打印决策链**（模板 cutPaper 唯一事实源，设置项仅初始值参考——计划决策，勿透传给生成器）
