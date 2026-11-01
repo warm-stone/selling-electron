@@ -478,7 +478,7 @@ Max Concurrent: 6（Wave 1b/2a）
 > EVERY task MUST have: Agent Profile + Parallelization + References + Acceptance Criteria + QA Scenarios。
 > **A task WITHOUT QA Scenarios is INCOMPLETE. No exceptions.**
 
-- [ ] 1. 项目脚手架 + 测试基建（含 electron-vite 6 spike）
+- [x] 1. 项目脚手架 + 测试基建（含 electron-vite 6 spike）
 
   **What to do**:
   - `npm create @quick-start/electron`（electron-vite 6 模板）或手动搭：`package.json` + `electron.vite.config.ts`（main/preload/renderer 三目标）+ `tsconfig.json`（三 tsconfig 引用结构）
