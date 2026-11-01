@@ -380,6 +380,29 @@
 - **✅ 终极方案：aria-controls 锚点域**——每行 select 的内部 `input[aria-controls]` 静态精确指向本下拉的 listbox（`UL.el-select-dropdown__list`）元素 id：**click 前读 `getAttribute('aria-controls')`**（静态属性，不依赖展开态）→ `page.locator('#' + id + ' .el-select-dropdown__item', { hasText })` 圈定本域 → toBeVisible 等打开动画非零框 → .first().click()。零时序/零残留歧义，多行动态表格（动态行内嵌 select）唯一可靠模式
 - 证据链：debug spec 两轮 DOM dump（popper/popperIdx/popperDisplay/aria-controls 归属）实证全部中间态；修复后 purchases 5/5 两轮 + 全量 25/25 全绿
 
+## Task 18 报表 UI + 导出集成落地记录（2026-11-01）
+
+### ★★ el-date-picker / el-dropdown 的 $attrs 落点（E2E 定位必读，el-select 之外的另一族坑）
+- **el-date-picker 的 $attrs 落在 ElTooltip（popper）上**（time-picker/src/common/picker.mjs：`createBlock(ElTooltip, mergeProps({...}, $attrs, {...}))`）——`data-testid` 等普通 attr **fallthrough 到 teleport 的隐藏 popper 容器**（display:none → locator.click 死等 30s）；但 **class/style 被单独摘出用于内部 input wrapper**（`class: $attrs.class`）——**E2E 定位 date-picker 用修饰 class（`--daily/--monthly`），勿用 data-testid**
+- **el-dropdown 的 menu 常驻 DOM**（非 lazy 挂载：teleport + v-show，未打开过也在 DOM）——`.el-dropdown-menu__item` CSS/text 定位在**两个 dropdown 共存**时必然 strict violation（月报 menu 隐藏但 DOM 在）；**✅ `getByRole('menuitem', { name })` 唯一可靠**（display:none 不进 a11y 树，天然过滤；与 el-select 渐隐动画问题不同族——dropdown 关闭无渐隐态歧义）
+- **el-table / 原生 div 的 attr fallthrough 正常**（单根默认 fallthrough）——testid 混用策略：原生 div/el-table 用 data-testid，el-date-picker/el-dropdown 用 class/原生 wrapper div
+- **el-date-picker 远期日期直输可用**：`input.fill('2030-01-01') + press('Enter')`（editable 默认 true，Enter parse 输入值生效）——空数据日零日历翻页/零 shortcut hack；date 型与 month 型同理
+
+### 报表契约对齐（以代码为准，非计划原文）
+- `reports:export` req = **`{ kind: 'daily'|'monthly', period, format }`**（非任务简报的 {type, date}）；period 日报 'yyyy-MM-dd' / 月报 'yyyy-MM'；文件名 `{日报|月报}{period}.{ext}`（E2E 落盘断言锚点）
+- DailyReport.sales **仅 completed**（repo 聚合与明细共用 WHERE）——日报明细表无 voided 行，状态 tag 列实际恒为"已完成"（按 DTO 断言 2 行）
+- helpers.launchApp env = `{...process.env, E2E_USER_DATA_DIR}` **透传 process.env** → spec 内 `process.env['E2E_EXPORT_DIR'] = dir` 先设再 launchApp 即可（**零基建改动**，afterAll delete 还原）
+
+### E2E 时序与状态细节
+- **ElMessage toast 连续断言**：每次导出后等 `.el-message--success` `toHaveCount(0, timeout 6000)` 退场（3s 自动关）再下一次——否则下一次 toast 叠加触发 strict violation（T13 双 toast 陷阱同款）
+- **serial 测试序列的组件状态残留**：测试 8 月报切"上月"后 activeMonth 跨测试保持——后续断言当月数据的测试必须先点"本月" shortcut 复位（组件状态不随 test 边界重置）
+- **月报期望动态推导**：月初 1 号运行时昨日跨月（SAME_MONTH=false）——当月/上月期望值按 `ym(-1)===ym(0)` 分支计算，任何日期运行均成立
+- **dropdown 只点一个实例**：日报 dropdown 打开 4 次（三格式+空数据 txt）同 menu 无歧义；月报导出仅断言 enabled 不点击（避免第二个 menu 实例引入定位歧义——月报导出与日报同一 T17 链路，round-trip 已被单元测试覆盖）
+- 测试期望金额 `(cents/100).toFixed(2)`：测试侧期望值计算非 UI 金额运算（G1 管渲染层），分值为 .5 倍数时 /100 浮点精确
+
+### 并行归责快照（Wave 3a）
+- Task 16（模板编辑器）半成品 template.repo.ts / template.repo.test.ts 在我两轮 typecheck 之间落盘（TS6133/TS2352）——按 T9 归责规则：我的文件（ReportsView/reports.spec/smoke.spec）node+web 双侧零错误、vitest 401 全绿、E2E 51/51 全绿；commit 只 add 自己的文件
+
 ## Task 13 销售记录查询落地记录（2026-11-01）
 
 ### ★ sales:list 分页契约现状（T15/后续报表消费前必读）

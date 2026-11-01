@@ -9,7 +9,6 @@ const NAV_ITEMS = [
   { path: '/purchases', label: '进货管理' },
   { path: '/sales-history', label: '销售记录' },
   { path: '/reports', label: '报表统计' },
-  { path: '/template-editor', label: '小票模板' },
   { path: '/settings', label: '系统设置' }
 ]
 
@@ -17,7 +16,14 @@ const NAV_ITEMS = [
  * 已替换占位的业务路由（页面内容验收由各任务的专属 E2E spec 覆盖；
  * 各任务落地时在此追加自己的路由，占位断言只对未实现路由生效）。
  */
-const IMPLEMENTED_ROUTES = new Set(['/purchases', '/products', '/settings', '/sales-history', '/pos'])
+const IMPLEMENTED_ROUTES = new Set([
+  '/purchases',
+  '/products',
+  '/settings',
+  '/sales-history',
+  '/pos',
+  '/reports',
+])
 test.describe.serial('应用骨架冒烟：导航与路由', () => {
   let app: LaunchedApp
 
