@@ -1,0 +1,75 @@
+name: Release
+
+# 正式发布流程：git tag v* → push tag → 全质量门通过后自动发布到 GitHub Releases
+# （日常每次 push 的验证仍走 ci.yml 的 artifact 方式，两者互不影响）
+on:
+  push:
+    tags: ['v*']
+
+# 创建 GitHub Release 需要写权限（GITHUB_TOKEN 默认只读）
+permissions:
+  contents: write
+
+jobs:
+  # ── 质量门（与 CI 相同：typecheck + vitest + E2E，目标平台）──
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: E2E tests (Playwright _electron)
+        run: npm run test:e2e
+
+  # ── 构建 + 发布到 GitHub Releases ──
+  release:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 防呆：tag 名必须与 package.json version 对应（v0.1.0 ↔ version 0.1.0），
+      # 否则 Release 版本号与安装包实际版本不一致
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$PKG_VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME != package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - name: Build app (electron-vite)
+        run: npm run build
+
+      # GH_TOKEN 用 Actions 运行时自动提供的 GITHUB_TOKEN（发布到本仓库 Releases，
+      # 无需手动创建任何密钥）；--publish always = 构建后创建 Release 并上传 exe
+      - name: Build installer & publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --publish always
