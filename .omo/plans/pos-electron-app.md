@@ -704,7 +704,7 @@ Max Concurrent: 6（Wave 1b/2a）
   - Message: `feat(shared): DTO/IPC 类型契约与小票模板 schema`
   - Pre-commit: `npm run typecheck && npm test`
 
-- [ ] 4. ESC/POS 生成器（纯函数 + GBK 编码 + golden 字节测试矩阵）
+- [x] 4. ESC/POS 生成器（纯函数 + GBK 编码 + golden 字节测试矩阵）
 
   **What to do**:
   - 安装 `node-thermal-printer@^4.6.1`（仅主进程用；**不安装 printer/electron-printer 原生 driver**——那是 Task 7 通道层职责，且 spooler 通道方案在 Task 7 决策）
