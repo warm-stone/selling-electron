@@ -30,6 +30,20 @@ function localYmd(): string {
   )
 }
 
+/**
+ * 测试机本地日期 yyyy-MM-dd（与 service.list 的 substr(created_at) / SQLite
+ * datetime('now','localtime') 语义一致）。勿用 toISOString——它返回 UTC 日期，
+ * 在 UTC+N 时区的本地 00:00–08:00 窗口比本地日期早一天，"明天"会算成"今天"。
+ */
+function localIsoDate(offsetDays = 0): string {
+  const d = new Date(Date.now() + offsetDays * 24 * 3600 * 1000)
+  return (
+    `${d.getFullYear()}-` +
+    `${String(d.getMonth() + 1).padStart(2, '0')}-` +
+    `${String(d.getDate()).padStart(2, '0')}`
+  )
+}
+
 function getStock(id: number): number {
   return (db.prepare('SELECT stock FROM products WHERE id = ?').get(id) as { stock: number }).stock
 }
@@ -239,11 +253,9 @@ describe('purchase.service：list', () => {
     expect(list[1]?.note).toBe('第一单')
   })
 
-  it('日期过滤：date_from 晚于全部单据 → 空', () => {
+  it('日期过滤：date_from 晚于全部单据 → 空（本地日期构造，时区无关）', () => {
     service.createPurchase([{ product_id: colaId, quantity: 1, cost_price_cents: 1 }])
-    const tomorrow = new Date(Date.now() + 24 * 3600 * 1000)
-    const iso = tomorrow.toISOString().slice(0, 10)
-    expect(service.list(iso, undefined)).toHaveLength(0)
+    expect(service.list(localIsoDate(1), undefined)).toHaveLength(0)
     expect(service.list(undefined, '2000-01-01')).toHaveLength(0)
     expect(service.list()).toHaveLength(1)
   })

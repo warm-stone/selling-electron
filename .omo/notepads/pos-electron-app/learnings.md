@@ -582,3 +582,9 @@
 - actionlint 从 GitHub releases 下载单二进制即用（v1.7.7）：本仓库 ci.yml 校验 exit=0
 - electron-builder 无 icon：`default Electron icon is used` 警告不失败（platformPackager getOrConvertIcon 源码）——"默认 icon"决策实证
 - CI job2 必须先 `npm run build`（electron-builder 只打包现有 out/，不会自跑构建）
+
+### ★ Task 9 fix：toISOString 日期构造的 UTC/本地时区窗口 flaky（CI 必读）
+- **根因**：`new Date(Date.now()+24h).toISOString().slice(0,10)` 取的是 **UTC 日期**——UTC+N 时区的本地 00:00–08:00 窗口内 UTC 日期=本地日期-1，"明天"被算成"今天"，过滤断言命中种子数据 → flaky（写测试时晚间 UTC 日期=本地日期所以绿，纯时区窗口 bug）
+- **修复模式**：测试日期构造一律本地格式化（`getFullYear/getMonth/getDate` + padStart 2）——与 SQLite `datetime('now','localtime')` / `strftime('%Y%m%d','now','localtime')` 同源同语义（JS Date 本地与 SQLite localtime 都由进程 TZ 驱动，同进程内严格一致）；purchase.service.test 的 `localIsoDate(offsetDays)` / `localYmd()` 即此模式
+- **验证矩阵**：`TZ=Asia/Shanghai` 与 `TZ=UTC` 各跑一遍 + 默认 TZ——三窗口全绿才证明时区无关（UTC+N 午夜后窗口正是 bug 触发窗口）
+- **CI 含义（重要）**：GitHub Actions windows-latest/ubuntu-latest 跑在 **UTC 时区**——本地（UTC+8）白天绿的测试 CI 可能挂（反之亦然）；所有涉及"当前日期"的断言必须走本地格式化或注入固定时钟，禁止 toISOString 构造业务日期
