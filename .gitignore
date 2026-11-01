@@ -12,4 +12,5 @@ coverage/
 
 # playwright
 test-results/
+test-results-qa/
 playwright-report/

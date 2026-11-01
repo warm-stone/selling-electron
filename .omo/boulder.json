@@ -6,9 +6,9 @@
       "work_id": "pos-electron-app-6f3d4b88",
       "active_plan": "/home/wenshi/codeSpace/selling-electron/.omo/plans/pos-electron-app.md",
       "plan_name": "pos-electron-app",
-      "status": "active",
+      "status": "completed",
       "started_at": "2026-11-01T12:16:46.416Z",
-      "updated_at": "2026-11-01T16:38:21.044Z",
+      "updated_at": "2026-11-01T16:44:50.307Z",
       "session_ids": [
         "opencode:ses_e69b3be88ffecJQjiNlFNXdRtH"
       ],
@@ -119,13 +119,15 @@
           "status": "running",
           "updated_at": "2026-11-01T16:38:21.045Z"
         }
-      }
+      },
+      "ended_at": "2026-11-01T16:44:50.307Z",
+      "elapsed_ms": 16083891
     }
   },
   "active_plan": "/home/wenshi/codeSpace/selling-electron/.omo/plans/pos-electron-app.md",
   "started_at": "2026-11-01T12:16:46.416Z",
-  "status": "active",
-  "updated_at": "2026-11-01T16:38:21.044Z",
+  "status": "completed",
+  "updated_at": "2026-11-01T16:44:50.307Z",
   "session_ids": [
     "opencode:ses_e69b3be88ffecJQjiNlFNXdRtH"
   ],
@@ -237,5 +239,7 @@
       "updated_at": "2026-11-01T16:38:21.045Z"
     }
   },
-  "agent": "atlas"
+  "agent": "atlas",
+  "ended_at": "2026-11-01T16:44:50.307Z",
+  "elapsed_ms": 16083891
 }
