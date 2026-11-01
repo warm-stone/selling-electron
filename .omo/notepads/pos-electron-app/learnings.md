@@ -202,3 +202,29 @@
 - items 列宽（ITEM_COLUMN_WIDTHS）：58mm 12/4/8/8、80mm 24/4/10/10（和=PAPER_COLUMNS）；名称左对齐+截断，数量/单价/小计右对齐
 - **golden .bin 再生机制**：`GOLDEN_UPDATE=1 npx vitest run tests/unit/printing/escpos-generator.test.ts`（describe.skipIf 门控）重写 tests/fixtures/golden/*.bin + .omo/evidence/task-4-sample-receipt.bin；**光栅字节=f(像素) 与 pngjs deflate 无关 → golden 跨 zlib/Node 版本稳定**；pngjs 无自带类型 → 测试侧 createRequire + 最小接口消费
 - 每段落自含完整状态块（GS! 归一 + ESC! 字号 + bold + 对齐；段落尾显式关粗体）——字节流对段落重排鲁棒，不依赖前段残留态
+
+## Task 10 销售事务核心落地记录（2026-11-01）
+
+### ★ sale_no 序列竞态分析（"事务内 COUNT+1"为何无竞态——D18 实现依据）
+- better-sqlite3 的 `db.transaction(fn)` 是**同步**事务：fn 在单次 JS 调用栈内跑完 BEGIN…COMMIT，Node 单线程下事务中途**不可能**插入其它 JS 代码（无 await、无事件循环让出点）→ 两个 checkout 不可能交错 → `dailyCount(COUNT LIKE 'yyyyMMdd-%') + 1` 无竞态
+- WAL 单写者只防多连接/多进程；真正让 COUNT 语义安全的是"同步事务 + 单线程"这一组合——若将来改 async 事务库（如 node:sqlite 异步版）此假设即失效，序列需改 `INSERT ... SELECT MAX+1` 或独立计数表
+- 序列语义是 **COUNT 计数**（当日第 N 单），不是 MAX 续接：手工插入跳号单 `xx-0007/xx-0012` 后下一单是 `xx-0003`；正常流程单号连续，UNIQUE 兜底。测试已锁定此语义
+
+### 事务嵌套模式（T9/T10 共用）
+- repo 层 `createSaleWithItems` 内嵌 `db.transaction()`，service 层大事务再包一层 → better-sqlite3 自动把内层降级为 **SAVEPOINT**（非嵌套 BEGIN），两层各自独立可用、组合安全——repo 可单测、service 保证编排原子性
+- kill-point 证明：trigger 注入在 movements INSERT 上时，sales 头 + sale_items 行 + stock UPDATE 均已执行，ABORT 后全部回滚——SAVEPOINT 不破坏外层回滚语义
+
+### kill-point 注入点实测结论（比 Inherited Wisdom 预判更细）
+- **RAISE(ABORT) trigger 是最真实可靠的 DB 层注入**：`CREATE TRIGGER … BEFORE INSERT ON stock_movements WHEN NEW.source='sale' BEGIN SELECT RAISE(ABORT, '…') END`——错误发生在写入序列**中途**（部分写入后），直击"事务性"而非"校验"
+- FK 注入路径分析：sale_items.product_id **nullable**（G4 快照）→ FK 不拦不存在商品；stock_movements.product_id NOT NULL FK 理论可拦，但 service 快照读取（`SELECT … FROM products WHERE id=?` 判 undefined）先于 movements INSERT 抛 PRODUCT_NOT_FOUND——FK 永远没机会触发。故第二注入测试断言的是"service 校验抛错同样触发全回滚"（此时 sales 头已 INSERT、第 1 项已完整写入，仍零变化）——证明回滚不依赖错误来源
+- 结论：kill-point 矩阵 = trigger 版（DB 层中途失败）+ 业务校验版（service 层中途失败），双覆盖
+
+### 作废边界（D15 × D3 交叉）
+- 商品硬删后作废：T8 硬删商品必然伴随 sale_items.product_id 断链（products 行删除被 stock_movements FK 拦截——movements.product_id NOT NULL，T8 的删除逻辑要处理引用）。voidSale 对 product_id 断链的行**跳过库存复原**（库存随硬删废弃），快照行不删、不写复原流水——已测试锁定
+- `DELETE FROM products` 直接删有流水的商品 → `FOREIGN KEY constraint failed`（本任务测试实测）——T8 删除实现的输入事实
+
+### 语义确认（T11/T13/T15 消费前必读）
+- `sales.item_count` = **Σquantity**（件数），非行数——seed 数据佐证（2 行明细 item_count=3）
+- `checkout` 返回 `SaleDetail`（头+items 快照行，全整数分）= 任务规格的 SaleReceiptData 实质；IPC 契约 `res: Sale` 是其超集，items 字段透传给 renderer（T15 组装 vars 时再格式化分→元）
+- 同车重复商品（不同价）service 不合并且逐行落库——合并（D16）是 renderer 购物车职责，service 保持无状态直传
+- preload/index.ts 出现并行混编（T9 purchases 段落 + 本任务 sales 段落同文件）——共享装配文件按"谁的段落谁保证 typecheck"归责，commit 时如实提交整文件（对方段落已过 typecheck 才提交）

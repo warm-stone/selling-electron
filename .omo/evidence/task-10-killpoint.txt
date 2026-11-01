@@ -1,0 +1,24 @@
+════════ Task 10 kill-point 原子性证据（G2：事务中途失败全回滚）════════
+# 运行: npx vitest run tests/unit/services/sale.service.test.ts -t 'kill-point'
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 20 skipped (22)
+   Start at  21:42:51
+   Duration  783ms (tests 38%, import 37%, transform 19%, worker 6%)
+
+
+════ 机制说明 ════
+注入点1：CREATE TRIGGER killpoint_before_movement BEFORE INSERT ON stock_movements WHEN NEW.source='sale' → RAISE(ABORT, 'kill-point 注入失败')
+  → 注入时序：sales 头已 INSERT + sale_items 2 行已 INSERT + products.stock 已扣减（UPDATE 已执行）→ movements INSERT 触发 ABORT
+  → better-sqlite3 同步事务 db.transaction(fn)：fn 内 throw 自动 ROLLBACK
+  → 断言回滚：sales=0 行 / sale_items=0 行 / stock_movements=0 行 / 两商品 stock 恢复原值（10/5）
+注入点2：第 2 项 product_id=999999（商品不存在，模拟 D15 加购后被硬删）→ service 快照读取抛 PRODUCT_NOT_FOUND
+  → 注入时序：sales 头已 INSERT（写入先于逐项快照读取）→ 第 1 项已完整处理
+  → 断言回滚：4 表零变化（含第 1 项的 sale_item 行与库存扣减全部撤销）
