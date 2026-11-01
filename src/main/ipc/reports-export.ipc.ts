@@ -1,18 +1,18 @@
 import type Database from 'better-sqlite3'
 import type { IpcChannels } from '../../shared/types/ipc'
 import { exportReport } from '../export/export.service'
-import type { ExportFormat } from '../export/export.types'
-import { loadReportExportInput } from '../export/report-loader'
+import type { ExportFormat, ReportExportInput } from '../export/export.types'
+import { createReportService, type ReportService } from '../services/report.service'
 
 /**
  * reports:export 通道（T3 契约：req { kind, period, format } → res { file_path | null }）。
  *
- * ⚠️ 冲突预警（Wave 2a/2b 并行）：本文件只注册 reports:export 单通道；
- * T14（报表 service）将另行注册 reports:daily / reports:monthly（不同文件，同归 reports 域）。
- *
- * 薄层三件事：参数校验（parseReportsExportRequest，纯函数可单测）→
- * 调 export 数据侧/编排层 → 序列化返回。electron 懒加载 require——本模块可被
- * vitest 纯 Node 环境导入（parse 单测）。
+ * T14 起数据侧统一走 report.service（T17 的临时 report-loader 已删除——
+ * 单一数据源，reports:daily/monthly 与 export 同口径）。薄层三件事：
+ * 参数校验（parseReportsExportRequest，纯函数可单测）→
+ * buildReportExportInput（service 输出 → exporter 输入，export 编排层转换点）→
+ * exportReport 编排。electron 懒加载 require——本模块可被
+ * vitest 纯 Node 环境导入（parse / build 单测）。
  */
 
 export interface ReportsExportRequest {
@@ -49,7 +49,25 @@ export function parseReportsExportRequest(req: unknown): ReportsExportRequest {
   return { kind, period, format }
 }
 
+/**
+ * service 输出 → ReportExportInput 组装（export 编排层转换点）。
+ * DailyReport / MonthlyReport（含 buckets——T14 起 shared 契约）与 exporter
+ * 输入结构逐字段一致，零结构转换；period/标题语义与 T17 行为不变。
+ */
+export function buildReportExportInput(
+  service: ReportService,
+  kind: 'daily' | 'monthly',
+  period: string
+): ReportExportInput {
+  const title = `${period} 销售报表`
+  if (kind === 'daily') {
+    return { kind, period, title, report: service.daily(period) }
+  }
+  return { kind, period, title, report: service.monthly(period) }
+}
+
 export function registerReportsExportIpc(db: Database.Database): void {
+  const service = createReportService(db)
   // 懒加载 electron：registerReportsExportIpc 仅在主进程装配时调用（main/index.ts）
   const { ipcMain } = require('electron') as {
     ipcMain: {
@@ -62,7 +80,7 @@ export function registerReportsExportIpc(db: Database.Database): void {
 
   ipcMain.handle('reports:export', async (_event, req) => {
     const { kind, period, format } = parseReportsExportRequest(req)
-    const input = loadReportExportInput(db, kind, period)
+    const input = buildReportExportInput(service, kind, period)
     const filePath = await exportReport(input, format)
     return { file_path: filePath }
   })

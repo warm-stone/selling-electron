@@ -33,6 +33,16 @@ const api = {
   invoke: (channel: string, payload?: unknown): Promise<unknown> =>
     ipcRenderer.invoke(channel, payload),
 
+  /**
+   * 扫码枪条码订阅（主进程 before-input-event 检测桥推送，绕过 IME）。
+   * 返回取消订阅函数（页面卸载时调用，防泄漏）。
+   */
+  onBarcode: (cb: (code: string) => void): (() => void) => {
+    const listener = (_event: unknown, code: string): void => cb(code)
+    ipcRenderer.on('scanner:barcode', listener)
+    return () => ipcRenderer.removeListener('scanner:barcode', listener)
+  },
+
   // ── 销售（Task 10：结账 + 作废 + 查询）──
   sales: {
     /** 结账（单事务：sales/sale_items/扣库存/movements；返回头+明细，金额整数分） */
@@ -126,8 +136,14 @@ const api = {
       ipcRenderer.invoke('printing:testPrint', req)
   },
 
-  // ── 报表（Task 17：导出 .txt/.xlsx/.docx；T14 将追加 daily/monthly 查询）──
+  // ── 报表（Task 14：日/月报查询；Task 17：导出 .txt/.xlsx/.docx）──
   reports: {
+    /** 日报（剔除 voided；空数据日零值不抛错；明细行带 status 标记） */
+    daily: (date: string): Promise<IpcChannels['reports:daily']['res']> =>
+      ipcRenderer.invoke('reports:daily', { date }),
+    /** 月报（剔除 voided；含按日分桶 buckets——空月为 []） */
+    monthly: (month: string): Promise<IpcChannels['reports:monthly']['res']> =>
+      ipcRenderer.invoke('reports:monthly', { month }),
     /**
      * 导出报表（主进程 showSaveDialog → 写文件 → 打开所在文件夹；
      * E2E_EXPORT_DIR 注入时直写固定目录——E2E 钩子）。

@@ -117,7 +117,7 @@ describe('xlsx.exporter：月报', () => {
     expect(summary.getCell('B4').value).toBe('2026-11')
   })
 
-  it('缺 buckets 的月报输入：无按日分桶 sheet（T14 前兼容形态）', async () => {
+  it('缺 buckets 的月报输入（契约外运行时形态）：无按日分桶 sheet', async () => {
     const wb = await reload(await exportXlsx(BUCKETLESS_MONTHLY_INPUT))
     expect(wb.getWorksheet('按日分桶')).toBeUndefined()
   })

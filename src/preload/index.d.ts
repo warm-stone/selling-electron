@@ -75,8 +75,12 @@ export interface PrintingApi {
   testPrint: (req: PrintTestRequest) => Promise<{ ok: boolean; error?: string }>
 }
 
-/** 报表导出（Task 17）：file_path null = 用户取消。T14 将追加 daily/monthly。 */
+/** 报表（Task 14 日/月查询 + Task 17 导出）：file_path null = 用户取消。 */
 export interface ReportsApi {
+  /** 日报（剔除 voided；空数据日零值不抛错；明细行带 status 标记） */
+  daily: (date: string) => Promise<IpcChannels['reports:daily']['res']>
+  /** 月报（剔除 voided；含按日分桶 buckets——空月为 []） */
+  monthly: (month: string) => Promise<IpcChannels['reports:monthly']['res']>
   export: (
     req: IpcChannels['reports:export']['req']
   ) => Promise<IpcChannels['reports:export']['res']>
@@ -86,6 +90,8 @@ export interface PosApi {
   ping: () => string
   /** 底层 IPC 入口：经 shared/types/ipc.ts 的 createTypedInvoke 包装使用（G8） */
   invoke: (channel: string, payload?: unknown) => Promise<unknown>
+  /** 扫码枪条码订阅（主进程检测桥推送）；返回取消订阅函数 */
+  onBarcode: (cb: (code: string) => void) => () => void
   sales: SalesApi
   purchases: PurchasesApi
   products: ProductsApi

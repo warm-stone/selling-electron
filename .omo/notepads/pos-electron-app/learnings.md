@@ -402,3 +402,31 @@
 ### 明细行精确断言（el-table 行内 td 列序定位）
 - `.el-table__row td.nth(n)` 按列序断言（数量/单价/小计），比行级 containsText 强（避免 '300' 撞条码子串之类的假阳性）；列序 = template 中 el-table-column 声明序
 - 双击行用 `row.locator('td').first().dblclick()`（单号格无交互元素，避开行内按钮误触）
+
+## Task 14 报表统计落地记录（2026-11-01）
+
+### 分层结构（T18 消费）
+- `report.repo`（createReportRepo：daily/monthly/dailyBuckets 三方法）由 T17 report-loader 演进而来：聚合与明细**共用同一 WHERE**（status='completed' + date()/strftime 过滤）→ 日报 total 与明细自洽由构造保证；**COALESCE(SUM(total_cents),0) 空集归 0**（SQL SUM 空集返回 NULL——空态不抛错的关键）；date()/strftime 与 created_at 写入默认值 `datetime('now','localtime')` 同钟，零 JS Date 重解析
+- `report.service`（createReportService）：格式校验（DATE_RE/MONTH_RE，`typeof !== 'string' ||` 先行——防 toString 巧合匹配正则的契约外对象）+ 组装 + 空态；ReportServiceError（code + 中文 message，与 Sale/Product service 同模式）
+- reports:export 与 reports:daily/monthly 同走一个 service（**单一数据源**，T17 临时 loader 已删除；issues 两条待办清零）
+
+### MonthlyReport buckets 契约统一（T17 兼容别名而非删除）
+- shared `MonthlyReport.buckets: DailyBucket[]` **必填**（service 恒提供，空月 []）；T17 的 `MonthlyReportInput`/`MonthlyBucket` 降级为兼容别名（`= MonthlyReport` / `= DailyBucket`）——**exporter 三文件零改动**（xlsx 的 `import type { MonthlyBucket } from './export.types'` 继续成立）
+- BUCKETLESS_MONTHLY_INPUT fixture 转 `as unknown as` **契约外运行时防御形态**：T14 前"T17 前兼容形态"已不存在（类型必填），但 exporter 的 `?? []`（txt/docx）/truthiness（xlsx）守卫仍在代码里——cast 样例继续锁定防御行为，断言零改动（微调允许范围内最小 diff）
+
+### ★ xlsx buckets 空数组语义（T18 报表 UI 必读）
+- xlsx.exporter `else if (input.report.buckets)` 对 **[] 是 truthy** → 空月导出会建"仅表头的按日分桶 sheet"；txt/docx `?? []` + `length===0` 才跳过区块 → 三格式对空月行为**不一致但都是 T17 原有行为**（经 reports:export 真实链路：T17 loader 空月就返回 buckets:[]，undefined 形态从未在生产路径出现）。T18 如需统一空月表现须另立决策，勿顺手改 exporter
+
+### TS 判别联合解构陷阱第二次踩中（vitest 全绿 tsc 报错——T17 learnings 已记，仍再犯）
+- `const { report } = buildReportExportInput(...)` 解构先于收窄 → report 永远是 `DailyReport | MonthlyReport` 联合，`.date/.sales/.month/.buckets` 全 TS2339；vitest（esbuild 转译不查类型）6/6 全绿，`npx tsc --noEmit` 报 10+ 错
+- **正解（与 T17 记录一致）**：保留 input 整体 + `if (input.kind !== 'daily') throw new Error(...)` 收窄后写 `input.report.*`——报错时 RED 快（kind 不符直接 throw，不走到错误分支）
+- 教训强化：**共享门禁必须 `npm run typecheck`（整链 exit 0），vitest 绿只证明运行时**
+
+### T17 测试迁移策略（53 计数保持的归责法）
+- report-loader.test.ts 6 用例**迁移而非删除**：seed（7 单含 1 voided）与断言**逐字保留**，仅数据路径从 loadXxxReport(db) 换为 buildReportExportInput(service, kind, period)——"导出行为不变"的可审计证据 = 断言值零漂移；export 套件 53 = 47 原有 + 6 迁移
+- buildReportExportInput(service, kind, period) 放 reports-export.ipc.ts（export 编排层转换点；懒 require electron 模式 → vitest 纯 Node 可导入）；DailyReport/MonthlyReport 与 exporter 输入逐字段一致 → 零结构转换，title/period 语义逐字同 T17
+- IPC 接线：registerReportsIpc(db) 独立文件（reports.ipc.ts，顶部 import ipcMain——无纯逻辑需单测，走 sales.ipc 同款薄层；与懒 require 的 reports-export.ipc 两种形态并存按需选用）；req 运行时防御 `typeof req?.date === 'string' ? req.date : ''`——空串被 service 正则拒绝（可诊断错误），与 sales.ipc 的 `?? -1` 哨兵同模式
+
+### 共享装配文件代持记录（F4 审计归因用）
+- 本任务 commit 的 main/index.ts（attachScannerBridge 导入+装配两行）与 preload index.ts/index.d.ts（onBarcode 段）含 **Task 11 并行未提交的扫码桥接线**（T5 交付的装配点）——按"先提交者代持"先例一并提交（共享文件无领地边界）；T11 自有文件（scanner/、cart.store、组件测试）未上船，T11 提交时归因对照本条
+- ★ 共享文件撞行实录（第二次，比 T8/T9/T10 那次更隐蔽）：T11 加 attachScannerBridge import 时**撞掉了我刚写入的 `import { registerReportsIpc }`**——注册行还在、import 行消失 → tsc TS2552；更险的是 `npm run typecheck | tail; echo $?` 的 **$? 取的是 tail 退出码（假绿）**——门禁必须 `npm run typecheck >/dev/null 2>&1; echo $?` 直存变量。撞行后修复=只补自己的行，不动对方段落

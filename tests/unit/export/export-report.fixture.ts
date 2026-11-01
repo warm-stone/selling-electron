@@ -78,10 +78,15 @@ export const EMPTY_DAILY_INPUT: DailyExportInput = {
   report: { date: '2026-11-03', total_cents: 0, order_count: 0, sales: [] }
 }
 
-/** 不带 buckets 的月报输入（T14 落地前的兼容形态：跳过按日分桶区块） */
-export const BUCKETLESS_MONTHLY_INPUT: MonthlyExportInput = {
+/**
+ * 契约外运行时形态（防御性样例）：buckets 缺失的月报输入。
+ * T14 起 shared MonthlyReport.buckets 必填（service 恒提供，空月为 []），
+ * 本样例经 cast 模拟契约外数据，锁定 exporter 的 `?? []`/truthiness 守卫
+ * （txt 跳过区块 / xlsx 不建 sheet）不因缺字段而抛错。
+ */
+export const BUCKETLESS_MONTHLY_INPUT = {
   kind: 'monthly',
   period: '2026-11',
   title: '2026-11 销售报表',
   report: { month: '2026-11', total_cents: 32105, order_count: 5 }
-}
+} as unknown as MonthlyExportInput

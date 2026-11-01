@@ -6,9 +6,9 @@
 - [x] [已解决 T12] **金额格式化函数共享**——`src/shared/utils/money.ts`：formatMoney（'12.50' 恰好 2 位小数、无千分位）+ parseMoneyToCents（非法输入 NaN）；T15/T18 统一消费
   - **T17 关联（2026-11-01）**：shared/utils/money.ts 仍未落地 → T17 已在 `src/main/export/money.ts` 实现等价私有 formatMoney（纯整数运算，'XX.XX' 元样式）——**又一份同源拷贝**，T12 统一上提时一并删除替换（learnings 已记）
 
-## Task 17（待办，T14 落地时处理）
-- [ ] **MonthlyReport DTO 缺 buckets（T3 契约缺口）**——T3 `MonthlyReport` 仅 `{ month, total_cents, order_count }`，无按日分桶字段；T17 按指示以 T3 类型为准 + 本地结构扩展 `MonthlyReportInput = MonthlyReport & { buckets?: MonthlyBucket[] }`（src/main/export/export.types.ts，月报 xlsx『按日分桶』sheet / docx 表 / txt 区块的数据源）。**T14 若在 shared DTO 补 `buckets` 字段则结构直接兼容**，届时应删除本地扩展类型改用 shared DTO（含 MonthlyBucket 上提）
-- [ ] **report-loader.ts 与 T14 report.service 聚合逻辑重复（技术债，刻意）**——`reports:export` IPC 当前用私有 SQL loader（src/main/export/report-loader.ts：日/月聚合 + 剔除 voided）避免跨波次依赖；T14 落地 report.service 后，reports-export.ipc 应改为注入/委托 report.service，删除私有聚合 SQL
+## Task 17（已解决，留档——2026-11-01 T14 落地）
+- [x] [已解决 T14] **MonthlyReport DTO 缺 buckets（T3 契约缺口）**——shared/types/domain.ts 已补 `DailyBucket` + `MonthlyReport.buckets: DailyBucket[]`（必填，service 恒提供、空月 []）；export.types.ts 的 `MonthlyReportInput`/`MonthlyBucket` 降级为兼容别名（= MonthlyReport / = DailyBucket），exporter 三文件零改动；BUCKETLESS_MONTHLY_INPUT fixture 转契约外运行时防御形态（as unknown as，继续锁定 exporter 守卫，断言零改动）
+- [x] [已解决 T14] **report-loader.ts 与 report.service 聚合逻辑重复（技术债）**——report-loader.ts 已删除，reports-export.ipc 数据获取改走 report.service（buildReportExportInput 组装，kind/period/title 语义与 T17 逐字一致）；T17 原 6 个 loader 测试迁移为 tests/unit/export/report-export-input.test.ts（seed 与断言逐字保留，仅换数据路径），export 套件 53 全绿
 
 ## Task 9（已按领地规则处理，留档）
 - [已处理] **T8 product.repo 在 Task 9 开工时不存在（并行未产出）**——按任务指示在 purchase.repo 内自写 products 读取 SQL（SELECT id,name,barcode,stock WHERE id=?，仅事务内快照用）；T8 后来已落地 products.ipc/products:list（E2E 自适应探测走真实 handler，stub 分支未触发）

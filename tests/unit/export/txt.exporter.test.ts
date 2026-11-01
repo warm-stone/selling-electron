@@ -80,7 +80,7 @@ describe('txt.exporter：月报', () => {
     expect(text).toContain('197.60')
   })
 
-  it('缺 buckets 的月报输入：跳过按日分桶区块不抛错（T14 前兼容形态）', () => {
+  it('缺 buckets 的月报输入（契约外运行时形态）：跳过按日分桶区块不抛错', () => {
     const text = decode(exportTxt(BUCKETLESS_MONTHLY_INPUT))
     expect(text).toContain('2026-11 销售报表')
     expect(text).toContain('总销售额: 321.05 元')

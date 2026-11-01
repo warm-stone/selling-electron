@@ -143,11 +143,20 @@ export interface DailyReport {
   sales: Sale[]
 }
 
+/** 月报按日分桶行（date=yyyy-MM-dd；T14 上提 shared，结构与导出层历史 MonthlyBucket 逐字段一致） */
+export interface DailyBucket {
+  date: string
+  total_cents: number
+  order_count: number
+}
+
 /** 月报（剔除 voided；month=yyyy-MM） */
 export interface MonthlyReport {
   month: string
   total_cents: number
   order_count: number
+  /** 按日分桶（SQL strftime 分桶；仅含有销售的日；空月为 []——T14 补齐 T3 契约缺口） */
+  buckets: DailyBucket[]
 }
 
 // ══════════════ 打印模板 ══════════════
