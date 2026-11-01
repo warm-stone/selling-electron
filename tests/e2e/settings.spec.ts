@@ -129,13 +129,18 @@ test.describe.serial('系统设置页（Task 19）', () => {
     await page.locator('.el-radio', { hasText: '系统打印机' }).click()
     await expect(page.locator('.printer-select')).toContainText('自动选择')
 
-    // Linux 无打印子系统：printers 列表为空 → 下拉仅「自动选择」，不崩溃
+    // 打印机列表数量随环境而异（G11）：Linux/无打印子系统 → 仅「自动选择」；
+    // Windows CI runner 自带虚拟打印机（Microsoft Print to PDF 等）→ 「自动选择」+ N 台。
+    // 不变量：不崩溃、「自动选择」恒在（printers 加载失败回落空列表的降级路径）
     await page.locator('.printer-select').click()
-    await expect(page.locator('.el-select-dropdown__item')).toHaveCount(1)
-    await expect(page.locator('.el-select-dropdown__item')).toHaveText('自动选择')
-    await page.locator('.el-select-dropdown__item').filter({ hasText: '自动选择' }).click()
+    const dropdownItems = page.locator('.el-select-dropdown__item')
+    const autoOption = dropdownItems.filter({ hasText: '自动选择' })
+    await expect(autoOption).toHaveCount(1)
+    expect(await dropdownItems.count()).toBeGreaterThanOrEqual(1)
+    await autoOption.first().click()
 
-    // spooler 在 Linux 不可用：错误被捕获为 error toast（含通道名），非崩溃
+    // 「自动选择」= 空 printer_name：spooler 发 RAW 必失败（Linux 无 powershell / Windows OpenPrinter('') 拒绝）
+    // → 错误被捕获为 error toast（含通道名），非崩溃——两平台同一路径
     await page.getByTestId('test-print-btn').click()
     const errorToast = page.locator('.el-message--error', { hasText: '测试打印失败' }).first()
     await expect(errorToast).toBeVisible()

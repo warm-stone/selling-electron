@@ -15,6 +15,11 @@ test.describe.serial('小票预览 demo：同源渲染 58/80mm', () => {
 
   test.beforeAll(async () => {
     app = await launchApp()
+    // 先等初始路由 finalize（URL 出现 #/pos ⟹ 路由回调已注册）：
+    // vue-router 的 setupListeners 在首次导航完成时才注册——在其之前改 hash，
+    // popstate 无人接收且初始导航会以过期快照覆写 URL（Windows CI 冷启动 chunk
+    // 加载慢时该盲窗可达数十~数百 ms，hash 导航被吞）。菜单点击的其他 spec 天然免疫。
+    await waitForRoute(app.page, '/pos')
     await app.page.evaluate(() => {
       location.hash = '#/receipt-preview-demo'
     })

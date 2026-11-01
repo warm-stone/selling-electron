@@ -613,3 +613,15 @@
 - 触发面：tests/e2e/reports.spec.ts + tests/e2e-qa/{qa-helpers,visual-css-check.mjs,packaged-smoke.mjs}——统一改 `join(tmpdir(), ...)`（node:os）
 - 判别方法：unit 测试里 mock 字符串路径（stub writeFile 不落盘）无害（export.service.test 的 '/tmp/opencode/saved' 即此类，CI vitest 过为证）；**实际执行 mkdtempSync/mkdirSync/writeFileSync 的才必须跨平台**
 - 教训：**一切实际触文件系统的临时路径一律 os.tmpdir()**——G11 的'禁硬编码路径'不止分隔符，还有 POSIX 绝对路径本身
+
+## Windows CI 跨平台坑（第三批，2026-11-02，Oracle 源码级诊断）
+
+### vue-router 初始化盲窗：hash 直达路由被吞（receipt-preview CI 失败根因）
+- **机制**：`app.use(router)` 发起初始导航（懒加载首页 chunk 的异步间隙）期间，`location.hash` 赋值触发的 popstate 无人接收——vue-router 的 `setupListeners()`（路由回调注册）**在首次导航 finalize 时才执行**；初始导航按模块求值时的过期快照收尾并**覆写 URL**（`#/pos`）。waitForURL 在覆写前匹配到瞬态 hash → beforeAll "假通过"，页面停在收银台
+- **平台不对称**：盲窗宽度 = 懒加载 chunk 读取时间。热 Linux ~1ms（14 档延迟扫描 0 命中）；Windows CI 冷盘 + Defender 扫描新构建文件 → 数十~数百 ms
+- **修复范式**：hash 直达前先 `waitForRoute(page, '/pos')`（URL 出现初始路由 ⟹ 回调已注册）。菜单点击的其他 spec 天然免疫（locator 自动等挂载后 DOM）
+- **通用规则**：E2E 直改 URL 导航前，必须先等初始路由 finalize
+
+### Windows CI runner 自带虚拟打印机（settings 测试环境假设）
+- windows-latest 预装 Microsoft Print to PDF / XPS 等虚拟打印机 → `getPrintersAsync()` 返回非空 → "无打印机环境"假设仅在 Linux 成立
+- **通用规则**：断言打印机数量/列表的测试必须环境自适应（不变量 = 「自动选择」恒在 + 不崩溃，数量 ≥1）
