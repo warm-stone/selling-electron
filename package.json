@@ -17,7 +17,13 @@
     "test:e2e": "node -e \"console.log('E2E（Playwright _electron）基建由 Task 6 搭建')\""
   },
   "dependencies": {
+    "@vue/test-utils": "^2.5.1",
+    "better-sqlite3": "^13.0.3",
+    "docx": "^9.15.1",
     "element-plus": "^2.14.7",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "node-thermal-printer": "^4.6.1",
     "pinia": "^4.1.0",
     "vue": "^3.5.44",
     "vue-router": "^4.6.4"
