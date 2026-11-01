@@ -1001,7 +1001,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(printing): 打印通道抽象（spooler/tcp/serial+串行队列）`
 
-- [ ] 8. 商品管理全链路（repo + service + IPC + UI + 手动库存流水）
+- [x] 8. 商品管理全链路（repo + service + IPC + UI + 手动库存流水）
 
   **What to do**:
   - `src/main/db/repositories/product.repo.ts`：`list(search?: string)`（name LIKE / barcode 精确或前缀）、`create({barcode?, name, defaultPriceCents?, initialStock})`、`update(id, {name?, defaultPriceCents?})`、`updateStock(id, newStock, source, sourceId?)`（**内部写 stock_movements**，before/after 快照）、`delete(id)`、`findByBarcode(code)`、`getById(id)`
@@ -1075,7 +1075,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(products): 商品管理全链路（CRUD+搜索+库存调整流水）`
 
-- [ ] 9. 进货管理全链路（repo + service + IPC + UI + 入库事务）
+- [x] 9. 进货管理全链路（repo + service + IPC + UI + 入库事务）
 
   **What to do**:
   - `src/main/db/repositories/purchase.repo.ts`：`createOrderWithItems(order, items[])`（事务）、`list(page)`、`getDetail(id)`（join items）
@@ -1143,7 +1143,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(purchases): 进货入库全链路（单据+库存+流水）`
 
-- [ ] 10. 销售结账 + 作废 service（事务核心 + kill-point 测试）
+- [x] 10. 销售结账 + 作废 service（事务核心 + kill-point 测试）
 
   **What to do**:
   - `src/main/db/repositories/sale.repo.ts`：`createSaleWithItems(sale, items[])`、`list(page, {from?, to?, status?})`、`getDetail(id)`、`voidSale(id)`、`findByNo(saleNo)`、`dailyCount(dateStr)`（单号序列用）
@@ -1286,7 +1286,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(pos): 收银台界面（扫码/双击加购/购物车编辑）`
 
-- [ ] 12. HTML 小票预览组件（同源渲染 58/80mm）
+- [x] 12. HTML 小票预览组件（同源渲染 58/80mm）
 
   **What to do**:
   - `src/renderer/src/components/receipt/ReceiptPreview.vue`：props `{ template: ReceiptTemplate, data: SaleReceiptData, vars: ReceiptVars }`：
@@ -1642,7 +1642,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(templates): 小票模板编辑器（表单+实时预览）`
 
-- [ ] 17. 导出器（txt/xlsx/docx + saveDialog + round-trip 测试）
+- [x] 17. 导出器（txt/xlsx/docx + saveDialog + round-trip 测试）
 
   **What to do**:
   - `src/main/export/txt.exporter.ts`：报表 → 纯文本（表头/分隔线/行/合计，char-grid 对齐复用，**UTF-8 with BOM**——Windows 记事本兼容）
@@ -1786,7 +1786,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(reports): 报表界面与导出集成`
 
-- [ ] 19. 系统设置页（打印机配置 + 店铺信息 + Logo 上传）
+- [x] 19. 系统设置页（打印机配置 + 店铺信息 + Logo 上传）
 
   **What to do**:
   - `src/main/db/repositories/settings.repo.ts`：get/getAll/set（KV upsert）
