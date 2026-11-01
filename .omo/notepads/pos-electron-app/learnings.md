@@ -70,3 +70,17 @@
 ### 环境记录
 - 本机 node v22.22.1 / npm 9.2.0 / Linux（DISPLAY=:0 可跑 GUI dev）
 - Windows 差异（CI）：spooler 打印、路径分隔符等留待各任务 mock/skip（G11）
+
+## Task 5 扫码枪检测器落地记录（S6 spike 实测，2026-11-01）
+
+### ★ S6 spike 结论（修正调研期预判——实测与预判相反，Task 11 E2E 关键输入）
+- **Playwright page.keyboard（CDP 路径）在 Electron 44 完全不触发 before-input-event**（3 阶段独立实测 count=0）——CDP Input.dispatchKeyEvent 绕过浏览器进程 PreHandleKeyboardEvent 钩子；调研期"OS 级管线可能触发"的预判不成立
+- **webContents.sendInputEvent({type:'keyDown'}) 可靠触发 before-input-event**，15ms 间隔连发 13 字符被检测器完整识别为条码（全链路真实事件）——调研期"大概率不触发"的预判不成立
+- sendInputEvent({type:'char'}) 不产生 keyDown 类 before-input-event（仅 keyDown Enter 到达）→ 字符不累计，扫码注入不可用
+- **Task 11 E2E 扫码注入策略**：electronApp.evaluate 内循环 `win.webContents.sendInputEvent({type:'keyDown', keyCode: ch})`（间隔 ≤15ms）+ 结尾 keyDown Enter；禁用 page.keyboard / type:'char'
+- 证据：`.omo/evidence/task-5-s6-spike.txt`
+
+### 检测器设计要点
+- BarcodeDetector 纯类零 Electron 依赖；判定全基于事件自身 timestamp（无 setTimeout/debounce，G13）
+- 细节规则（实测锁行为）：修饰键（Shift 等）不打断序列（兼容配置大小写转换的扫码枪）；其他控制键（Tab 等）打断序列；间隔恰 50ms 仍连发、51ms 重置
+- bridge 薄壳三件事：过滤 type==='keyDown'、feed、命中后 onBarcode 回调 + send('scanner:barcode')；bridge/main 装配与 preload onBarcode 暴露留给 T11

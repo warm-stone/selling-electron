@@ -1,0 +1,42 @@
+=== Task 5 S6 spike：E2E 扫码注入路径实测（哪条路径触发 before-input-event）===
+日期：2026-11-01；环境：Linux + DISPLAY=:0（tmux），Electron 44.10.1，Playwright _electron.launch
+
+方法（独立脚本窗口，未改 src/main/index.ts，临时脚本已删除）：
+  - 独立 BrowserWindow + attachScannerBridge(win, cb)（真实 detector + bridge，tsc 编译为 CJS）
+  - 另挂原始 before-input-event 全量记录器，持续写 results.json
+  - 三个注入阶段，各自独立 Electron 实例 → 结果互不污染
+      A        : Playwright page.keyboard.type('6901234567890', {delay:15}) + press('Enter')
+      B-char   : webContents.sendInputEvent({type:'char'}) 13 字符（15ms 间隔）+ keyDown Enter
+      B-keyDown: webContents.sendInputEvent({type:'keyDown'}) 13 字符（15ms 间隔）+ keyDown Enter
+
+─── S6 SPIKE REPORT ───
+
+[A page.keyboard]
+  before-input-event 触发: false (count=0)
+  keyStream: (空)
+  检测器命中条码: (无)
+  结论: ❌ 不触发 before-input-event
+
+[B sendInputEvent(char)]
+  before-input-event 触发: true (count=1)
+  keyStream: Enter
+  检测器命中条码: (无)
+  结论: ✅ 触发 before-input-event（但 13 个 char 事件均未产生 keyDown，仅最终 keyDown Enter 到达 → 字符未累计，无法识别）
+
+[B sendInputEvent(keyDown)]
+  before-input-event 触发: true (count=14)
+  keyStream: 2,1,0,1,2,3,4,5,6,7,8,9,2,Enter
+  检测器命中条码: 2101234567892
+  结论: ✅ 触发 before-input-event → 完整识别为条码
+
+─── 结论（修正 learnings 调研期预判，与预判相反）───
+1. Playwright page.keyboard（CDP Input.dispatchKeyEvent 路径）在 Electron 44 **完全不触发**
+   before-input-event（count=0）——CDP 注入绕过浏览器进程 PreHandleKeyboardEvent 钩子。
+2. webContents.sendInputEvent({type:'keyDown'}) **可靠触发** before-input-event，
+   且 15ms 间隔连发被检测器完整识别为条码（真实可用）。
+3. sendInputEvent({type:'char'}) 不产生 keyDown 类 before-input-event（仅 Enter keyDown 到达），
+   字符无法累计 → 不可用于扫码注入。
+4. ★ Task 11 E2E 扫码注入策略：electronApp.evaluate 内循环
+   win.webContents.sendInputEvent({type:'keyDown', keyCode: ch})（间隔 ≤15ms）
+   + 结尾 keyDown Enter —— 与真扫码枪等效（真实事件管线 + 检测器全链路验证）。
+   不得用 page.keyboard / type:'char'。
