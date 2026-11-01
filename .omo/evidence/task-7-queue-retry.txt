@@ -1,0 +1,18 @@
+=== Task 7 证据：打印任务串行队列 + 失败重试（print.service / PrintQueue） ===
+命令：npx vitest run tests/unit/printing/print.service.test.ts
+时间：2026-11-01 21:01:31  平台：Linux  node：v22.22.1
+
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  21:01:32
+   Duration  483ms (tests 52%, import 24%, transform 17%, worker 7%)
+
+
+=== 场景对照（计划 QA 场景 2） ===
+1. mock channel 第一次 reject 第二次 resolve → send 被调 2 次且最终 resolve ✔（用例『失败自动重试 1 次后成功』）
+2. 两次全 reject → enqueue reject（含『已自动重试 1 次』标记）且后续 job 不被阻塞 ✔（用例『两次全部失败』+『连续失败的两个 job』）
+3. 两个 job 严格串行（时间戳/事件顺序断言）✔（用例『两个 job 严格串行』：job1 未放行前 job2 不启动）

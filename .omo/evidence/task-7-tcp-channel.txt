@@ -1,0 +1,17 @@
+=== Task 7 证据：TCP 通道回环测试（127.0.0.1:19910 mock server） ===
+命令：npx vitest run tests/unit/printing/channels/tcp.channel.test.ts
+时间：2026-11-01 21:01:22  平台：Linux  node：v22.22.1
+
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+
+ RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
+
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  21:01:24
+   Duration  942ms (tests 92%, import 5%, transform 3%, worker 1%)
+
+
+=== 附：electron 真机 spike（Linux 下 getPrintersAsync 返回数组不抛错，G11） ===
+[T7-SPIKE] getPrintersAsync → OK count=0 sample=[]（DISPLAY=:0 npx electron，exit 0）

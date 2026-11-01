@@ -132,3 +132,30 @@
 - WAL 持久化在 DB 文件头：独立连接（readonly 亦可）读 `PRAGMA journal_mode` 返回 'wal'，QA 验证即用此法
 - 迁移幂等机制 = user_version 守卫（001_init.sql 逐字抄计划、无 IF NOT EXISTS，重启靠版本号跳过）
 - fixture seed：`tests/fixtures/seed.ts`（4 商品 → 进货+24/+18/+30 → 手工+6 → 销售-2/-1，审计链 6 条流水，前后库存衔接可断言）——T8/T9/T10/T13/T14 测试直接复用
+
+## Task 7 打印通道层落地记录（2026-11-01 实证）
+
+### ★ PowerShell RAW 打印转义坑（spooler 主通道，真机调试必读）
+- **execFile 不经 shell**：`execFile('powershell.exe', args)` 免 cmd 注入；Node spawn 自动做 Windows 参数引号转义（脚本内的 `"` → 命令行 `\"`），powershell `-Command` 能正确还原 —— 转义链：PS 脚本(单引号) → Node 参数转义 → PS -Command 还原
+- **PS 脚本内统一用单引号字符串**：单引号内唯一需转义的字符是单引号本身（`'` → `''`，`escapePowerShellSingleQuoted`）；双引号字符串有变量插值风险，C# 代码放 here-string `@'...'@`（**闭合 `'@` 必须顶行**，脚本用 `\n` join 无 `\r`，PS 5.1 接受）
+- **若真机 -Command 引号仍被吃**（罕见）：备选 `-EncodedCommand`（整脚本 base64(UTF-16LE)，零引号问题）；生成：`[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))`
+- **命令行 32K 上限**：CreateProcess 命令行 ≤32767 字符；base64 内联超 24000 字符（脚本本体约 4KB）自动改走 **stdin**（`[Console]::In.ReadToEnd()`）——Logo 光栅字节可能触发该路径
+- **中文打印机名**：经典 KB322091 RawPrinterHelper 是 ANSI 版（OpenPrinterA/CharSet.Ansi，非 zh-CN 代码页会挂）；已改 **W 系 API**（OpenPrinterW/StartDocPrinterW/CharSet.Unicode）全程 Unicode
+- **exit code 约定**：0=成功 / 2=SendBytesToPrinter 失败（stderr 带 win32 错误码 GetLastWin32Error）；`$ErrorActionPreference='Stop'` 让 Add-Type/FromBase64String 硬失败
+- **性能**：powershell.exe 进程 + Add-Type 每次 .NET 冷编译 ≈1-3s/单；真机高频打印若嫌慢，优化方向：预生成 .ps1 到 userData 用 -File 调用（PS 会缓存编译类型）
+- **Linux 调 execFile('powershell.exe') = ENOENT**：sendRawToPrinter 先判 `process.platform !== 'win32'` 抛『spooler channel 仅 Windows 可用』（比 ENOENT 可诊断）
+
+### 打印机枚举（G11 实证）
+- **真机 spike（Linux + Electron 44 + DISPLAY=:0）**：`win.webContents.getPrintersAsync()` → `[]` **不抛错** —— printer-enumerator 的外部假设成立；封装层再叠加 try/catch + 无窗口守卫（无 provider / 窗口销毁 / 抛错 → 全部返回 `[]`）
+- `printer:auto` 的 RAW-ONLY 过滤在 node-thermal-printer `lib/interfaces/printer.js getPrinterName()`（`attributes.indexOf('RAW-ONLY')`）；Electron getPrintersAsync **不暴露 attributes** → 枚举层只做注释语义，设置页引导选热敏机，真机清单覆盖
+- `printer:` interface 源码确认：构造时无 driver 对象即抛 `No driver set!`（依赖 2022 停更的 printer/electron-printer）→ 维持不装，PowerShell 方案为唯一主路径
+
+### 串口通道跨平台陷阱
+- **`\\.\COM1` 在 Linux 是合法文件名**：`fs.createWriteStream(port,{flags:'w'})` 会**静默创建垃圾文件**（TDD 期间踩过：构造签名不匹配导致默认口写入 cwd，已修复+清理）。串口通道仅供 Windows 真机设备路径使用；Linux 下测试用临时文件路径做等价验证
+
+### tcp 通道实现要点
+- 自实现与 node-thermal-printer Network 接口（`lib/interfaces/network.js`）同构：`net.createConnection` → write 回调（drain 语义）→ `end()` → `close` 收尾
+- 超时守护覆盖连接+写阶段（防对端不读挂死）；写完即 FIN，等对端 close 才 resolve（『连接关闭干净』断言）；RFC 5737 `192.0.2.1` 做不可路由地址测试（CI 安全）
+
+### 队列实现要点（PrintQueue）
+- **串行队列死锁防线**：`this.queueTail = run.then(()=>{},()=>{})`（队尾吞失败）+ 返回原 `run` 给调用方 —— 前序 job 双败后队列必须继续，这是"队列死锁"失败指示器的根因解法
