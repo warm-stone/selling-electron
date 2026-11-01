@@ -1,6 +1,8 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db/database'
+import { registerPurchasesIpc } from './ipc/purchases.ipc'
+import { registerSalesIpc } from './ipc/sales.ipc'
 
 // ── E2E 数据隔离（Task 6）：测试进程通过环境变量注入临时 userData，避免污染真实用户数据 ──
 // 必须在 app ready 前设置；正常 dev/生产环境不注入该变量，零影响
@@ -54,7 +56,9 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
-    initDatabase()
+    const db = initDatabase()
+    registerSalesIpc(db)
+    registerPurchasesIpc(db) // Task 9：进货管理（IPC 统一装配模式）
 
     createWindow()
 
