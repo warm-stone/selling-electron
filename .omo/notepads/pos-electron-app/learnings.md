@@ -594,3 +594,14 @@
 - **修复模式**：测试日期构造一律本地格式化（`getFullYear/getMonth/getDate` + padStart 2）——与 SQLite `datetime('now','localtime')` / `strftime('%Y%m%d','now','localtime')` 同源同语义（JS Date 本地与 SQLite localtime 都由进程 TZ 驱动，同进程内严格一致）；purchase.service.test 的 `localIsoDate(offsetDays)` / `localYmd()` 即此模式
 - **验证矩阵**：`TZ=Asia/Shanghai` 与 `TZ=UTC` 各跑一遍 + 默认 TZ——三窗口全绿才证明时区无关（UTC+N 午夜后窗口正是 bug 触发窗口）
 - **CI 含义（重要）**：GitHub Actions windows-latest/ubuntu-latest 跑在 **UTC 时区**——本地（UTC+8）白天绿的测试 CI 可能挂（反之亦然）；所有涉及"当前日期"的断言必须走本地格式化或注入固定时钟，禁止 toISOString 构造业务日期
+
+## Windows CI EBUSY fix：测试 teardown 删 temp DB 目录（2026-11-02）
+
+### ★ unlink 语义的 Windows/Linux 分裂（G11 又一实证，CI 失败两例：settings.repo/seed）
+- **Linux 允许 unlink 打开中的文件**（inode 引用计数，句柄在文件也"消失"）——本地全绿**掩盖了连接泄漏**；Windows 不允许（rmSync 直接 EBUSY），CI windows-latest 才炸。与 spooler/路径分隔符同族：**"本地 Linux 绿"只是单平台绿，Windows CI 是另一套文件系统语义**
+- **better-sqlite3 连接泄漏两形态**（全仓 grep 定位）：① **freshDb 自建连接从不 close**（settings.repo/template.repo/settings.ipc——afterEach 直接 rmSync）；② **initDatabase 模块级单例不关闭**（seed/sale.service/purchase.service/migrator 第二 describe——单例跨测试持有最后连接）。已有 try/finally close 的（report.service/report-export-input）不泄漏
+- **修复范式（三件套）**：`closeDatabase()` 导出（关单例，幂等）+ `openDbs` 模块级登记（自建连接 afterEach 逐个 close，免逐测试手写）+ `rmTempDirSync`（tests/helpers/cleanup.ts——rmSync 带 maxRetries:5/retryDelay:100）。**不变量：每个 rmTempDirSync 前本文件打开的所有连接已 close**（grep 结构性可证）
+- **maxRetries 兜底的必要性**：即使连接已关，Windows 仍可能有第三方进程**短暂持有句柄**（防病毒扫描/索引服务）——node fs 的 maxRetries/retryDelay 专为 EBUSY/EPERM 竞态设计（线性退避重试）；Linux 上 maxRetries 无害（rmSync 一次成功）
+- **幂等测试的细节**：migrator"二次迁移"用例保留 `first.close()` 内联（顺序重开语义不漂移），仅 second 走 openDbs 登记——close 不能双调（better-sqlite3 对已关连接再 close 会 throw）
+- **顺带排查结论**：tests/e2e 与 e2e-qa **均无 rmSync**（temp userData 目录用后不删）——electronApp.close() 后立即 rm 的 Chromium 句柄延迟风险不存在；serial.channel 的 fs 流在 send 内 `stream.end()` 已关
+- **验收矩阵**：`npm test`（423+1 skip）+ `TZ=UTC npm test`（CI 时区，顺防时区 flaky 复发）+ `npm run typecheck` 三绿；断言语义零改动（只动 teardown/连接生命周期）
