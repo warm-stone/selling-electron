@@ -1,0 +1,10 @@
+.claude/
+.opencode/
+
+# build & tooling
+node_modules/
+out/
+dist/
+coverage/
+*.local
+.DS_Store

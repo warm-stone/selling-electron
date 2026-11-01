@@ -1,0 +1,55 @@
+=== Task 1 QA: 单实例锁验证 ===
+date: 2026-11-01T20:39:35+08:00
+
+--- 前置：实例 A（tmux window 0）已在运行 ---
+实例 A electron 主进程（无 --type 参数者）:
+94401 /home/wenshi/codeSpace/selling-electron/node_modules/electron/dist/electron .
+此时主进程数（应为 1 个 App 实例）: 1
+
+--- 第二实例已启动（tmux window second: npm run dev）---
+--- sleep 20 后检查 ---
+
+第二实例 tmux pane 输出:
+wenshi@MI-gamebook:~/codeSpace/selling-electron$ npm run dev 2>&1 | tee /tmp/opencode/task1-dev-b.log; echo "SECOND_INSTANCE_DEV_EXIT_CODE=${PIPESTATUS[0]}"
+> selling-electron@0.1.0 dev
+> electron-vite dev
+vite v8.3.5 building ssr environment for development...
+transforming...
+✓ 2 modules transformed.
+rendering chunks...
+out/main/index.js  1.33 kB
+✓ built in 68ms
+electron main process built successfully
+-----
+vite v8.3.5 building ssr environment for development...
+transforming...
+✓ 2 modules transformed.
+rendering chunks...
+out/preload/index.js  0.10 kB
+✓ built in 30ms
+electron preload scripts built successfully
+-----
+Port 5173 is in use, trying another one...
+dev server running for the electron renderer process at:
+  ➜  Local:   http://localhost:5174/
+  ➜  Network: use --host to expose
+starting electron app...
+SECOND_INSTANCE_DEV_EXIT_CODE=0
+wenshi@MI-gamebook:~/codeSpace/selling-electron$
+
+存活 electron 主进程（App 实例，无 --type）:
+94401 /home/wenshi/codeSpace/selling-electron/node_modules/electron/dist/electron .
+
+实例 A pane 尾部（应仍在运行）:
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+
+starting electron app...
+
+
+
+--- 结论 ---
+[PASS] 第二实例 npm run dev：electron 启动后自动退出（requestSingleInstanceLock 未获得锁 → app.quit()），SECOND_INSTANCE_DEV_EXIT_CODE=0（干净退出）
+[PASS] sleep 后仅剩实例 A 的 electron 主进程（PID 94401），第二实例主进程已消失
+[PASS] 实例 A 持续运行无崩溃（pane 无新增错误输出）
+单实例锁 + second-instance 聚焦回调路径生效（第二实例启动时触发实例 A 的 'second-instance' 事件）

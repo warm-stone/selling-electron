@@ -1,0 +1,17 @@
+/* 全局中文字体栈（Task 1 脚手架基线） */
+html,
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+#app {
+  height: 100%;
+}
+
+/* 等宽 CJK 字体：小票预览等宽对齐用（ReceiptPreview 双渲染同源） */
+.mono-cjk {
+  font-family: "NSimSun", "SimSun", monospace;
+}
