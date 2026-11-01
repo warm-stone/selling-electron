@@ -8,6 +8,7 @@ import { registerProductsIpc } from './ipc/products.ipc'
 import { registerPurchasesIpc } from './ipc/purchases.ipc'
 import { registerSalesIpc } from './ipc/sales.ipc'
 import { registerSettingsIpc } from './ipc/settings.ipc'
+import { registerTemplatesIpc } from './ipc/templates.ipc'
 import { attachScannerBridge } from './scanner/scanner-bridge'
 
 // ── E2E 数据隔离（Task 6）：测试进程通过环境变量注入临时 userData，避免污染真实用户数据 ──
@@ -73,7 +74,8 @@ if (!gotTheLock) {
     registerReportsExportIpc(db) // Task 17：报表导出（reports:export；数据源走 report.service——T14 统一）
     registerReportsIpc(db) // Task 14：日/月报查询（reports:daily/monthly；剔除 voided + SQL 分桶）
     registerSettingsIpc(db) // Task 19：系统设置（店铺信息/打印配置/Logo）
-    registerPrintingIpc() // Task 19：打印设置（打印机枚举 + 测试打印）
+    registerPrintingIpc(db) // Task 15：打印编排（preview/print；T19 打印机枚举/测试打印）
+    registerTemplatesIpc(db) // Task 16：小票模板（五通道 CRUD + setDefault 互斥）
 
     createWindow()
 

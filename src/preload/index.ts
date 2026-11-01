@@ -3,6 +3,7 @@ import type {
   AppSettings,
   CheckoutItem,
   IpcChannels,
+  PrintTemplate,
   Product,
   PurchaseInputItem,
   PurchaseOrderWithItems,
@@ -10,6 +11,8 @@ import type {
   SaleDetail,
   SaleStatus
 } from '../shared/types'
+import type { SaleReceiptData } from '../shared/receipt/item-columns'
+import type { ReceiptTemplate, ReceiptVars } from '../shared/receipt/template-schema'
 
 /**
  * 商品列表行：Product + 删除影响计数（契约 products:list res `Product[]`
@@ -17,6 +20,18 @@ import type {
  */
 interface ProductRow extends Product {
   willOrphan: number
+}
+
+/**
+ * 小票预览结果（printing:preview res 的运行时结构超集——契约只声明
+ * template+sale；与 index.d.ts 的同名声明保持结构同步）。
+ */
+interface PrintingPreviewResult {
+  template: ReceiptTemplate
+  sale: SaleDetail
+  data: SaleReceiptData
+  vars: ReceiptVars
+  logoUrl: string | null
 }
 
 /**
@@ -117,6 +132,7 @@ const api = {
   },
 
   // ── 打印设置（Task 19：打印机枚举 + 测试打印）──
+  // ── 打印（Task 19：打印机枚举 + 测试打印；Task 15：小票预览 + 打印）──
   printing: {
     /** 系统打印机列表（Linux/无窗口环境优雅降级为 []——G11） */
     printers: (): Promise<{ name: string; is_default: boolean }[]> =>
@@ -133,7 +149,37 @@ const api = {
       tcp_port: number | null
       com_port: string | null
     }): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('printing:testPrint', req)
+      ipcRenderer.invoke('printing:testPrint', req),
+    /**
+     * 小票预览（Task 15）：返回模板/明细/vars/logoUrl——与打印字节同一组装
+     * 源头（G7）。与 index.d.ts 的 PrintingPreviewResult 保持结构同步。
+     */
+    preview: (saleId: number): Promise<PrintingPreviewResult> =>
+      ipcRenderer.invoke('printing:preview', { sale_id: saleId }),
+    /**
+     * 小票打印（Task 15）：串行队列 best-effort；失败返回 { ok:false, error }
+     * （error 含通道名 + 重打引导）——销售已落库不受影响（G3）。
+     */
+    print: (saleId: number): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('printing:print', { sale_id: saleId })
+  },
+
+  // ── 模板（Task 16：小票模板 CRUD + 设默认；类型对齐 IpcChannels 契约防漂移）──
+  templates: {
+    /** 模板列表（按创建序；is_default 行为默认模板） */
+    list: (): Promise<PrintTemplate[]> => ipcRenderer.invoke('templates:list'),
+    /** 新建（config_json 为模板 JSON 字符串；首个模板自动成为默认） */
+    create: (req: IpcChannels['templates:create']['req']): Promise<PrintTemplate> =>
+      ipcRenderer.invoke('templates:create', req),
+    /** 局部更新（name / config_json 至少其一） */
+    update: (req: IpcChannels['templates:update']['req']): Promise<PrintTemplate> =>
+      ipcRenderer.invoke('templates:update', req),
+    /** 删除（唯一模板时主进程守卫抛错） */
+    delete: (id: number): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('templates:delete', { id }),
+    /** 设为默认（事务互斥：全表清零 → 目标置一） */
+    setDefault: (id: number): Promise<PrintTemplate> =>
+      ipcRenderer.invoke('templates:setDefault', { id })
   },
 
   // ── 报表（Task 14：日/月报查询；Task 17：导出 .txt/.xlsx/.docx）──

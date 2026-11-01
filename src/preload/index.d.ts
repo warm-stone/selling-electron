@@ -2,6 +2,7 @@ import type {
   AppSettings,
   CheckoutItem,
   IpcChannels,
+  PrintTemplate,
   Product,
   PurchaseInputItem,
   PurchaseOrderWithItems,
@@ -9,6 +10,8 @@ import type {
   SaleDetail,
   SaleStatus
 } from '../shared/types'
+import type { SaleReceiptData } from '../shared/receipt/item-columns'
+import type { ReceiptTemplate, ReceiptVars } from '../shared/receipt/template-schema'
 
 /** preload 暴露给 renderer 的类型化 API surface（通道名与 IpcChannels 契约一致）。 */
 export interface SalesApi {
@@ -70,9 +73,30 @@ export type PrintTestRequest = Pick<
   'printer_channel' | 'printer_name' | 'tcp_host' | 'tcp_port' | 'com_port'
 >
 
+/**
+ * 小票预览结果（Task 15）：printing:preview res 的运行时结构超集——
+ * T3 契约只声明 template+sale，data/vars/logoUrl 为主进程 PreviewPayload
+ * 附加字段（与打印字节同一组装源头，G7）。
+ * 与 src/preload/index.ts 的同名声明保持结构同步。
+ */
+export interface PrintingPreviewResult {
+  template: ReceiptTemplate
+  sale: SaleDetail
+  /** 明细行（display-ready：主进程 formatMoney 组装——G1） */
+  data: SaleReceiptData
+  /** 变量插槽值（纯字符串） */
+  vars: ReceiptVars
+  /** Logo dataURL（未设置/读取失败 → null；Buffer 不跨 IPC） */
+  logoUrl: string | null
+}
+
 export interface PrintingApi {
   printers: () => Promise<{ name: string; is_default: boolean }[]>
   testPrint: (req: PrintTestRequest) => Promise<{ ok: boolean; error?: string }>
+  /** 小票预览（printing:preview）：ReceiptPreview 同源渲染（G7） */
+  preview: (saleId: number) => Promise<PrintingPreviewResult>
+  /** 小票打印（printing:print）：串行队列 best-effort；失败 { ok:false, error }（G3 不影响已保存销售） */
+  print: (saleId: number) => Promise<{ ok: boolean; error?: string }>
 }
 
 /** 报表（Task 14 日/月查询 + Task 17 导出）：file_path null = 用户取消。 */
@@ -84,6 +108,15 @@ export interface ReportsApi {
   export: (
     req: IpcChannels['reports:export']['req']
   ) => Promise<IpcChannels['reports:export']['res']>
+}
+
+/** 模板（Task 16）：config_json 为 shared/receipt ReceiptTemplate 的 JSON 序列化。 */
+export interface TemplatesApi {
+  list: () => Promise<PrintTemplate[]>
+  create: (req: IpcChannels['templates:create']['req']) => Promise<PrintTemplate>
+  update: (req: IpcChannels['templates:update']['req']) => Promise<PrintTemplate>
+  delete: (id: number) => Promise<{ ok: true }>
+  setDefault: (id: number) => Promise<PrintTemplate>
 }
 
 export interface PosApi {
@@ -98,6 +131,7 @@ export interface PosApi {
   settings: SettingsApi
   printing: PrintingApi
   reports: ReportsApi
+  templates: TemplatesApi
 }
 
 declare global {

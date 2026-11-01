@@ -17,3 +17,9 @@
 ## Task 19（T15 消费提示 + 共享验收现状）
 - [ ] **共享质量门被 T12 已提交文件挡住（归责 T12）**——`tests/e2e/receipt-preview.spec.ts` 存在 4 个 TS2304 DOM 全局错误（location/getComputedStyle，该文件被 tsconfig.node.json 收编但用浏览器全局）——当前全量 `npm run typecheck` 无法全绿；T19 自有文件零错误（按文件路径归责验证），F2 审计时需 T12 补 DOM lib 引用或局部声明
 - [ ] **T15 打印编排消费 T19 产物的方式**：settings:get 的 AppSettings 直接喂 T7 `getChannel`（key 逐字一致）；logoBuffer 从 settings.logo_path 读文件（勿再走 dataURL）；vars.shopName/shopPhone/receiptNote 从 settings 组装（本任务数据源就绪）；**auto_cut 不进打印决策链**（模板 cutPaper 唯一事实源，设置项仅初始值参考——计划决策，勿透传给生成器）
+
+## Task 16（领地实录 + F4 审计提示）
+- [已处理] **T15 的 repo 读取方法晚于我开工落地**——template.repo.ts 由 T16 先落盘（文件头注释声明领地：list/getDefault 归 T15、CRUD 归 T16），T15 随后追加 getDefault/seedDefaults（惰性 seed 插 58mm+80mm 两行，80mm 置默认）+ 其测试 4 例（追加在我建的 template.repo.test.ts 末尾）；我方 CRUD 测试全程直插 SQL 构造/断言，对读取方法零依赖——"追加不改"承诺双向成立
+- [ ] **F4 审计归因：本任务 commit 按 T10 先例代持 T15 未提交段落**——src/main/index.ts 的 `registerPrintingIpc(db)` 行、preload index.ts/index.d.ts 的 printing preview/print 段（PrintingPreviewResult 等）、template.repo.ts 的 getDefault 段与其测试 describe 块——T15 任务专属 commit 将不含这些共享文件；中间提交的独立树完整性按波次惯例由后续 T15 commit 即时补全
+- [已记录] **templates:update 契约无 paper_width 字段**（T3 契约冻结）——纸宽变更经 config_json 模板主体生效，repo 同步 paper_width 列（列=主体的投影）；勿按"列不可变"或"透传字段"误判
+- [已记录] **全量 E2E 的 pos.spec/sales-history.spec 失败为 T15 替换占位弹窗过渡态**（view 已换新、spec 同步更新中；T15 更新后的断言以'小票预览'弹窗为锚）——归责 T15；共享质量门以 T15 完成后的全绿快照为准

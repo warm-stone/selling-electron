@@ -23,6 +23,7 @@ const IMPLEMENTED_ROUTES = new Set([
   '/sales-history',
   '/pos',
   '/reports',
+  '/template-editor'
 ])
 test.describe.serial('应用骨架冒烟：导航与路由', () => {
   let app: LaunchedApp

@@ -479,3 +479,39 @@
 - toContainText 锚点正则坑：`/^\d{8}-\d{4}$/` 撞「单号 」前缀必败——含前缀文案用 `toHaveText(/单号 \d{8}-\d{4}/)`
 - vue-tsc 对模板内联事件 handler 参数**不做上下文类型推断**（`(v) => f(v)` 报 TS7006 隐式 any）——模板内需显式注解 `(v: number | undefined) => …`（Vue 3.3+ 模板支持 TS 语法）；`:row-class-name` 等复杂表达式抽 script 方法（同 T8 模式）
 - E2E 断言金额显示用 `toHaveValue('3.50')`（el-input-number 精度 2 显示）与 `.cart-row__subtotal` 文本（formatMoney 恰 2 位小数）双层验证——显示层与 store 整数分由 DB 断言闭环（total_cents=1700 硬校验）
+
+## Task 16 小票模板编辑器落地记录（2026-11-01）
+
+### ★ Element Plus attrs fallthrough 分裂（表单类 E2E testid 策略必读，与 T9 aria-controls 配套）
+- **el-input 的非 class attrs（含 data-testid）落在原生 `<input>` 上**（2.14.7 源码实证：input.vue `useAttrs()` + `v-bind="attrs"` 绑到 native input 节点）——`getByTestId('tpl-name')` 拿到的就是 input 本身，**再 `.locator('input')` = 0 匹配**（"element(s) not found"）
+- **el-select/el-radio-group/el-switch/el-button/el-tag 走 Vue 默认 fallthrough 到根元素**——el-select 的 testid 在根 div 上，`.locator('input')` 取 aria-controls 照常可用
+- 结论：el-input 用 testid 直接定位（fill/toHaveValue 原生可用）；el-select 维持 aria-controls 锚点域方案
+
+### ★ el-tag 渐隐动画残留 strict violation（popper 残留同族第三例，T19/后续引用 tag 的 E2E 必读）
+- 状态切换（draft→已保存）时旧 tag `el-zoom-in-center-leave-active` 退场动画期间与新 tag `enter-active` **并存** → `getByTestId('tpl-draft-tag')` 解析到 2 元素
+- 正解：`.last()` 锚定新挂载元素（enter-active 在 DOM 后位）；与 el-select popper 残留、el-message 叠加同一治理思路
+
+### 断言子串陷阱（列表 tag 断言通用）
+- 模板名「默认小票」含子串「默认」→ `toContainText('默认')` 恒假通过；默认标记断言改用 **`.el-tag--success` 计数**（toHaveCount(1)/(0)），语义精确零歧义
+- toast 断言：`.el-message--success` 必须 `filter({ hasText }) + .first()`——3s 寿命内跨测试叠加触发 strict violation
+
+### ★ T15 并行领地实录（共享 template.repo.ts 的"追加不修改"实证）
+- 我先落盘 CRUD + list（文件头注释声明：list/getDefault 归 T15，CRUD 归 T16）；T15 随后在同文件追加 `stmtGetDefault`/`seedDefaults`/`getDefault()`——**惰性 seed 插两行**（58mm + 80mm，80mm 置默认，单事务）
+- T15 的 getDefault 测试（4 例）追加在我建的 tests/unit/db/template.repo.test.ts 末尾 describe 块——合计 24 用例全绿；我的 CRUD 测试全程**直插 SQL 构造数据 + 直读 DB 断言**，对 T15 读取方法零依赖，合并顺序无碍
+- 写入时序插曲：T15 的 stmtGetDefault/seedDefaults 先于 getDefault 接线落盘 → 期间 typecheck 的 TS6133 unused 错误归 T15 段落（我的文件零错），接线完成后整链恢复 exit 0
+
+### 模板 CRUD 语义定案（F4 审计 / T20 消费必读）
+- **create：首个模板自动 is_default=1**（表恒有默认的不变量起点）；config_json 序列化 + isValidReceiptTemplate 类型守卫（repo 层落库前校验——枚举值与 T3 schema 联合类型逐字对应，shared/schema 零改动）
+- **delete：唯一模板不可删**（count>1 守卫抛 CANNOT_DELETE_LAST_TEMPLATE）+ **删默认模板时剩余最早一员晋升默认**（单事务，互斥不变量不破）
+- **update：换模板时 paper_width 列同步**（列声明是 config_json 主体的投影；契约 update 无 paper_width 字段——纸宽变更经 config_json 主体生效）；IPC create 校验 req.paper_width === 模板 paperWidth 一致性（不一致拒绝）
+- IPC 五通道薄层 = settings.ipc 同款：parseTemplatesCreateRequest/parseTemplatesUpdateRequest/parseTemplateIdRequest 纯函数（JSON.parse + 结构校验）+ registerTemplatesIpc 懒 require
+
+### 模板编辑器数据流（G14 段落级为止）
+- draft（reactive）→ previewTemplate（**computed = 表单的响应式 watch**，"不保存也实时刷新"由 computed 链天然成立）→ ReceiptPreview（样例 shopName='测试商店' + 两行商品，金额经 shared/utils/money 组装——G1）
+- 新建 = DEFAULT_TEMPLATES['80mm'] 深拷贝草稿（id=null，保存走 create）；复制 = 当前 draft 快照 +『 副本』名；空表 fallback = 直接进入新建草稿态（T15 getDefault 惰性 seed 属打印链路，编辑器 list 为纯 SELECT 不 seed）
+- 设默认 UI 语义：radio（设为默认/非默认）+ @change 边界——取消默认被拒（回滚 + warning，无"取消默认"IPC）；草稿设默认被拒（先保存）；保存后 defaultChoice 从行数据重同步
+
+### E2E 过渡态归责 + 设默认闭环实测
+- 全量 E2E 撞上 T15 替换 PosView/SalesHistoryView 占位弹窗的瞬间（view 已换新、spec 更新中）→ pos.spec/sales-history.spec 各 1 例失败为 T15 领地过渡态；我的 template-editor.spec 9/9 独立绿
+- **设默认→结账预览闭环实测 PASS**：E2E 末用例探测 printing:preview handler（renderer 侧 invoke 探测法）——T15 已接线 → 真实结账 → 预览弹窗含本模板特征行 'E2E专用模板标记'（打印链路消费默认模板的端到端证明）；T15 未合并环境的 skip 分支保留（appendFileSync 记录 evidence）
+- "刷新页面值保持"用 SPA 路由离开再回来（T8 page.reload 竞态规避惯例）；autoSelect 恒选默认模板
