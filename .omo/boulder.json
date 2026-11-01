@@ -8,7 +8,7 @@
       "plan_name": "pos-electron-app",
       "status": "active",
       "started_at": "2026-11-01T12:16:46.416Z",
-      "updated_at": "2026-11-01T15:37:34.843Z",
+      "updated_at": "2026-11-01T16:38:21.044Z",
       "session_ids": [
         "opencode:ses_e69b3be88ffecJQjiNlFNXdRtH"
       ],
@@ -94,6 +94,30 @@
           "status": "completed",
           "ended_at": "2026-11-01T15:37:34.843Z",
           "elapsed_ms": 127882
+        },
+        "todo:20": {
+          "task_key": "todo:20",
+          "task_label": "20",
+          "task_title": "Windows CI 完善 + NSIS 打包 + 真机验证清单",
+          "session_id": "opencode:ses_e683d18c5ffex2PkwJx7q370qT",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-11-01T16:00:46.699Z",
+          "started_at": "2026-11-01T16:00:46.698Z",
+          "status": "completed",
+          "ended_at": "2026-11-01T16:00:46.699Z",
+          "elapsed_ms": 1
+        },
+        "final-wave:f1": {
+          "task_key": "final-wave:f1",
+          "task_label": "F1",
+          "task_title": "**Plan Compliance Audit** — `oracle`",
+          "session_id": "opencode:ses_e685f5755ffe2fRa2axLt3Uxml",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "started_at": "2026-11-01T16:04:18.313Z",
+          "status": "running",
+          "updated_at": "2026-11-01T16:38:21.045Z"
         }
       }
     }
@@ -101,7 +125,7 @@
   "active_plan": "/home/wenshi/codeSpace/selling-electron/.omo/plans/pos-electron-app.md",
   "started_at": "2026-11-01T12:16:46.416Z",
   "status": "active",
-  "updated_at": "2026-11-01T15:37:34.843Z",
+  "updated_at": "2026-11-01T16:38:21.044Z",
   "session_ids": [
     "opencode:ses_e69b3be88ffecJQjiNlFNXdRtH"
   ],
@@ -187,6 +211,30 @@
       "status": "completed",
       "ended_at": "2026-11-01T15:37:34.843Z",
       "elapsed_ms": 127882
+    },
+    "todo:20": {
+      "task_key": "todo:20",
+      "task_label": "20",
+      "task_title": "Windows CI 完善 + NSIS 打包 + 真机验证清单",
+      "session_id": "opencode:ses_e683d18c5ffex2PkwJx7q370qT",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-11-01T16:00:46.699Z",
+      "started_at": "2026-11-01T16:00:46.698Z",
+      "status": "completed",
+      "ended_at": "2026-11-01T16:00:46.699Z",
+      "elapsed_ms": 1
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**Plan Compliance Audit** — `oracle`",
+      "session_id": "opencode:ses_e685f5755ffe2fRa2axLt3Uxml",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "started_at": "2026-11-01T16:04:18.313Z",
+      "status": "running",
+      "updated_at": "2026-11-01T16:38:21.045Z"
     }
   },
   "agent": "atlas"
