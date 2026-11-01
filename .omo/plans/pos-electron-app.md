@@ -1215,7 +1215,7 @@ Max Concurrent: 6（Wave 1b/2a）
   **Commit**: YES
   - Message: `feat(sales): 结账与作废事务核心（原子性+kill-point 测试）`
 
-- [ ] 11. 收银台 UI（扫码 + 双击加购 + 购物车编辑 + 合计）
+- [x] 11. 收银台 UI（扫码 + 双击加购 + 购物车编辑 + 合计）
 
   **What to do**:
   - `PosView.vue` 布局：左 60% 商品搜索区（搜索框[自动聚焦，扫码枪焦点锚点] + 结果表格[名称/条码/库存/默认售价]，行**双击**→加购）+ 右 40% 购物车（CartPanel：行[商品名/数量 el-input-number/单价 el-input 元两位小数/小计/删除]、合计行、清空按钮、结账按钮[空车 disabled]）

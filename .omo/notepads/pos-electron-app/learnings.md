@@ -430,3 +430,29 @@
 ### 共享装配文件代持记录（F4 审计归因用）
 - 本任务 commit 的 main/index.ts（attachScannerBridge 导入+装配两行）与 preload index.ts/index.d.ts（onBarcode 段）含 **Task 11 并行未提交的扫码桥接线**（T5 交付的装配点）——按"先提交者代持"先例一并提交（共享文件无领地边界）；T11 自有文件（scanner/、cart.store、组件测试）未上船，T11 提交时归因对照本条
 - ★ 共享文件撞行实录（第二次，比 T8/T9/T10 那次更隐蔽）：T11 加 attachScannerBridge import 时**撞掉了我刚写入的 `import { registerReportsIpc }`**——注册行还在、import 行消失 → tsc TS2552；更险的是 `npm run typecheck | tail; echo $?` 的 **$? 取的是 tail 退出码（假绿）**——门禁必须 `npm run typecheck >/dev/null 2>&1; echo $?` 直存变量。撞行后修复=只补自己的行，不动对方段落
+
+## Task 11 收银台落地记录（2026-11-01）
+
+### ★★ el-input 受控回吞陷阱（单价编辑必读，T15/T16 表单复用前必看）
+- **现象**：CartPanel 单价用 `<el-input :model-value="formatMoney(cents)">`（不监听 update:model-value 意图 blur 提交）→ Playwright fill('2.50') 后 input.value 神秘回滚为 '3.50'（实测 `after fill, value = 3.50`）
+- **根因（element-plus input 源码）**：handleInput 内 `emit('update:modelValue')` 之后 `await nextTick(); setNativeInputValue()` 强制把 input.value 回写为 `String(props.modelValue)`——父组件不 v-model 回写时（受控只读），程序化输入必被回吞；真实键入同样会在 nextTick 被吞（焦点在时的 userInput 不保护 el-input，那是 input-number 的机制）
+- **正解**：**单价用 el-input-number（元浮点 + `Math.round(yuan*100)` 边界转换 + precision 2 + controls=false）**——T8 默认售价同款模式，其内部 userInput 在聚焦期保护显示、blur 自管提交（handleInputChange 组件级，不依赖浏览器 dirty flag），fill+blur 实证可用
+- 同族坑：**el-input 的原生 change 事件依赖浏览器 dirty flag**——Playwright fill 是程序化赋值不置 dirty，blur 不触发 change（实测 NATIVE CHANGE 不 fire）；el-input-number 不受影响（自管 blur）
+
+### ★ S6 注入 evaluate 签名实证（修正早前 learnings 模板）
+- `electronApp.evaluate(fn, arg)` 运行时实际调用 `fn(electron模块, arg)`——**第一参数就是 `require('electron')` 模块本身**（实测 keys: BrowserWindow/app/dialog/ipcMain…；官方文档示例 `({ app }) => app.getPath()` 解构的就是它）；TS 类型 `PageFunctionOn<ElectronType, Arg, R> = (on, arg2) => R` 两参签名直接匹配
+- **正解模板**：`electronApp.evaluate(async (electron, { code }) => { const wc = electron.BrowserWindow.getAllWindows()[0]?.webContents; … }, { code })`——早前 learnings 的 `from.windows()` 写法无此 API（`from` 即 electron 模块，无 windows() 方法）
+- 注入后字符不进入聚焦输入框（keyDown 无 text 不产生 input 事件），但 **Enter keyDown 会到达聚焦元素**——见下条焦点安全
+
+### ★ E2E 焦点安全：fill 后必须 blur()，严禁 Tab 遍历
+- **扫码注入 + 表单混合场景的隐形炸弹**：fill('3') 后按 Tab 会把焦点送进行内删除按钮/结账按钮；S6 扫码注入的结尾 Enter keyDown 到达聚焦元素 → **误点删除行/误触结账**。Tab 遍历在此页面 = 不可预测的状态污染
+- **正解**：`locator.fill(v)` 后 `locator.blur()`（`node.blur()` 派发真实 blur 事件，el-input-number 的组件级 blur 处理照常触发提交）；BarcodeInput **不处理 Enter**（扫码唯一入口 = 主进程桥，双路径消费同一次扫码 = 重复加购）
+
+### 收银台工程结论（T15 消费必读）
+- **结账成功占位 dialog**（PosView 内，title='结账成功'）：单号/合计/件数 + `<pre>` JSON 全量 SaleDetail——T15 替换点：`checkout()` 内 `sales:checkout` 返回后、`cart.clear()` 前，把 dialog 换成 printing:preview 真预览窗口；结构已按"单点替换"组织
+- **cart.store**：`stockByProduct` 快照（加购时点库存，行内"库存不足(负库存将产生)"提示数据源——D2 仅提示不阻断）；`subtotalCents(item)` 为 action 而非 getter（参数化行）；`updateQty/updatePrice` 无效输入静默忽略（Number.isInteger + 下界守卫，不产生半状态）
+- **typedInvoke 首个落地视图**：`createTypedInvoke((ch, p) => window.api.invoke(ch, p))` 在 PosView 顶层构造——products:list/sales:checkout 全走 typed 契约（G8）；`res: Sale` 运行时是 SaleDetail 超集，`as SaleDetail` 下行 cast 取 items
+- **共享文件代持**：main/index.ts（attachScannerBridge 装配）+ preload index.ts/index.d.ts（onBarcode）已被 T14 的 2437d6f 先行代持提交（T14 learnings L430 已双向记录）；本任务 commit 仅含自有文件 + smoke.spec '/pos' 追加
+- toContainText 锚点正则坑：`/^\d{8}-\d{4}$/` 撞「单号 」前缀必败——含前缀文案用 `toHaveText(/单号 \d{8}-\d{4}/)`
+- vue-tsc 对模板内联事件 handler 参数**不做上下文类型推断**（`(v) => f(v)` 报 TS7006 隐式 any）——模板内需显式注解 `(v: number | undefined) => …`（Vue 3.3+ 模板支持 TS 语法）；`:row-class-name` 等复杂表达式抽 script 方法（同 T8 模式）
+- E2E 断言金额显示用 `toHaveValue('3.50')`（el-input-number 精度 2 显示）与 `.cart-row__subtotal` 文本（formatMoney 恰 2 位小数）双层验证——显示层与 store 整数分由 DB 断言闭环（total_cents=1700 硬校验）
