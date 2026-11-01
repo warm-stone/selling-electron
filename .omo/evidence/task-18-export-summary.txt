@@ -1,5 +1,5 @@
 Task 18 报表导出闭环（E2E_EXPORT_DIR 钩子直写，exceljs/zip 读回断言全通过）
-导出目录: /tmp/opencode/e2e-exports-SI4Jab
+导出目录: /tmp/e2e-exports-zox08r
 日报（2026-11-02）: 日报2026-11-02.txt / .xlsx / .docx —— 汇总 17.50 元 / 2 单（voided 600 分剔除）
   xlsx 汇总!B2 = 17.5（数值+numFmt 0.00）；明细 sheet 2 行
   txt 含「总销售额: 17.50 元」；docx PK zip 魔数
