@@ -34,11 +34,6 @@ function ymd(offsetDays: number): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
-/** 测试机本地月份 'YYYY-MM' */
-function ym(offsetDays: number): string {
-  return ymd(offsetDays).slice(0, 7)
-}
-
 /** yyyyMMdd 紧凑形态（sale_no 日期前缀——D18） */
 function ymdCompact(offsetDays: number): string {
   return ymd(offsetDays).replaceAll('-', '')
@@ -46,23 +41,71 @@ function ymdCompact(offsetDays: number): string {
 
 const TODAY = ymd(0)
 const YESTERDAY = ymd(-1)
-const TODAY_MONTH = ym(0)
-const YESTERDAY_MONTH = ym(-1)
-/** 昨日与今日是否同月（月初 1 号运行时 false——昨日落在上月） */
-const SAME_MONTH = YESTERDAY_MONTH === TODAY_MONTH
 
 const SALE_A_NO = `${ymdCompact(0)}-0001` // 今日单 1：completed，可乐×2 + 雪碧×1 = 10.00
 const SALE_B_NO = `${ymdCompact(0)}-0002` // 今日单 2：completed，薯片×1 = 7.50
 const SALE_V_NO = `${ymdCompact(0)}-0003` // 今日单 3：voided，雪碧×2 = 6.00（汇总剔除）
 const SALE_D_NO = `${ymdCompact(-1)}-0001` // 昨日单：completed，可乐×1 + 雪碧×1 = 6.50
 
-// ── 月报动态期望（当日 + 昨日两笔 completed 单的组合）──
-const MONTH_TOTAL_CENTS = SAME_MONTH ? 1750 + 650 : 1750
-const MONTH_ORDERS = SAME_MONTH ? 3 : 2
-const MONTH_BUCKETS = SAME_MONTH ? 2 : 1
-const PREV_MONTH_TOTAL_CENTS = SAME_MONTH ? 1750 + 650 : 650
-const PREV_MONTH_ORDERS = SAME_MONTH ? 3 : 1
-const PREV_MONTH_BUCKETS = SAME_MONTH ? 2 : 1
+// ── 月报期望（F3 修复）：由 seed 单分布动态聚合，与运行日期解耦 ──
+//
+// 期望不再按「今天是否 1 号」写日历分支（原分支把「上月 shortcut」当成
+// 「昨日所在月」——仅 1 号重合，月中运行期望倒置）。唯一真相源是 seed 的
+// completed 单落月分布，monthAgg(目标月) 对它聚合；运行日期只决定 seed 单
+// 落在哪个月，期望与 UI 实际值恒同源。
+//
+// 日期稳定性推演（seed completed 单：TODAY×2 [1000+750] + YESTERDAY×1 [650]）：
+// - 每月 1 号运行（昨日=上月末日，跨月）：本月 17.50/2单/1桶；上月 6.50/1/1
+// - 月中/月末运行（昨日同月）：本月 24.00/3/2；上月（上一日历月，无 seed 单）0.00/0/0
+// - 跨年 1-01 运行（昨日=去年 12-31）：上月（setMonth(-1)=去年 12 月）6.50/1/1
+//   （setMonth 负数自动跨年进位）
+// 任意日期下「UI 实际值」与「期望」都由同一批 seed 单落月决定——不存在分支倒置窗口。
+
+/** seed 的 completed 单分布（金额分；与 seedDatabase 插入的单据一一对应） */
+const SEED_COMPLETED: ReadonlyArray<{ day: string; cents: number }> = [
+  { day: TODAY, cents: 1000 }, // saleA
+  { day: TODAY, cents: 750 }, // saleB
+  { day: YESTERDAY, cents: 650 } // saleD
+]
+
+function monthOf(day: string): string {
+  return day.slice(0, 7)
+}
+
+interface MonthExpectation {
+  /** 元字符串（'17.50'——与汇总卡显示一致） */
+  total: string
+  orders: number
+  /** 分桶行数（仅含有销售的日） */
+  buckets: number
+}
+
+function monthAgg(month: string): MonthExpectation {
+  const hits = SEED_COMPLETED.filter((s) => monthOf(s.day) === month)
+  const totalCents = hits.reduce((sum, s) => sum + s.cents, 0)
+  return {
+    total: (totalCents / 100).toFixed(2),
+    orders: hits.length,
+    buckets: new Set(hits.map((s) => s.day)).size
+  }
+}
+
+/** 「本月」shortcut 目标月（今天所在月） */
+const THIS_MONTH = monthOf(TODAY)
+
+/**
+ * 「上月」shortcut 目标月——与 ReportsView monthDate(-1) 同算法（setMonth(-1)），
+ * 即**上一个日历月**（非「昨日所在月」——两者仅每月 1 号重合）。
+ * 月末 31 号的 JS 滚月行为（如 3-31 setMonth(-1) → 3-03 → '2026-03'）两侧
+ * 同算法复制，期望恒与 UI 实际选中的月同步。
+ */
+function prevCalendarMonth(): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - 1)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
+}
+
+const PREV_MONTH = prevCalendarMonth()
 
 /** 导出目录（T17 钩子）：/tmp/opencode 下按次隔离（预批准临时区） */
 const EXPORT_DIR = mkdtempSync(join('/tmp/opencode', 'e2e-exports-'))
@@ -266,18 +309,19 @@ test.describe.serial('Task 18：报表查看与导出', () => {
     const { page } = app
     await page.getByRole('tab', { name: '月报' }).click()
 
+    const expectThis = monthAgg(THIS_MONTH)
     const stats = monthlyStatValues(page)
-    await expect(stats.nth(0)).toHaveText((MONTH_TOTAL_CENTS / 100).toFixed(2))
-    await expect(stats.nth(1)).toHaveText(String(MONTH_ORDERS))
+    await expect(stats.nth(0)).toHaveText(expectThis.total)
+    await expect(stats.nth(1)).toHaveText(String(expectThis.orders))
 
-    // 分桶：仅含有销售的日（今日桶必有；昨日桶视跨月而定）
+    // 分桶：仅含有销售的日（今日桶必有；昨日桶仅当昨日同月时可见）
     const rows = monthlyRows(page)
-    await expect(rows).toHaveCount(MONTH_BUCKETS)
+    await expect(rows).toHaveCount(expectThis.buckets)
     const todayRow = rows.filter({ hasText: TODAY })
     await expect(todayRow).toBeVisible()
     await expect(todayRow.locator('td').nth(1)).toHaveText('17.50')
     await expect(todayRow.locator('td').nth(2)).toHaveText('2')
-    if (SAME_MONTH) {
+    if (monthOf(YESTERDAY) === THIS_MONTH) {
       const yesterdayRow = rows.filter({ hasText: YESTERDAY })
       await expect(yesterdayRow.locator('td').nth(1)).toHaveText('6.50')
       await expect(yesterdayRow.locator('td').nth(2)).toHaveText('1')
@@ -288,17 +332,25 @@ test.describe.serial('Task 18：报表查看与导出', () => {
     await expect(page.locator('[data-testid="monthly-export"] button')).toBeEnabled()
   })
 
-  test('月报切月联动：上月快捷 → 昨日所在月数据', async () => {
+  test('月报切月联动：上月快捷 → 上月期望（seed 分布推导，任意运行日期稳定）', async () => {
     const { page } = app
     await page.locator('.reports__date-picker--monthly').click()
     const shortcut = page.locator('.el-picker-panel__shortcut').filter({ hasText: '上月' })
     await expect(shortcut).toBeVisible()
     await shortcut.click()
 
+    const expectPrev = monthAgg(PREV_MONTH)
     const stats = monthlyStatValues(page)
-    await expect(stats.nth(0)).toHaveText((PREV_MONTH_TOTAL_CENTS / 100).toFixed(2))
-    await expect(stats.nth(1)).toHaveText(String(PREV_MONTH_ORDERS))
-    await expect(monthlyRows(page)).toHaveCount(PREV_MONTH_BUCKETS)
+    await expect(stats.nth(0)).toHaveText(expectPrev.total)
+    await expect(stats.nth(1)).toHaveText(String(expectPrev.orders))
+    await expect(monthlyRows(page)).toHaveCount(expectPrev.buckets)
+
+    // 月中/月末运行时上月无 seed 单（空月 0.00/0/0）——空态表格文案顺带锁定
+    if (expectPrev.buckets === 0) {
+      const empty = page.locator('[data-testid="monthly-table"] .el-empty')
+      await expect(empty).toBeVisible()
+      await expect(empty).toContainText('当月无销售')
+    }
   })
 
   test('空数据日（2030-01-01）：汇总 0.00/0 + el-empty + 导出按钮仍可用', async () => {
@@ -353,13 +405,13 @@ test.describe.serial('Task 18：报表查看与导出', () => {
 
     await page.screenshot({ path: `${EVIDENCE_DIR}/task-18-reports-e2e.png`, fullPage: true })
 
-    // 月报分桶证据（附加；上月测试后 activeMonth 仍在昨日月——先切回本月）
+    // 月报分桶证据（附加；上月测试后 activeMonth 仍在上月——先切回本月）
     await page.getByRole('tab', { name: '月报' }).click()
     await page.locator('.reports__date-picker--monthly').click()
     const thisMonth = page.locator('.el-picker-panel__shortcut').filter({ hasText: '本月' })
     await expect(thisMonth).toBeVisible()
     await thisMonth.click()
-    await expect(monthlyStatValues(page).nth(0)).toHaveText((MONTH_TOTAL_CENTS / 100).toFixed(2))
+    await expect(monthlyStatValues(page).nth(0)).toHaveText(monthAgg(THIS_MONTH).total)
     await page.screenshot({ path: `${EVIDENCE_DIR}/task-18-reports-monthly.png`, fullPage: true })
 
     // 导出文件副本（4 个：日报三格式 + 空数据日 txt）
@@ -369,6 +421,8 @@ test.describe.serial('Task 18：报表查看与导出', () => {
     copyFileSync(join(EXPORT_DIR, '日报2030-01-01.txt'), `${EVIDENCE_DIR}/task-18-empty-day.txt`)
 
     // 文字化证据：导出闭环摘要
+    const expectThis = monthAgg(THIS_MONTH)
+    const expectPrev = monthAgg(PREV_MONTH)
     writeFileSync(
       `${EVIDENCE_DIR}/task-18-export-summary.txt`,
       [
@@ -378,8 +432,9 @@ test.describe.serial('Task 18：报表查看与导出', () => {
         `  xlsx 汇总!B2 = 17.5（数值+numFmt 0.00）；明细 sheet 2 行`,
         `  txt 含「总销售额: 17.50 元」；docx PK zip 魔数`,
         `空数据日（2030-01-01）: 日报2030-01-01.txt —— 含「总销售额: 0.00 元」「（无销售记录）」`,
-        `月报（${TODAY_MONTH}）: 汇总 ${(MONTH_TOTAL_CENTS / 100).toFixed(2)} 元 / ${MONTH_ORDERS} 单 / ${MONTH_BUCKETS} 桶`,
-        `上月（${YESTERDAY_MONTH}）联动: ${(PREV_MONTH_TOTAL_CENTS / 100).toFixed(2)} 元 / ${PREV_MONTH_ORDERS} 单 / ${PREV_MONTH_BUCKETS} 桶`
+        `月报（${THIS_MONTH}）: 汇总 ${expectThis.total} 元 / ${expectThis.orders} 单 / ${expectThis.buckets} 桶`,
+        `上月（${PREV_MONTH}）联动: ${expectPrev.total} 元 / ${expectPrev.orders} 单 / ${expectPrev.buckets} 桶`,
+        `（期望由 seed 单落月分布动态推导——任意运行日期稳定，F3 修复）`
       ].join('\n')
     )
   })

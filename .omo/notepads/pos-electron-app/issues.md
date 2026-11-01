@@ -24,3 +24,7 @@
 - [已记录] **templates:update 契约无 paper_width 字段**（T3 契约冻结）——纸宽变更经 config_json 模板主体生效，repo 同步 paper_width 列（列=主体的投影）；勿按"列不可变"或"透传字段"误判
 - [已记录] **全量 E2E 的 pos.spec/sales-history.spec 失败为 T15 替换占位弹窗过渡态**（view 已换新、spec 同步更新中；T15 更新后的断言以'小票预览'弹窗为锚）——归责 T15；共享质量门以 T15 完成后的全绿快照为准
   - **T15 收口（2026-11-01）**：过渡态已消除——pos.spec/sales-history.spec 断言已随新弹窗更新，全量 E2E 63/63 全绿（含 template-editor.spec 9/9 与 T16 的「设默认→结账预览」交叉闭环用例）
+
+## Task 18 修复轮（F3 终审 QA，2026-11-02）
+- [x] [已修复] **月报 E2E 期望日期敏感倒置**——「上月」shortcut（ReportsView monthDate(-1) = 上一个日历月）与「昨日所在月」ym(-1) 仅每月 1 号重合：月中运行时上月实际 0.00，而原 `PREV_MONTH_* = SAME_MONTH ? 本月总额 : 昨日单` 分支期望 24.00 → 仅 1 号跑绿（serial 连带 2 用例未跑）。修复：期望改为 `monthAgg(目标月)` 对 seed 单落月分布动态聚合（今日 1000+750 + 昨日 650——期望与 UI 实际值同源单一真相源，消灭运行日期分支）；「上月」目标月与 UI 同 setMonth(-1) 算法复制（3-31 滚月两侧一致恒同步）。日期稳定性验证：五日期机器推演（1 号/月中/月末/跨年 1-01/3-31 滚月）5/5 PASS（`.omo/evidence/task-18-date-stability-verify.mjs/.txt`）+ spec 注释推演；spec 两轮 10/10、全量 E2E 63/63、vitest 423、typecheck 整链全绿。切月联动本身经 F3 独立 QA 旁证无缺陷
+- [ ] **[F3 观察，非 T18 范围] 新 DB 未结账直接进模板页显示空列表**——模板域 lazy seed（T15 的 seedDefaults）只在 getDefault 触发、`templates:list` 不触发：新装应用先访问模板页看到空列表（与「内置默认模板」的用户预期不符；结账后经 getDefault 才出现）。建议：`templates:list` 也触发默认模板 seed，或列表空态给「新建默认模板」引导按钮。归属模板域（T15/T16 或后续迭代），**留给用户决定**是否调整
