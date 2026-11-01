@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type Database from 'better-sqlite3'
-import { initDatabase } from '../../../src/main/db/database'
+import { closeDatabase, initDatabase } from '../../../src/main/db/database'
 import {
   SaleServiceError,
   createSaleService
 } from '../../../src/main/services/sale.service'
+import { rmTempDirSync } from '../../helpers/cleanup'
 import type { Sale, StockMovement } from '../../../src/shared/types'
 
 // ── 测试脚手架 ──────────────────────────────────────────────
@@ -21,7 +22,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  // initDatabase 是模块级单例：不关闭则 Windows 上删 temp 目录 EBUSY
+  closeDatabase()
+  rmTempDirSync(dir)
 })
 
 function svc(): ReturnType<typeof createSaleService> {

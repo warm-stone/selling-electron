@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
-import { initDatabase, getDatabase } from '../../../src/main/db/database'
+import { closeDatabase, initDatabase, getDatabase } from '../../../src/main/db/database'
+import { rmTempDirSync } from '../../helpers/cleanup'
 
 const USER_TABLES = [
   'products',
@@ -37,17 +38,31 @@ function countTable(db: Database.Database, name: string): number {
 
 let dir: string
 
+/** 本文件自建连接登记（Windows 不可删打开中的文件：afterEach 先逐一 close 再删目录） */
+const openDbs: Database.Database[] = []
+
+/** 自建连接统一入口：登记进 openDbs，由 afterEach 收尾关闭（免逐测试手写 close） */
+function newDb(): Database.Database {
+  const db = new Database(join(dir, 'pos.db'))
+  openDbs.push(db)
+  return db
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'pos-migrator-'))
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  for (const db of openDbs) db.close()
+  openDbs.length = 0
+  // initDatabase 是模块级单例：不关闭则 Windows 上删 temp 目录 EBUSY
+  closeDatabase()
+  rmTempDirSync(dir)
 })
 
 describe('migrator：迁移执行器', () => {
   it('全新 DB 迁移后 user_version=1 且 8 张用户表按具名断言齐全', () => {
-    const db = new Database(join(dir, 'pos.db'))
+    const db = newDb()
     migrate(db)
 
     expect(db.pragma('user_version', { simple: true })).toBe(1)
@@ -57,7 +72,6 @@ describe('migrator：迁移执行器', () => {
       expect(names, `缺少用户表 ${t}`).toContain(t)
     }
     expect(namedUserTables(db)).toHaveLength(8)
-    db.close()
   })
 
   it('幂等：同一文件二次迁移不重复建表、user_version 保持 1', () => {
@@ -67,18 +81,17 @@ describe('migrator：迁移执行器', () => {
     migrate(first)
     first.close()
 
-    const second = new Database(dbPath)
+    const second = newDb()
     migrate(second)
 
     expect(second.pragma('user_version', { simple: true })).toBe(1)
     for (const t of USER_TABLES) {
       expect(countTable(second, t), `${t} 应只存在一份`).toBe(1)
     }
-    second.close()
   })
 
   it('DDL 保真：created_at 默认值走 localtime 而非 UTC', () => {
-    const db = new Database(join(dir, 'pos.db'))
+    const db = newDb()
     migrate(db)
     db.prepare('INSERT INTO products (name) VALUES (?)').run('本地时间抽查')
 
@@ -93,7 +106,6 @@ describe('migrator：迁移执行器', () => {
       String(now.getDate()).padStart(2, '0')
     ].join('-')
     expect(row.created_at.startsWith(localDate)).toBe(true)
-    db.close()
   })
 })
 

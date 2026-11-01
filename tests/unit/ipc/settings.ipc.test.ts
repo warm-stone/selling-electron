@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -13,15 +13,21 @@ import {
   rowsToAppSettings
 } from '../../../src/main/ipc/settings.ipc'
 import { TEST_PRINT_BYTES, toPrintSettings } from '../../../src/main/ipc/printing.ipc'
+import { rmTempDirSync } from '../../helpers/cleanup'
 
 let dir: string
+
+/** 本文件打开的连接登记（Windows 不可删打开中的文件：afterEach 先逐一 close 再删目录） */
+const openDbs: Database.Database[] = []
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'pos-settings-ipc-'))
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  for (const db of openDbs) db.close()
+  openDbs.length = 0
+  rmTempDirSync(dir)
 })
 
 /** 1×1 透明 PNG（valid 头，dataURL 断言用） */
@@ -126,6 +132,7 @@ describe('settings.ipc 纯映射：appSettingsPatchToKv（settings:set 序列化
 describe('settings.ipc Logo 文件助手', () => {
   it('importLogoFile：复制到 logosDir/logo.png + 写 settings.logo_path（不存 DB BLOB）', async () => {
     const db = new Database(join(dir, 'pos.db'))
+    openDbs.push(db)
     migrate(db)
     const repo = createSettingsRepo(db)
 
@@ -139,7 +146,6 @@ describe('settings.ipc Logo 文件助手', () => {
     expect(existsSync(dest)).toBe(true)
     // 源被复制（保留），目标字节一致
     expect(repo.get('logo_path')).toBe(dest)
-    db.close()
   })
 
   it('readLogoDataUrl：有效 png → data:image/png;base64 前缀 dataURL', async () => {

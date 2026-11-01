@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type Database from 'better-sqlite3'
-import { initDatabase } from '../../../src/main/db/database'
+import { closeDatabase, initDatabase } from '../../../src/main/db/database'
 import {
   createPurchaseService,
   type PurchaseService
 } from '../../../src/main/services/purchase.service'
 import { createPurchaseRepo } from '../../../src/main/db/repositories/purchase.repo'
 import { insertProduct } from '../../fixtures/seed'
+import { rmTempDirSync } from '../../helpers/cleanup'
 import type { StockMovement } from '../../../src/shared/types'
 
 let dir: string
@@ -69,7 +70,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  // initDatabase 是模块级单例：不关闭则 Windows 上删 temp 目录 EBUSY
+  closeDatabase()
+  rmTempDirSync(dir)
 })
 
 // ═══════════ 事务原子性（TDD 核心：部分失败全回滚）═══════════

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { initDatabase } from '../../../src/main/db/database'
+import { closeDatabase, initDatabase } from '../../../src/main/db/database'
 import { SEED_PRODUCTS, seedDatabase } from '../../fixtures/seed'
+import { rmTempDirSync } from '../../helpers/cleanup'
 import type Database from 'better-sqlite3'
 
 let dir: string
@@ -15,7 +16,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  // initDatabase 是模块级单例：不关闭则 Windows 上删 temp 目录 EBUSY（Linux 允许 unlink 打开中的文件，掩盖泄漏）
+  closeDatabase()
+  rmTempDirSync(dir)
 })
 
 describe('fixtures/seed：种子数据', () => {

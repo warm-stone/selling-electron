@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { SerialChannel } from '../../../../src/main/printing/channels/serial.channel'
+import { rmTempDirSync } from '../../../helpers/cleanup'
 
 /**
  * Task 7 — serial.channel 单元测试。
@@ -13,7 +14,7 @@ import { SerialChannel } from '../../../../src/main/printing/channels/serial.cha
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pos-serial-test-'))
 
 afterAll(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
+  rmTempDirSync(tmpDir)
 })
 
 describe('SerialChannel', () => {

@@ -38,6 +38,17 @@ export function getDatabase(): Database.Database {
   return current
 }
 
+/**
+ * 关闭当前单例连接（幂等：未初始化时 no-op）。
+ * 供测试 teardown 使用——Windows 不允许 unlink 打开中的文件，
+ * 删除临时 DB 目录前必须先关闭连接（否则 rmSync EBUSY）。
+ */
+export function closeDatabase(): void {
+  current?.close()
+  current = null
+  currentPath = null
+}
+
 function resolveUserDataDir(): string {
   // 延迟 require（而非顶部 import）：本模块需可在 vitest 纯 Node 环境导入，只有未传 dir 时才真正触碰 electron
   const electron = require('electron') as { app: { getPath(name: string): string } }

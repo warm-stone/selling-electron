@@ -1,23 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
 import { createSettingsRepo } from '../../../src/main/db/repositories/settings.repo'
+import { rmTempDirSync } from '../../helpers/cleanup'
 
 let dir: string
+
+/** 本文件打开的连接登记（Windows 不可删打开中的文件：afterEach 先逐一 close 再删目录） */
+const openDbs: Database.Database[] = []
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'pos-settings-repo-'))
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  for (const db of openDbs) db.close()
+  openDbs.length = 0
+  rmTempDirSync(dir)
 })
 
 function freshDb(): Database.Database {
   const db = new Database(join(dir, 'pos.db'))
+  openDbs.push(db)
   migrate(db)
   return db
 }

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
 import { createReportService } from '../../../src/main/services/report.service'
 import { buildReportExportInput } from '../../../src/main/ipc/reports-export.ipc'
+import { rmTempDirSync } from '../../helpers/cleanup'
 
 /**
  * Task 14 — reports:export 数据侧回归（由 T17 的 export/report-loader.test.ts 迁移而来）：
@@ -20,7 +21,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  rmTempDirSync(dir)
 })
 
 function createDb(): Database.Database {

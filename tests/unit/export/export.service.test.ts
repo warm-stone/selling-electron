@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportReport } from '../../../src/main/export/export.service'
 import type { ExportDeps, SaveDialogOptionsLike, SaveDialogResultLike } from '../../../src/main/export/export.service'
 import { SAMPLE_DAILY_INPUT, SAMPLE_MONTHLY_INPUT } from './export-report.fixture'
+import { rmTempDirSync } from '../../helpers/cleanup'
 
 /**
  * Task 17 — export.service：
@@ -56,7 +57,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  rmSync(e2eDir, { recursive: true, force: true })
+  rmTempDirSync(e2eDir)
 })
 
 describe('export.service：正常路径（dialog 确认保存）', () => {
