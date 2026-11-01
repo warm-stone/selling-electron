@@ -120,12 +120,21 @@ test.describe.serial('Task 9：进货入库全链路', () => {
     const rows = page.locator('.create-form__table .el-table__row')
     await expect(rows).toHaveCount(1)
 
-    // ARIA role 定位选项：隐藏 dropdown 的选项不在 a11y 树，天然过滤 DOM 残留；
-    // 不用 .el-select-dropdown__item 定位——关闭态 dropdown 的 DOM 残留会让 .first() 命中隐藏元素
+    // el-select 选项定位坑（全量 E2E 实测 strict violation 根因）：
+    // ① popper teleport 到 body 后关闭即 DOM 残留（外层 .el-select__popper display:none，
+    //    item 本体永远 display:block）——按 class/role 全局定位必命中残留；
+    // ② 关闭/打开都是渐隐动画——动画重叠窗口内残留项仍 :visible、新项可能未展开到非零框，
+    //    ':visible + .first()/.last()/getByRole' 都会拿错目标，toHaveCount(1) 也会在"假唯一"
+    //    窗口（残留可见+新项未可见）提前通过。
+    // 稳定方案：aria-controls 锚点——每行 select 的内部 input[aria-controls] 精确指向本
+    // 下拉的 listbox（UL.el-select-dropdown__list）元素 id，按 id 圈定选项域，零时序/零残留歧义
     const selectProduct = async (rowIdx: number, keyword: string): Promise<void> => {
       const row = rows.nth(rowIdx)
+      const listboxId = await row.locator('.el-select input').getAttribute('aria-controls')
       await row.locator('.el-select').click()
-      await page.getByRole('option', { name: new RegExp(keyword) }).click()
+      const option = page.locator(`#${listboxId} .el-select-dropdown__item`, { hasText: keyword })
+      await expect(option).toBeVisible()
+      await option.first().click()
     }
 
     // 行 1：测试可乐 qty=10 cost=2.00

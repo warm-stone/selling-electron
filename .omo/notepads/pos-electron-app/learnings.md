@@ -372,3 +372,10 @@
 - **`/// <reference lib="dom" />` 文件级注入**：tests/e2e/*.spec.ts 的 `page.evaluate` 回调（location/getComputedStyle 等 DOM 全局）在浏览器执行，但 tsconfig.node.json 无 DOM lib——文件顶部 lib 三斜线指令为**单个文件**注入 DOM 声明（零 tsconfig/归属改动；Playwright 官方类型同款机制）。备选 rejected：改 evaluate 写法（回调必然用 DOM 全局，不可移）、tsconfig 拆分（动全局归属）
 - **typecheck `&&` 短路假绿**：`typecheck:node && typecheck:web` 在 node 侧失败时 web 侧不跑——并行任务提交时只看到自己侧的错误（T8 提交时 ProductsView 的 web 侧错误被短路掩盖，node 侧修复后暴露 11 个）。**提交门禁必须 `npm run typecheck` 整链通过（exit 0），不能只看自己侧**
 - **views → shared 相对路径是 3 级**（`../../../shared/...`）；4 级只适用于 components/receipt/ 的深度。同款层级坑第二次出现（T12 demo 页 → T8 ProductsView import type 路径）——**`import type` 编译期擦除使 build/E2E 完全无感，只有 vue-tsc 才暴露**（运行时零影响，纯类型层修复）
+
+### ★★ Task 9 fix：el-select 下拉选项定位的终极方案（四轮实测迭代，T11 收银台必读）
+- **修正此前错误结论**：本文件早前"getByRole('option') 是正解——隐藏 dropdown 的选项不在 a11y 树"**不完整**——popper 关闭是**渐隐动画**，动画中（未 display:none）的残留选项仍在 a11y 树/:visible，全量运行负载高时动画重叠窗口拉长 → strict violation（2 个匹配）或拿到残留目标（not stable→not visible 死等 30s）
+- **失败方案全谱（勿再试）**：`.first()`/`.last()`（DOM 顺序假设在动画重叠窗口失效）、`:visible` 过滤（动画中残留仍 :visible）、`getByRole('option')`（同 :visible 问题）、`toHaveCount(1)` 收敛断言（**"假唯一"窗口提前通过**：残留可见+新项未展开到非零框时 count=1 是残留的那个）
+- **实证细节**：隐藏的是外层 `.el-select__popper`（display:none + 0x0），`.el-select-dropdown__item` 本体永远 display:block——item 级 visibility 判定全靠边界框传递；popper 在 select 挂载时即 teleport（DOM 顺序=挂载顺序，与打开顺序无关）
+- **✅ 终极方案：aria-controls 锚点域**——每行 select 的内部 `input[aria-controls]` 静态精确指向本下拉的 listbox（`UL.el-select-dropdown__list`）元素 id：**click 前读 `getAttribute('aria-controls')`**（静态属性，不依赖展开态）→ `page.locator('#' + id + ' .el-select-dropdown__item', { hasText })` 圈定本域 → toBeVisible 等打开动画非零框 → .first().click()。零时序/零残留歧义，多行动态表格（动态行内嵌 select）唯一可靠模式
+- 证据链：debug spec 两轮 DOM dump（popper/popperIdx/popperDisplay/aria-controls 归属）实证全部中间态；修复后 purchases 5/5 两轮 + 全量 25/25 全绿
