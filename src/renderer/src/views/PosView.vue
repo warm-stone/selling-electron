@@ -3,7 +3,9 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import BarcodeInput from '@renderer/components/scanner/BarcodeInput.vue'
 import CartPanel from '@renderer/components/cart/CartPanel.vue'
+import ReceiptPreviewDialog from '@renderer/components/receipt/ReceiptPreviewDialog.vue'
 import { useCartStore } from '@renderer/stores/cart.store'
+import { usePrintingStore } from '@renderer/stores/printing.store'
 import { createTypedInvoke } from '../../../shared/types/ipc'
 import { formatMoney } from '../../../shared/utils/money'
 import type { Product, SaleDetail } from '../../../shared/types'
@@ -115,11 +117,10 @@ function flashSearchMiss(): void {
   }, MISS_FLASH_MS)
 }
 
-// ── 结账（占位成功 dialog——Task 15 替换为 printing:preview 真预览窗口）──
+// ── 结账（Task 15：成功回调 → printing:preview → ReceiptPreviewDialog）──
 
 const checkingOut = ref(false)
-const saleDialogVisible = ref(false)
-const lastSale = ref<SaleDetail | null>(null)
+const printing = usePrintingStore()
 
 async function checkout(): Promise<void> {
   if (cart.items.length === 0) return
@@ -131,9 +132,9 @@ async function checkout(): Promise<void> {
       unit_price_cents: it.unit_price_cents
     }))
     const sale = (await typedInvoke('sales:checkout', { items })) as SaleDetail
-    lastSale.value = sale
-    saleDialogVisible.value = true
+    // 销售已落库（G3 基线）：清车/刷新先于预览——预览或打印失败绝不影响已保存销售
     cart.clear()
+    void printing.openPreview(sale.id)
     await loadProducts()
   } catch (err) {
     ElMessage.error(extractIpcErrorMessage(err))
@@ -217,24 +218,8 @@ onBeforeUnmount(() => {
 
     <CartPanel class="pos-right" :checking-out="checkingOut" @checkout="void checkout()" />
 
-    <!-- 占位：结账成功 dialog（Task 15 替换为 printing:preview 真预览窗口 + 立即打印） -->
-    <el-dialog
-      v-model="saleDialogVisible"
-      title="结账成功"
-      width="440px"
-      align-center
-      destroy-on-close
-    >
-      <div v-if="lastSale" class="sale-summary">
-        <div class="sale-summary__no">单号 {{ lastSale.sale_no }}</div>
-        <div class="sale-summary__total">¥{{ formatMoney(lastSale.total_cents) }}</div>
-        <div class="sale-summary__count">共 {{ lastSale.item_count }} 件</div>
-        <pre class="sale-summary__json">{{ JSON.stringify(lastSale, null, 2) }}</pre>
-      </div>
-      <template #footer>
-        <el-button type="warning" @click="saleDialogVisible = false">完成</el-button>
-      </template>
-    </el-dialog>
+    <!-- Task 15：结账成功 → 小票预览弹窗（与销售记录重打共用，printing store 全局状态） -->
+    <ReceiptPreviewDialog />
   </section>
 </template>
 
@@ -326,47 +311,5 @@ onBeforeUnmount(() => {
 .pos-right {
   flex: 4;
   min-width: 0;
-}
-
-/* ── 结账成功占位（T15 替换点）── */
-.sale-summary {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.sale-summary__no {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: 0.04em;
-}
-
-.sale-summary__total {
-  font-size: 30px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--el-color-warning);
-}
-
-.sale-summary__count {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-}
-
-.sale-summary__json {
-  align-self: stretch;
-  margin: 10px 0 0;
-  padding: 10px 12px;
-  box-sizing: border-box;
-  max-height: 220px;
-  overflow: auto;
-  border-radius: var(--el-border-radius-small);
-  background: var(--el-fill-color-light);
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--el-text-color-regular);
 }
 </style>

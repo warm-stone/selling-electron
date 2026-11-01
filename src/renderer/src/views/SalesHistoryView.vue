@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import ReceiptPreviewDialog from '@renderer/components/receipt/ReceiptPreviewDialog.vue'
+import { usePrintingStore } from '@renderer/stores/printing.store'
 import { createTypedInvoke } from '../../../shared/types/ipc'
 import type { Sale, SaleDetail, SaleStatus } from '../../../shared/types/domain'
 
@@ -122,27 +124,15 @@ async function voidSale(sale: Sale): Promise<void> {
   }
 }
 
-// ── 重打小票（T15 打印编排挂接点：按钮 + saleId 传递）──
-// preload printing 段暂未暴露 preview（T15 实装 printing:preview 通道）：
-// 方法存在则透传调用（T15 接管后自然升级为真实预览，错误如实显示）；
-// 不存在则占位——点击不报错 + console.log + 提示 toast。
-// voided 单重打按钮保留可用（D19：作废单可重打，预览时模板加印'已作废'——由 T15 处理）。
+// ── 重打小票（Task 15 接线：与收银台结账共用同一预览弹窗）──
+// 原占位形态（window.api.printing?.preview 未暴露时 console.log + info toast）
+// 已随 preload printing 段实装自然升级：printing:preview → ReceiptPreviewDialog。
+// voided 单按钮保持可用（D19：主进程组装时模板 footer 前加印「已作废」段落）。
+
+const printing = usePrintingStore()
 
 async function reprint(sale: Sale): Promise<void> {
-  const printing = window.api.printing as unknown as
-    | { preview?: (saleId: number) => Promise<unknown> }
-    | undefined
-  const preview = printing?.preview?.bind(printing)
-  if (preview) {
-    try {
-      await preview(sale.id)
-    } catch (err) {
-      ElMessage.error(errorMessage(err))
-    }
-    return
-  }
-  console.log(`[printing:preview 占位] sale_id=${sale.id}（Task 15 打印编排接管）`)
-  ElMessage.info('打印功能集成中')
+  await printing.openPreview(sale.id)
 }
 
 // ── 工具 ──
@@ -278,6 +268,8 @@ function centsToYuan(cents: number): string {
         </el-table>
       </template>
     </el-dialog>
+    <!-- Task 15：重打预览弹窗（与收银台结账共用，printing store 全局状态） -->
+    <ReceiptPreviewDialog />
   </section>
 </template>
 

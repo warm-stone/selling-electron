@@ -315,18 +315,23 @@ test.describe.serial('Task 13：销售记录查询与作废', () => {
     }
   })
 
-  test('重打小票占位：voided 单按钮可用，点击出「打印功能集成中」不报错', async () => {
+  test('重打小票：voided 单按钮可用，点击打开预览弹窗（T15 接管占位；含「已作废」标记）', async () => {
     const { page } = app
     // D19：voided 单重打按钮保留可用
     const voidedRow = mainTableRows(page).filter({ hasText: SALE3_NO })
     const voidedReprint = voidedRow.getByRole('button', { name: '重打小票' })
     await expect(voidedReprint).toBeEnabled()
 
-    // 点击不报错（printing:preview 未实装 → 占位 toast；T15 接管后自然升级）
+    // T15 后占位升级为真预览：printing:preview → ReceiptPreviewDialog（点击不报错）
     await voidedReprint.click()
-    await expect(page.locator('.el-message--info')).toContainText('打印功能集成中')
+    const preview = page.locator('.el-dialog').filter({ hasText: '小票预览' })
+    await expect(preview).toBeVisible()
+    await expect(preview).toContainText(SALE3_NO)
+    await expect(preview).toContainText('已作废')
+    await preview.getByRole('button', { name: '取消' }).click()
+    await expect(preview).toBeHidden()
 
-    // completed 单按钮同样可用（仅断言 enabled，避免双 toast 叠加的 strict 冲突）
+    // completed 单按钮同样可用（仅断言 enabled，避免连续弹窗的叠加干扰）
     const completedRow = mainTableRows(page).filter({ hasText: SALE1_NO })
     await expect(completedRow.getByRole('button', { name: '重打小票' })).toBeEnabled()
   })

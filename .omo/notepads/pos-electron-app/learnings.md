@@ -515,3 +515,39 @@
 - 全量 E2E 撞上 T15 替换 PosView/SalesHistoryView 占位弹窗的瞬间（view 已换新、spec 更新中）→ pos.spec/sales-history.spec 各 1 例失败为 T15 领地过渡态；我的 template-editor.spec 9/9 独立绿
 - **设默认→结账预览闭环实测 PASS**：E2E 末用例探测 printing:preview handler（renderer 侧 invoke 探测法）——T15 已接线 → 真实结账 → 预览弹窗含本模板特征行 'E2E专用模板标记'（打印链路消费默认模板的端到端证明）；T15 未合并环境的 skip 分支保留（appendFileSync 记录 evidence）
 - "刷新页面值保持"用 SPA 路由离开再回来（T8 page.reload 竞态规避惯例）；autoSelect 恒选默认模板
+
+## Task 15 打印编排集成落地记录（2026-11-01）
+
+### ★ AppSettings「可直接喂」PrintSettings 是假象（T19 learnings 修正——strictNullChecks 陷阱）
+- T19 learnings 称"AppSettings → PrintSettings key 逐字一致可直接喂"——**不成立**：PrintSettings 的 `printer_name?: string`（string | undefined）容不下 AppSettings 的 `printer_name: string | null`（strictNullChecks 下 null ⊄ undefined），直接传 TS2345
+- 正解：print.service 内 `appSettingsToPrintSettings(s)` 归一（`?? ''` / `?? undefined`）；T19 的 toPrintSettings（ipc 边界防御）与它语义相同但签名不同（Partial 入参），两者并存勿合并——toPrintSettings 被 settings.ipc.test 锁定导出路径
+
+### ★ 打印成功后弹窗自动关闭的 E2E 时序坑（print-flow 首败根因）
+- store.print() 成功 → toast + close() **自动关弹窗**；E2E 若再点「取消」→ 目标已在关闭动画（not stable→detached）→ locator.click 30s 超时
+- 正解：成功路径断言 `expect(dialog).toBeHidden()`（自动关闭），取消点击只留给"取消/失败后仍在开"的路径
+
+### 组装链路（G7 同源铁律的落地形态）
+- **单一组装源**：`createPrintOrchestrator(deps).buildReceiptPayload()` 是预览与打印的唯一数据源——previewSale 只做 logoBuffer→dataURL 分叉、printSale 只做 →generateReceiptBytes→enqueuePrintJob；ReceiptVars 纯字符串（IPC 安全）、ReceiptPrintVars（含 logoBuffer Buffer）仅主进程
+- **DI 编排器**：deps = { getSaleDetail / getDefaultTemplate / getSettings / readLogoFile / createChannel? }——vitest 全 mock 零真打印机；`createChannel` 缺省 getChannel（测试注入捕获通道断言字节）
+- **串行队列实例级单例**：PrintQueue 在编排器实例内构建一次，包一个"send 时按当前设置解析通道"的 settings-bound lazy channel（`get name()` 委派）——连续 printSale 严格串行 + 设置变更下一次打印即生效（不必重建队列）；printSale 并发串行测试用门控 send 事件序锁定
+- **voided 标记组装期生效（D19）**：`withVoidedMark(template)` 在 buildReceiptPayload 里改模板副本（footer 前 insert '=== 已作废 ===' 倍高居中加粗）——预览与打印字节**同步**含标记（E2E 场景 3 双证）；原模板对象不可变（copy-on-write）
+- **Logo 读取条件化**：模板 header/footer 无 image 段落时不读文件（readLogoFile 零调用）；有段落且读失败 → null 优雅降级（同 T19 语义）
+- **坏 config_json 兜底**：`parseTemplateRow` 用 T16 的 isValidReceiptTemplate 做结构校验，脏 JSON/残缺结构按行声明纸宽回落 DEFAULT_TEMPLATES[paper_width]——T2 fixture `seedDefaultTemplate` 插的就是**非法最小结构**（仅 {paperWidth, cutPaper}），打印链路靠此兜底不崩
+
+### printing:preview res 的结构超集（T3 契约冻结下的第 4 例）
+- 契约 res 只声明 `{ template, sale }`；PreviewPayload 附加 data/vars/logoUrl——renderer 侧 `res as PrintingPreviewResult` 下传 cast（PosView `as SaleDetail` 同款）；preload 侧 PrintingPreviewResult 双声明（index.ts 实现 + index.d.ts 权威，ProductRow 先例）；renderer 经 `Awaited<ReturnType<typeof window.api.printing.preview>>` 单源取型
+- 错误路径分层：previewSale 错误**原样 reject**（renderer errorMessage 展示）；printSale 错误在 ipc 层转 `{ ok:false, error: '打印失败（${channel} 通道）：…。销售已保存，可稍后在销售记录中重打' }`（G3 文案 + 通道名由 ipc 层取当前设置补全）
+
+### E2E 编排要点（print-flow 三场景）
+- settings 直插 DB（printer_channel/tcp_host/tcp_port/shop_name…）+ mock TCP server 19910（T19 模式）；**tcp_port 直改 '1' 模拟不可达**——编排器按次读设置，DB 直改即时生效（无需重启/走设置页 UI）
+- 断字节三件套：poll hex contains '1b40' → contains '1b520f'（中文页）→ poll endsWith '1d564200'（全切）；字节落盘 evidence + `1b40…` 头部与 GBK 店名（`b4f2 d3a1 d0a1 b5ea`=「打印小店」）可 xxd 目检
+- voided 直插单技巧：sale_no 用 `-0901` 段避开 D18 自动序列（COUNT 语义不受手插跳号影响）；product_id NULL + 快照名（G4 断链形态原生合法）
+- sales-history 刷新用 SPA 路由离开再回来（T8 page.reload 竞态规避）
+
+### 共享文件代持实录（F4 审计归因用——反向代持）
+- **我的共享段落被 T16 的 87a65ca 先行代持提交**：main/index.ts `registerPrintingIpc(db)` 行、preload index.ts/index.d.ts printing preview/print 段（PrintingPreviewResult 双声明）、template.repo.ts getDefault/seedDefaults 段及其测试 describe 块——T16 issues.md 已记录代持归因；本任务 commit 仅含打印编排专属文件（print.service/printing.ipc/store/dialog/两 view 改造/两 spec/两单测/task-15 证据）
+- template.repo.ts 领地协作（先后落地顺序与计划相反）：T16 先建 CRUD + list（文件头留言邀请 T15 追加 getDefault），我在其文件/测试文件末尾**只追加**——"追加不改"双向成立（T16 learnings 已互证）
+- pos.spec/sales-history.spec 的占位弹窗断言更新属本任务领地（占位 dialog 替换的必然伴生——T11 的 `.sale-summary__*` 断言随占位 UI 一同退役，新断言锚 '小票预览' 弹窗 + receipt-line 计数 + 全角 '￥' 金额）
+
+### T16 交叉闭环实测（打印链路消费默认模板的端到端证明）
+- T16 的 template-editor.spec 末用例（设默认→结账预览含特征行）在本次全量 E2E 63/63 中 PASS——证明打印编排真实消费 DB 默认模板（非硬编码），且 T15/T16 并行改动在合并态下互洽

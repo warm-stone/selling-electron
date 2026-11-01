@@ -236,22 +236,23 @@ test.describe.serial('收银台：扫码/双击加购/购物车编辑/结账', (
     await expect(page.locator('.cart-panel__checkout')).toBeEnabled()
   })
 
-  test('结账：成功 dialog + 购物车清空 + DB 落库断言（total_cents/item_count/库存）', async () => {
+  test('结账：预览弹窗（T15 真预览）+ 购物车清空 + DB 落库断言（total_cents/item_count/库存）', async () => {
     const { page } = app
 
     await page.locator('.cart-panel__checkout').click()
 
-    // 占位成功 dialog（Task 15 替换为真预览窗口）：单号/合计/件数
-    const dialog = page.locator('.el-dialog')
+    // Task 15：占位 dialog 已替换为小票预览弹窗（同源 ReceiptPreview 渲染）
+    const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
-    await expect(page.locator('.el-dialog__title')).toHaveText('结账成功')
-    await expect(dialog.locator('.sale-summary__no')).toHaveText(/单号 \d{8}-\d{4}/)
-    await expect(dialog.locator('.sale-summary__total')).toHaveText('¥17.00')
-    await expect(dialog.locator('.sale-summary__count')).toHaveText('共 7 件')
+    await expect(dialog.locator('.el-dialog__title')).toHaveText(/小票预览 · \d{8}-\d{4}/)
+    // 未设置店名（shopName 空行仍占位）：默认模板 2 头部行 + 1 列头 + 2 明细 + 2 合计 + 2 底部 = 9 行
+    await expect(dialog.locator('.receipt-line')).toHaveCount(9)
+    await expect(dialog).toContainText('￥17.00') // 合计行（默认模板全角 ￥）
+    await expect(dialog).toContainText('件数: 7')
 
     await page.screenshot({ path: '.omo/evidence/task-11-pos-e2e.png' })
 
-    await dialog.getByRole('button', { name: '完成' }).click()
+    await dialog.getByRole('button', { name: '取消' }).click()
     await expect(dialog).toBeHidden()
 
     // 购物车清空 + 结账恢复 disabled

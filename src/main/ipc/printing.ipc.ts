@@ -1,20 +1,34 @@
+import type Database from 'better-sqlite3'
 import { isPrintChannelKind } from '../printing/channels/print-channel'
 import { createPrinterEnumerator } from '../printing/channels/printer-enumerator'
-import { getChannel, PrintQueue } from '../printing/print.service'
+import {
+  createPrintOrchestrator,
+  getChannel,
+  PrintQueue,
+  readLogoFileBuffer,
+  type PreviewPayload
+} from '../printing/print.service'
 import type { PrintSettings } from '../printing/print.service'
+import { createSaleRepo } from '../db/repositories/sale.repo'
+import { createSettingsRepo } from '../db/repositories/settings.repo'
+import { createTemplateRepo } from '../db/repositories/template.repo'
 import type { AppSettings } from '../../shared/types'
+import { rowsToAppSettings } from './settings.ipc'
 
 /**
- * 打印设置 IPC 薄层（Task 19）。
+ * 打印 IPC 薄层（Task 19 打印设置 + Task 15 打印编排）。
  *
  * 通道：
  *  - printing:printers  系统打印机枚举（T7 listSystemPrinters 消费面）
  *  - printing:testPrint 最小 ESC/POS 测试字节发送（T7 getChannel + PrintQueue 消费面）
+ *  - printing:preview   小票预览（T15：预览与打印同源组装——G7）
+ *  - printing:print     小票打印（T15：串行队列 best-effort，失败不影响已保存销售——G3）
  *
- * ★ 只消费 T7 产物（printer-enumerator / print-channel 守卫 / getChannel / PrintQueue），
- *   不改动 channels/ 任何代码。
+ * ★ 只消费上游产物（printer-enumerator / print-channel 守卫 / getChannel /
+ *   PrintQueue / generateReceiptBytes / 各 repo），不改动 channels/ 与
+ *   escpos-generator 内部任何代码。
  * ★ `require('electron')` 懒加载（T2 模式）：TEST_PRINT_BYTES / toPrintSettings /
- *   PrinterEntry 等纯部分可在 vitest 纯 Node 环境导入。
+ *   parseSaleId 等纯部分可在 vitest 纯 Node 环境导入。
  */
 
 /** 打印机下拉项（设置页消费；is_default 用于默认标记展示） */
@@ -57,13 +71,37 @@ export function toPrintSettings(req: Partial<PrintTestRequest> | undefined): Pri
   }
 }
 
-export function registerPrintingIpc(): void {
+/**
+ * preview/print 请求 → sale_id（运行时边界防御：非正整数 → NaN，
+ * 走编排器「未找到销售单」的可诊断路径，不静默成功）。
+ */
+export function parseSaleId(req: unknown): number {
+  if (typeof req === 'object' && req !== null && 'sale_id' in req) {
+    const v = (req as { sale_id?: unknown }).sale_id
+    if (typeof v === 'number' && Number.isInteger(v)) return v
+  }
+  return Number.NaN
+}
+
+export function registerPrintingIpc(db: Database.Database): void {
   // 懒 require（T2 模式）：本模块纯部分可在 vitest 纯 Node 环境导入
   const { ipcMain, BrowserWindow } = require('electron') as typeof import('electron')
 
   // G11：惰性取窗口——每次枚举时求值（窗口可能尚未创建/已销毁）；
   // 无窗口 / Linux 无打印子系统 → enumerator 内部已捕获，返回 []（不崩溃）
   const enumerator = createPrinterEnumerator(() => BrowserWindow.getAllWindows()[0])
+
+  // ── Task 15：打印编排装配（repo → 编排器；队列随编排器实例级单例串行） ──
+  const saleRepo = createSaleRepo(db)
+  const templateRepo = createTemplateRepo(db)
+  const settingsRepo = createSettingsRepo(db)
+  const currentSettings = (): AppSettings => rowsToAppSettings(settingsRepo.getAll())
+  const orchestrator = createPrintOrchestrator({
+    getSaleDetail: (saleId) => saleRepo.getDetail(saleId),
+    getDefaultTemplate: () => templateRepo.getDefault(),
+    getSettings: currentSettings,
+    readLogoFile: readLogoFileBuffer
+  })
 
   ipcMain.handle('printing:printers', async (): Promise<PrinterEntry[]> => {
     const printers = await enumerator.listSystemPrinters()
@@ -89,6 +127,37 @@ export function registerPrintingIpc(): void {
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         return { ok: false, error: `测试打印失败（${settings.printer_channel} 通道）：${detail}` }
+      }
+    }
+  )
+
+  /**
+   * 小票预览（T15）：saleId → PreviewPayload（模板/明细/vars/logoUrl）——
+   * 与 printing:print 的字节组装同一份 buildReceiptPayload（G7 同源）。
+   * 错误（如销售单不存在）原样 reject，renderer 展示可诊断消息。
+   */
+  ipcMain.handle('printing:preview', async (_event, req: unknown): Promise<PreviewPayload> => {
+    return orchestrator.previewSale(parseSaleId(req))
+  })
+
+  /**
+   * 小票打印（T15）：组装 → generateReceiptBytes → 串行队列入队。
+   * 失败**不抛**（G3：销售已落库，打印失败绝不影响销售）——返回
+   * { ok:false, error }，error 含通道名 + 重打引导文案。
+   */
+  ipcMain.handle(
+    'printing:print',
+    async (_event, req: unknown): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        await orchestrator.printSale(parseSaleId(req))
+        return { ok: true }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        const channel = currentSettings().printer_channel
+        return {
+          ok: false,
+          error: `打印失败（${channel} 通道）：${detail}。销售已保存，可稍后在销售记录中重打`
+        }
       }
     }
   )
