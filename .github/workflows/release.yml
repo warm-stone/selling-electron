@@ -40,9 +40,6 @@ jobs:
   release:
     needs: test
     runs-on: windows-latest
-    env:
-      # 提升到 job 级：供下方「双发」step 的 if 探测（secrets 不能直接进 if 表达式）
-      GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,16 +69,8 @@ jobs:
 
       # GH_TOKEN 用 Actions 运行时自动提供的 GITHUB_TOKEN（发布到本仓库 Releases，
       # 无需手动创建任何密钥）；--publish always = 构建后创建 Release 并上传 exe
+      # （GitCode 侧的同步发布为手动：GitHub Releases 下载 exe → GitCode Release 页上传）
       - name: Build installer & publish to GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win nsis --publish always
-
-      # 双发：同一安装包上传 GitCode Releases（国内下载快）。
-      # token 未配置时自动跳过；脚本见 scripts/publish-gitcode.mjs（GitCode API v5 预签名直传）
-      - name: Upload installer to GitCode Releases
-        if: env.GITCODE_TOKEN != ''
-        env:
-          GITCODE_REPO: warm-stone/selling-electron
-          GITCODE_TAG: ${{ github.ref_name }}
-        run: node scripts/publish-gitcode.mjs
