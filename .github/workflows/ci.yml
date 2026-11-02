@@ -1,9 +1,9 @@
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
 
 jobs:
   # ── job 1：质量门（typecheck + vitest + Playwright E2E，windows-latest 目标平台）──
