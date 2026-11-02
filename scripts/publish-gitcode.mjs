@@ -19,6 +19,11 @@
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+// undici（node fetch 底层）默认 headersTimeout=300s：跨境上传 ~100MB 安装包
+// 到 GitCode 国内 OBS 的耗时远超此限（实测 HeadersTimeoutError）——解除该限制
+import { Agent, setGlobalDispatcher } from 'undici'
+
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }))
 
 const TOKEN = process.env.GITCODE_TOKEN
 const REPO = process.env.GITCODE_REPO
@@ -77,15 +82,32 @@ async function uploadAsset(filePath) {
   if (!url || !headers) {
     throw new Error(`upload_url 响应缺少预签名字段：${presignText.slice(0, 300)}`)
   }
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers,
-    body: readFileSync(filePath)
-  })
-  if (!res.ok) {
-    throw new Error(`上传 ${fileName} 失败：HTTP ${res.status} ${await res.text()}`)
+  const body = readFileSync(filePath)
+
+  // 跨境上传（GitHub 美国机房 → GitCode 国内 OBS）：整体 30 分钟硬上限，
+  // 网络抖动重试 2 次（预签名 PUT 幂等，断点重传安全）
+  const MAX_ATTEMPTS = 3
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers,
+        body,
+        signal: AbortSignal.timeout(30 * 60 * 1000)
+      })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
+      }
+      console.log(`GitCode 上传 ${fileName} 完成（HTTP ${res.status}，第 ${attempt} 次尝试）`)
+      return
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS) {
+        throw new Error(`上传 ${fileName} 失败（已重试 ${MAX_ATTEMPTS - 1} 次）：${err.message}`)
+      }
+      console.log(`GitCode 上传 ${fileName} 第 ${attempt} 次尝试失败（${err.message}），重试…`)
+      await new Promise((r) => setTimeout(r, 5000 * attempt))
+    }
   }
-  console.log(`GitCode 上传 ${fileName} 完成（HTTP ${res.status}）`)
 }
 
 const installers = readdirSync(RELEASE_DIR)
