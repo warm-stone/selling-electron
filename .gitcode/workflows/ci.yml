@@ -1,0 +1,27 @@
+name: ci
+
+# GitCode 侧：Linux 快速验证（纯逻辑层，G11 双平台设计）。
+# Windows 交付链（E2E + NSIS 打包 + Releases 发布）在 GitHub（.github/workflows/）——
+# GitCode 无 Windows runner，本文件职责仅为 push 后的秒级核心逻辑反馈，与 GitHub CI 各自独立演化。
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  check:
+    # GitCode Euler 运行器（Linux）；仓库检出在 repo_workspace/ 子目录
+    runs-on: euleros-2.10.1
+    steps:
+      - uses: checkout-action@0.0.1
+
+      - name: Use Node.js
+        uses: setup-node@0.0.1
+        with:
+          node-version: "22"
+
+      - run: cd repo_workspace && npm ci
+      - run: cd repo_workspace && npm run typecheck
+      - run: cd repo_workspace && npm test
+      - run: cd repo_workspace && npm run build
