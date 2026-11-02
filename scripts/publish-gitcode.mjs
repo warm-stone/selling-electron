@@ -60,9 +60,9 @@ async function ensureRelease() {
   form.set('tag_name', TAG)
   form.set('name', TAG)
   form.set('body', `销存系统 ${TAG}（Windows NSIS 安装包，与 GitHub Releases 同源）`)
-  await apiText('/releases', {
+  // GitCode API v5 认 query 的 access_token（Authorization: token 头实测 401 "token not found"）
+  await apiText(authedPath('/releases'), {
     method: 'POST',
-    headers: { Authorization: `token ${TOKEN}` },
     body: form
   })
   console.log(`GitCode Release ${TAG} 创建完成`)
