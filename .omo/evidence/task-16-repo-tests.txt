@@ -1,8 +1,0 @@
- RUN  v5.0.5 /home/wenshi/codeSpace/selling-electron
-
-
- Test Files  1 passed (1)
-      Tests  24 passed (24)
-   Start at  23:27:44
-   Duration  878ms (tests 64%, import 21%, transform 11%, worker 4%)
-

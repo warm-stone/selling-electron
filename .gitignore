@@ -14,3 +14,10 @@ coverage/
 test-results/
 test-results-qa/
 playwright-report/
+
+# test evidence (e2e specs write screenshots/artifacts here)
+.omo/evidence/
+
+# omo ephemeral tooling state (session bookkeeping, machine-local)
+.omo/run-continuation/
+.omo/boulder.json
