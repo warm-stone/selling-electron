@@ -159,8 +159,13 @@ test.describe.serial('收银台：扫码/双击加购/购物车编辑/结账', (
     await expect(row.locator('.cart-row__subtotal')).toHaveText('¥10.50')
     await expect(page.locator('.cart-panel__total-value')).toHaveText('¥10.50')
 
-    // 单价 3.50 → 2.50：3 × 2.50 = 7.50（证明单价编辑驱动合计）
-    await priceInput(page, COLA).fill('2.50')
+    // 单价 3.50 → 2.50：3 × 2.50 = 7.50（证明单价编辑驱动合计）。
+    // 逐键输入验证焦点保持：行 key 含 unit_price_cents（D16 分行语义），
+    // 若改价逐键实时落 store，key 变化会销毁重建行 DOM 导致每键失焦
+    await priceInput(page, COLA).fill('2')
+    await expect(priceInput(page, COLA)).toBeFocused()
+    await priceInput(page, COLA).pressSequentially('.50')
+    await expect(priceInput(page, COLA)).toBeFocused()
     await priceInput(page, COLA).blur()
     await expect(row.locator('.cart-row__subtotal')).toHaveText('¥7.50')
     await expect(page.locator('.cart-panel__total-value')).toHaveText('¥7.50')

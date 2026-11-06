@@ -12,6 +12,11 @@ import type { CartItem } from '../../../../shared/types'
  * el-input-number（元，precision 2），blur 提交时 Math.round(yuan * 100)
  * 入分（3.5×100=350.00000000000006 必须 round——T8 实证）；显示经
  * shared/utils/money formatMoney（恰好 2 位小数）。store 内部全程整数分。
+ *
+ * 单价必须走 @change（blur/Enter 提交）而非 @update:model-value（逐键触发）：
+ * 行 key = product_id + unit_price_cents（D16 分行语义），逐键改价会让 key
+ * 变化 → Vue 销毁重建整行 DOM → 输入框立刻失焦（每敲一个字符丢一次焦）。
+ * blur 时才落 store，key 只在焦点离开后变化，输入体验完好。
  */
 
 const props = defineProps<{ checkingOut: boolean }>()
@@ -94,7 +99,7 @@ function onPriceChange(index: number, yuan: number | undefined): void {
             :step="0.5"
             :precision="2"
             :controls="false"
-            @update:model-value="(v: number | undefined) => onPriceChange(index, v)"
+            @change="(v: number | undefined) => onPriceChange(index, v)"
           />
           <span class="cart-row__subtotal">¥{{ formatMoney(cart.subtotalCents(item)) }}</span>
           <el-button
