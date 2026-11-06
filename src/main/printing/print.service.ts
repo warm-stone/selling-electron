@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { isPrintChannelKind, type PrintChannel, type PrintChannelKind } from './channels/print-channel'
 import { SerialChannel, DEFAULT_SERIAL_PORT } from './channels/serial.channel'
 import { SpoolerChannel } from './channels/spooler.channel'
@@ -100,38 +99,40 @@ export interface PrintOrchestratorDeps {
   getDefaultTemplate(): PrintTemplate
   /** 全量设置（T19 rowsToAppSettings 映射后的 AppSettings） */
   getSettings(): AppSettings
-  /** 读 Logo 文件 → PNG Buffer（未设置/不可读 → null）；生产实现 readLogoFileBuffer */
-  readLogoFile(logoPath: string | null): Promise<Buffer | null>
+  /** 按 logo id 读 Logo 文件 → PNG Buffer（行/文件不存在或不可读 → null）；生产实现在 ipc 装配处（logo repo 查行 → 读文件） */
+  readLogoById(logoId: number): Promise<Buffer | null>
   /** 通道工厂：缺省 getChannel；测试注入 mock 通道捕获字节 */
   createChannel?(settings: PrintSettings): PrintChannel
 }
 
 /**
  * 打印载荷（组装产物——预览与打印的共同源头，G7）。
- * logoBuffer 仅主进程消费（generateReceiptBytes 的光栅输入；不跨 IPC）。
+ * logoBuffers 仅主进程消费（generateReceiptBytes 的光栅输入；不跨 IPC）。
  */
 export interface ReceiptPayload {
   /** 模板（voided 单已含「已作废」段落副本；config_json 已解析） */
   template: ReceiptTemplate
   sale: SaleDetail
-  /** 明细行（display-ready：formatMoney 已格式化，buildItemLine 直接输入） */
+  /** 明细行（display-ready：formatMoney 已格式化，buildItemLines 直接输入） */
   data: SaleReceiptData
   /** 变量插槽值（纯字符串，IPC 安全——T3 冻结契约形态） */
   vars: ReceiptVars
-  logoBuffer: Buffer | null
+  /** Logo PNG 集合（image 段落 logoId → Buffer；读不到的 id 不在其中，warn 诊断） */
+  logoBuffers: Map<number, Buffer>
 }
 
 /**
- * printing:preview 返回载荷：ReceiptPayload 的 IPC 形态——logoBuffer → dataURL
- * （Buffer 不跨 IPC；契约 res 只声明 template+sale，本形态为其运行时结构超集）。
+ * printing:preview 返回载荷：ReceiptPayload 的 IPC 形态——logoBuffers →
+ * dataURL 集合（Buffer 不跨 IPC；契约 res 只声明 template+sale，本形态
+ * 为其运行时结构超集）。
  */
 export interface PreviewPayload {
   template: ReceiptTemplate
   sale: SaleDetail
   data: SaleReceiptData
   vars: ReceiptVars
-  /** Logo dataURL（未设置/读取失败 → null，ReceiptPreview 的 logoUrl prop） */
-  logoUrl: string | null
+  /** Logo dataURL 集合（logoId → dataURL；未引用/读取失败 → 无该 key，ReceiptPreview 的 logoUrls prop） */
+  logoUrls: Record<number, string>
 }
 
 /** AppSettings → PrintSettings（T7 getChannel 参数；可空字段 null → ''/undefined 归一） */
@@ -176,14 +177,17 @@ export function pngBufferToDataUrl(png: Buffer): string {
   return `data:image/png;base64,${png.toString('base64')}`
 }
 
-/** 生产 Logo 读取：文件缺失/不可读 → null（优雅降级，同 T19 readLogoDataUrl 语义） */
-export async function readLogoFileBuffer(logoPath: string | null): Promise<Buffer | null> {
-  if (!logoPath) return null
-  try {
-    return await readFile(logoPath)
-  } catch {
-    return null
+/**
+ * 收集模板 header/footer 中 image 段落引用的 logoId 集合
+ * （去重升序；logoId 未指定的 image 段落不算——渲染时静默跳过）。
+ * buildReceiptPayload（打印/预览）与测试打印（printing.ipc）共用的纯函数。
+ */
+export function collectSectionLogoIds(template: ReceiptTemplate): number[] {
+  const ids = new Set<number>()
+  for (const section of [...template.header, ...template.footer]) {
+    if (section.type === 'image' && section.logoId !== undefined) ids.add(section.logoId)
   }
+  return [...ids].sort((a, b) => a - b)
 }
 
 export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
@@ -206,7 +210,8 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
 
   /**
    * 组装打印载荷（G7 唯一数据源）：sale 明细 → 默认模板 → settings →
-   * ReceiptVars（formatMoney 元显示）+ ReceiptItemLine[]（display-ready）+ Logo Buffer。
+   * ReceiptVars（formatMoney 元显示）+ ReceiptItemLine[]（display-ready）+
+   * logoBuffers（image 段落 logoId → PNG Buffer）。
    * 预览（previewSale）与打印（printSale）共用本产物——两套渲染不得两套组装。
    */
   async function buildReceiptPayload(saleId: number): Promise<ReceiptPayload> {
@@ -237,24 +242,34 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
       }))
     }
 
-    // Logo 仅模板含 image 段落时读取（主进程 Buffer，生成器光栅输入——G6）
-    const hasImageSection = [...template.header, ...template.footer].some(
-      (s) => s.type === 'image'
-    )
-    const logoBuffer = hasImageSection ? await deps.readLogoFile(settings.logo_path) : null
+    // 多 Logo：模板 image 段落引用的 logoId 逐个读取（主进程 Buffer，生成器
+    // 光栅输入——G6）；读不到（行/文件缺失）→ warn 诊断后跳过，不影响打印
+    const logoBuffers = new Map<number, Buffer>()
+    for (const logoId of collectSectionLogoIds(template)) {
+      const buf = await deps.readLogoById(logoId)
+      if (buf) {
+        logoBuffers.set(logoId, buf)
+      } else {
+        console.warn(`[print] 模板引用 logoId=${logoId} 但文件不可读，已跳过`)
+      }
+    }
 
-    return { template, sale, data, vars, logoBuffer }
+    return { template, sale, data, vars, logoBuffers }
   }
 
-  /** 预览载荷（printing:preview res）：与打印字节同一组装源头，logoBuffer → dataURL 分叉 */
+  /** 预览载荷（printing:preview res）：与打印字节同一组装源头，logoBuffers → dataURL 集合分叉 */
   async function previewSale(saleId: number): Promise<PreviewPayload> {
     const payload = await buildReceiptPayload(saleId)
+    const logoUrls: Record<number, string> = {}
+    for (const [logoId, buf] of payload.logoBuffers) {
+      logoUrls[logoId] = pngBufferToDataUrl(buf)
+    }
     return {
       template: payload.template,
       sale: payload.sale,
       data: payload.data,
       vars: payload.vars,
-      logoUrl: payload.logoBuffer ? pngBufferToDataUrl(payload.logoBuffer) : null
+      logoUrls
     }
   }
 
@@ -263,7 +278,7 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
     const payload = await buildReceiptPayload(saleId)
     const vars: ReceiptPrintVars = {
       ...payload.vars,
-      logoBuffer: payload.logoBuffer ?? undefined
+      logoBuffers: payload.logoBuffers
     }
     const bytes = await generateReceiptBytes(payload.template, payload.data, vars)
     // G3：入队失败向上抛（ipc 层转 { ok:false, error }），已落库销售不受影响

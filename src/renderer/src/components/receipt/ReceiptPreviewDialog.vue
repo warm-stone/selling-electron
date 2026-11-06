@@ -50,7 +50,7 @@ const isVoided = computed(() => store.payload?.sale.status === 'voided')
           :template="store.payload.template"
           :data="store.payload.data"
           :vars="store.payload.vars"
-          :logo-url="store.payload.logoUrl ?? undefined"
+          :logo-urls="store.payload.logoUrls"
         />
       </div>
     </template>

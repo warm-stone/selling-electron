@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import initSql from './migrations/001_init.sql?raw'
+import logosSql from './migrations/002_logos.sql?raw'
 
 interface Migration {
   version: number
@@ -7,7 +8,10 @@ interface Migration {
   sql: string
 }
 
-const migrations: Migration[] = [{ version: 1, name: '001_init.sql', sql: initSql }]
+const migrations: Migration[] = [
+  { version: 1, name: '001_init.sql', sql: initSql },
+  { version: 2, name: '002_logos.sql', sql: logosSql }
+]
 
 export function migrate(db: Database.Database): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number

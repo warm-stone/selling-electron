@@ -7,7 +7,7 @@ import { ITEM_COLUMN_WIDTHS } from '../../src/shared/receipt/item-columns'
 import { closeApp, launchApp, waitForRoute, type LaunchedApp } from './helpers'
 
 /**
- * Task 12 — 小票预览 demo 页 E2E：58/80mm 纸宽容器、超长商品名截断、
+ * Task 12 — 小票预览 demo 页 E2E：58/80mm 纸宽容器、超长商品名换行（多行）、
  * 同源视觉锚点（mono-cjk / white-space: pre / bold class）。
  */
 test.describe.serial('小票预览 demo：同源渲染 58/80mm', () => {
@@ -80,30 +80,39 @@ test.describe.serial('小票预览 demo：同源渲染 58/80mm', () => {
     }
   })
 
-  test('超长商品名（58mm）：行 stringWidth ≤ 32、名称列 ≤ 12、完整名不出现；截图留证', async () => {
+  test('超长商品名（58mm）：名称列折行多行、每行 stringWidth = 32、名称列 ≤ 12、完整名不单行出现；截图留证', async () => {
     const { page } = app
     await page.getByTestId('demo-sample-long').click()
     const longName = '超长商品名称测试一二三四五六七八九十甲乙丙丁戊己庚辛壬癸'
 
     const rows = page.locator('.receipt-items tbody tr.receipt-line')
-    const firstItem = rows.nth(1) // nth(0) 为列头行
+    // 长名（48 宽）在 12 列名称栏折行：列头 1 行 + 长名 N（>1）行 + 短名 1 行
+    const rowCount = await rows.count()
+    expect(rowCount).toBeGreaterThan(3)
+
+    const firstItem = rows.nth(1) // nth(0) 为列头行；首个商品折行后的首行
     const rowText = await firstItem.textContent()
-    expect(stringWidth(rowText ?? '')).toBeLessThanOrEqual(32)
+    expect(stringWidth(rowText ?? '')).toBe(32)
 
     const nameText = await firstItem.locator('td').first().textContent()
     expect(stringWidth(nameText ?? '')).toBeLessThanOrEqual(ITEM_COLUMN_WIDTHS['58mm'].name)
 
+    // 折行后完整名不再以单行整体出现（名称分散在多行、行间有 pad 空格）
     await expect(page.locator('body')).not.toContainText(longName)
     await page.screenshot({ path: '.omo/evidence/task-12-paperwidth.png' })
   })
 
-  test('切回 80mm + 超长名：行 stringWidth ≤ 48、名称列 ≤ 24（双纸宽网格一致）', async () => {
+  test('切回 80mm + 超长名：行 stringWidth = 48、名称列 ≤ 24（双纸宽网格一致）', async () => {
     const { page } = app
     await page.getByTestId('demo-paper-80').click()
     const rows = page.locator('.receipt-items tbody tr.receipt-line')
+    const rowCount = await rows.count()
+    // 48 宽长名在 24 列名称栏折 2 行：列头 1 + 长名 2 + 短名 1 = 4
+    expect(rowCount).toBeGreaterThan(3)
+
     const firstItem = rows.nth(1)
     const rowText = await firstItem.textContent()
-    expect(stringWidth(rowText ?? '')).toBeLessThanOrEqual(48)
+    expect(stringWidth(rowText ?? '')).toBe(48)
     const nameText = await firstItem.locator('td').first().textContent()
     expect(stringWidth(nameText ?? '')).toBeLessThanOrEqual(ITEM_COLUMN_WIDTHS['80mm'].name)
   })

@@ -3,7 +3,8 @@ import {
   PAPER_COLUMNS,
   stringWidth,
   truncateToGrid,
-  padLine
+  padLine,
+  wrapToGrid
 } from '../../../src/shared/receipt/char-grid'
 
 describe('PAPER_COLUMNS', () => {
@@ -121,5 +122,66 @@ describe('padLine（补齐到网格宽度）', () => {
 
   it('align 缺省为 left', () => {
     expect(padLine('ab', 4)).toBe('ab  ')
+  })
+})
+
+describe('wrapToGrid（按显示宽度折行）', () => {
+  it('不超宽原样单行返回', () => {
+    expect(wrapToGrid('中文ab', 10)).toEqual(['中文ab'])
+    expect(wrapToGrid('可口可乐 330ml', 48)).toEqual(['可口可乐 330ml'])
+  })
+
+  it('空字符串返回 [""]', () => {
+    expect(wrapToGrid('', 32)).toEqual([''])
+  })
+
+  it('纯 ASCII 词折：空格处断行、词不放不下时提前断', () => {
+    // 宽 11，cols=5：'aa bb' 放不下 'cc' → 断行
+    expect(wrapToGrid('aa bb cc', 5)).toEqual(['aa bb', 'cc'])
+    // 恰好占满（5=2+1+2）：同行
+    expect(wrapToGrid('aa bb', 5)).toEqual(['aa bb'])
+  })
+
+  it('CJK 无空格长文本：逐字硬断、宽字符不拆半、每行不越界', () => {
+    const out = wrapToGrid('中中中中', 5) // 每字宽 2：每行最多 2 字（4 列）
+    expect(out).toEqual(['中中', '中中'])
+    for (const line of out) expect(stringWidth(line)).toBeLessThanOrEqual(5)
+  })
+
+  it('混合文本：ASCII 词 + CJK 逐字断共存', () => {
+    // token 'ab中中中' 宽 8 > 5 → 硬断：ab(2) 中(4) 中(6>5)断 → 'ab中' / '中中'
+    const out = wrapToGrid('ab中中中', 5)
+    expect(out).toEqual(['ab中', '中中'])
+  })
+
+  it('断行不吞非空格字符：所有非空格字符按序保留', () => {
+    const s = 'ab中 cd中 ef中'
+    const joined = wrapToGrid(s, 5).join(' ')
+    // 非空格字符序列与原文一致（空格为断点可被吞并/折叠）
+    expect(joined.replace(/ /g, '')).toBe(s.replace(/ /g, ''))
+  })
+
+  it('空格吞并：连续空格折叠为单分隔符、断点处不留尾随/前导空格', () => {
+    // 'a  b'（双空格）→ 词间单空格
+    expect(wrapToGrid('a  b', 10)).toEqual(['a b'])
+    // 断行处空格被吞：'aa bb' 折在 'aa' 后，行尾无空格、次行行首无空格
+    const out = wrapToGrid('aa bb', 4)
+    expect(out).toEqual(['aa', 'bb'])
+    // 前导/尾随空格被吞
+    expect(wrapToGrid('  ab  ', 10)).toEqual(['ab'])
+  })
+
+  it('单个超宽字符（cols < 字符宽）独占一行，不吞字符', () => {
+    expect(wrapToGrid('😀', 1)).toEqual(['😀']) // emoji 宽 2 > cols 1
+    expect(wrapToGrid('a😀', 1)).toEqual(['a', '😀'])
+  })
+
+  it('cols<=0 防御：原样单行返回', () => {
+    expect(wrapToGrid('abc', 0)).toEqual(['abc'])
+    expect(wrapToGrid('abc', -1)).toEqual(['abc'])
+  })
+
+  it('cols=1 纯半角逐字符断行', () => {
+    expect(wrapToGrid('abc', 1)).toEqual(['a', 'b', 'c'])
   })
 })

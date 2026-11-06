@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { PaperWidth } from '../../../shared/receipt/char-grid'
+import { PAPER_COLUMNS, type PaperWidth } from '../../../shared/receipt/char-grid'
 import { DEFAULT_TEMPLATES } from '../../../shared/receipt/default-template'
 import type {
   ItemsSection,
@@ -75,6 +75,8 @@ function isValidSection(v: unknown): v is Section {
   if (!isOptionalAlign(v['align'])) return false
   if (!isOptionalSize(v['size'])) return false
   if (!isOptionalBold(v['bold'])) return false
+  // image 段落引用的 logo 行 id：存在时必须是 number
+  if (v['logoId'] !== undefined && typeof v['logoId'] !== 'number') return false
   return true
 }
 
@@ -88,12 +90,31 @@ function isValidTotalLine(v: unknown): v is TotalLine {
   return true
 }
 
-function isValidItemsSection(v: unknown): v is ItemsSection {
+/**
+ * columnWidths 覆盖的严格校验（与 item-columns resolveColumnWidths 同规则）：
+ * 存在时必须四键全为正整数且总和等于该模板 paperWidth 的 PAPER_COLUMNS
+ * （需 paperWidth 参数——校验发生在 isValidReceiptTemplate 的模板整体语境）。
+ */
+function isValidColumnWidths(v: unknown, paperWidth: PaperWidth): boolean {
+  if (!isPlainObject(v)) return false
+  let sum = 0
+  for (const key of ['name', 'qty', 'price', 'subtotal'] as const) {
+    const w = v[key]
+    if (typeof w !== 'number' || !Number.isInteger(w) || w <= 0) return false
+    sum += w
+  }
+  return sum === PAPER_COLUMNS[paperWidth]
+}
+
+function isValidItemsSection(v: unknown, paperWidth: PaperWidth): v is ItemsSection {
   if (!isPlainObject(v)) return false
   if (v['type'] !== 'items') return false
   if (v['showHeader'] !== undefined && typeof v['showHeader'] !== 'boolean') return false
   for (const key of ['nameLabel', 'qtyLabel', 'priceLabel', 'subtotalLabel'] as const) {
     if (!isOptionalString(v[key])) return false
+  }
+  if (v['columnWidths'] !== undefined && !isValidColumnWidths(v['columnWidths'], paperWidth)) {
+    return false
   }
   return true
 }
@@ -105,8 +126,9 @@ function isValidItemsSection(v: unknown): v is ItemsSection {
 export function isValidReceiptTemplate(v: unknown): v is ReceiptTemplate {
   if (!isPlainObject(v)) return false
   if (!PAPER_WIDTHS.includes(v['paperWidth'])) return false
+  const paperWidth = v['paperWidth'] as PaperWidth
   if (!Array.isArray(v['header']) || !v['header'].every(isValidSection)) return false
-  if (!isValidItemsSection(v['items'])) return false
+  if (!isValidItemsSection(v['items'], paperWidth)) return false
   if (!Array.isArray(v['totals']) || !v['totals'].every(isValidTotalLine)) return false
   if (!Array.isArray(v['footer']) || !v['footer'].every(isValidSection)) return false
   if (typeof v['cutPaper'] !== 'boolean') return false

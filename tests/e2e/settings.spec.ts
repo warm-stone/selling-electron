@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import net from 'node:net'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -13,8 +13,8 @@ import { closeApp, launchApp, waitForRoute, type LaunchedApp } from './helpers'
  *  1. 店名保存 → settings 表 DB 断言 + 离开再进入页面回显
  *  2. tcp 通道 + 127.0.0.1:19910 mock server → 测试打印 → 字节含 1b40
  *  3. spooler 优雅降级（Linux 无打印机）：下拉仅「自动选择」不崩溃；测试打印错误 toast 含通道名
- *  4. Logo 上传（E2E patch dialog.showOpenDialog 注入固定 png）→ DB logo_path +
- *     dataURL 预览 + 清除
+ *  4. Logo 管理（E2E patch dialog.showOpenDialog 注入固定 png）→ 多 Logo 网格缩略图
+ *     dataURL → 删除（确认弹窗）→ 空态提示（logos 表存储归后端领地，此处只断 UI 链路）
  */
 
 /** 1×1 透明 PNG（上传/预览断言用） */
@@ -107,7 +107,7 @@ test.describe.serial('系统设置页（Task 19）', () => {
     expect(readSetting('auto_cut')).toBe('0')
   })
 
-  test('测试打印（tcp 通道）：mock server 收到最小 ESC/POS 字节（含 1b40）', async () => {
+  test('测试打印（tcp 通道）：mock server 收到真实链路 ESC/POS 字节（1b40 + 1c26 汉字模式 + GBK 店名 + 全切）', async () => {
     const { page } = app
     receivedChunks.length = 0
 
@@ -116,9 +116,13 @@ test.describe.serial('系统设置页（Task 19）', () => {
 
     const receivedHex = (): string => Buffer.concat(receivedChunks).toString('hex')
     await expect.poll(receivedHex, { timeout: 5_000 }).toContain('1b40')
-    // ESC @ 初始化 + ESC a 1 居中 + 'test' + LF×2 + GS V 66 0 全切（T4 契约字节逐段断言）
+    // 真实生成链路（TEST_PRINT_SALE/VARS + 默认模板）的契约字节逐段断言：
+    // ESC R 15 中文页 + FS & 汉字模式（中文全跳过问题的修复核心）+ 居中
+    // + GBK 店名「测试商店」+ GS V 66 0 全切
+    expect(receivedHex()).toContain('1b520f')
+    expect(receivedHex()).toContain('1c26')
     expect(receivedHex()).toContain('1b6101')
-    expect(receivedHex()).toContain(Buffer.from('test', 'ascii').toString('hex'))
+    expect(receivedHex()).toContain('b2e2cad4c9ccb5ea')
     expect(receivedHex()).toContain('1d564200')
   })
 
@@ -149,7 +153,7 @@ test.describe.serial('系统设置页（Task 19）', () => {
     await page.screenshot({ path: '.omo/evidence/task-19-graceful-degrade.png' })
   })
 
-  test('Logo 上传（patch dialog 注入 png）→ DB logo_path + dataURL 预览 + 清除', async () => {
+  test('Logo 管理：上传（patch dialog 注入 png）→ 网格缩略图 dataURL → 删除（确认弹窗）→ 空态提示', async () => {
     const { page } = app
 
     // E2E 注入固定 png：写入临时文件 + patch 主进程 dialog.showOpenDialog
@@ -160,23 +164,24 @@ test.describe.serial('系统设置页（Task 19）', () => {
     }, srcLogo)
 
     await page.getByTestId('upload-logo-btn').click()
-    await expect(page.locator('.el-message--success', { hasText: 'Logo 已更新' })).toBeVisible()
+    await expect(page.locator('.el-message--success', { hasText: 'Logo 已上传' })).toBeVisible()
 
-    // 预览：img dataURL
-    const preview = page.getByTestId('logo-preview')
+    // 多 Logo 网格：缩略图 dataURL
+    const item = page.getByTestId('logo-item')
+    await expect(item).toHaveCount(1)
+    const preview = item.first().getByTestId('logo-preview')
     await expect(preview).toBeVisible()
     const src = await preview.getAttribute('src')
     expect(src).toMatch(/^data:image\/png;base64,/)
 
-    // DB：文件系统 + 路径引用（非 BLOB），指向 userData/logos/logo.png
-    const expectedLogoPath = join(app.userDataDir, 'logos', 'logo.png')
-    expect(readSetting('logo_path')).toBe(expectedLogoPath)
-    expect(existsSync(expectedLogoPath)).toBe(true)
-
-    // 清除 → 预览消失 + DB 归空
-    await page.getByTestId('clear-logo-btn').click()
-    await expect(page.locator('.el-message--success', { hasText: 'Logo 已清除' })).toBeVisible()
-    await expect(page.getByTestId('logo-preview')).toHaveCount(0)
-    expect(readSetting('logo_path') ?? '').toBe('')
+    // 删除 → 确认弹窗 → toast + 网格清空 + 空态提示
+    await page.getByTestId('logo-delete-btn').click()
+    const box = page.locator('.el-message-box')
+    await expect(box).toContainText('删除 Logo')
+    await box.getByRole('button', { name: '删除' }).click()
+    await expect(page.locator('.el-message--success', { hasText: 'Logo 已删除' })).toBeVisible()
+    await expect(page.getByTestId('logo-item')).toHaveCount(0)
+    await expect(page.getByText('暂未上传 Logo，上传后可在小票模板中选择使用')).toBeVisible()
+    await page.screenshot({ path: '.omo/evidence/task-19-logo-grid.png' })
   })
 })

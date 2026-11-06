@@ -14,11 +14,12 @@ import {
   padLine,
   stringWidth,
   truncateToGrid,
+  wrapToGrid,
   type PaperWidth
 } from '../../../src/shared/receipt/char-grid'
+import { ITEM_COLUMN_WIDTHS } from '../../../src/shared/receipt/item-columns'
 import type { ReceiptTemplate } from '../../../src/shared/receipt/template-schema'
 import {
-  ITEM_COLUMN_WIDTHS,
   generateReceiptBytes,
   type ReceiptPrintVars,
   type SaleReceiptData
@@ -30,11 +31,12 @@ import {
 } from '../../../src/main/printing/escpos/gb2312-encoder'
 
 /**
- * Task 4 — ESC/POS 生成器 golden 字节测试矩阵（无实机验证策略的核心）。
+ * ESC/POS 生成器 golden 字节测试矩阵（无实机验证策略的核心）。
  *
  * 矩阵维度：{58mm, 80mm} × {bold on/off} × {doubleHeight/Width/quad/normal}
  *            × {left/center/right} × {Logo 有/无} × {cutPaper on/off}
  * 每项断言十六进制指令序列；另含 GBK 中文断言、GBK 降级（'𠀀'→'?'）、
+ * FS & 汉字模式（真机修复指令链）、名称折行多行 items、1d 76 30 30 光栅头、
  * 重打幂等、char-grid 同源几何、golden .bin 字节级 diff。
  */
 
@@ -95,20 +97,26 @@ function makeLogoPng(): Buffer {
   return PNG.sync.write(png)
 }
 
-/** 与生成器同源的期望 items 行（测试侧用 shared char-grid 独立重算——G7 交叉验证） */
-function expectedItemRow(
+/**
+ * 与生成器同源的期望 items 行集（测试侧用 shared char-grid 独立重算——G7
+ * 交叉验证；名称列 wrapToGrid 折行、首行四列齐备、续行三列空白）。
+ */
+function expectedItemLines(
   paper: PaperWidth,
   name: string,
   qty: string,
   price: string,
   subtotal: string
-): string {
+): string[] {
   const w = ITEM_COLUMN_WIDTHS[paper]
-  return (
-    padLine(truncateToGrid(name, w.name), w.name) +
-    padLine(truncateToGrid(qty, w.qty), w.qty, 'right') +
-    padLine(truncateToGrid(price, w.price), w.price, 'right') +
-    padLine(truncateToGrid(subtotal, w.subtotal), w.subtotal, 'right')
+  const nameLines = wrapToGrid(name, w.name)
+  return nameLines.map((nl, i) =>
+    i === 0
+      ? padLine(nl, w.name) +
+        padLine(truncateToGrid(qty, w.qty), w.qty, 'right') +
+        padLine(truncateToGrid(price, w.price), w.price, 'right') +
+        padLine(truncateToGrid(subtotal, w.subtotal), w.subtotal, 'right')
+      : padLine(nl, w.name) + padLine('', w.qty) + padLine('', w.price, 'right') + padLine('', w.subtotal, 'right')
   )
 }
 
@@ -136,11 +144,13 @@ const SAMPLE_VARS: ReceiptPrintVars = {
 // ═════════════════════════════════════════════════════════════════
 
 describe('ESC/POS 生成器 golden 字节矩阵', () => {
-  it('80mm 默认模板全指令链：ESC @ 开头 + 中文页 + 居中 + 粗体 + 倍高 + GBK 中文 + 切纸', async () => {
+  it('80mm 默认模板全指令链：ESC @ 开头 + 中文页 + FS & 汉字模式 + 居中 + 粗体 + 倍高 + GBK 中文 + 切纸', async () => {
     const bytes = await gen(DEFAULT_TEMPLATE_80MM)
-    // 字节流以 ESC @（1b 40）开头，紧随 ESC R 15（1b 52 0f）中文页
+    // 字节流以 ESC @（1b 40）开头，紧随 ESC R 15（1b 52 0f）中文页 + FS &（1c 26）汉字模式
     expect(bytes.subarray(0, 2)).toEqual(seq(0x1b, 0x40))
     expect(bytes.subarray(0, 5)).toEqual(seq(0x1b, 0x40, 0x1b, 0x52, 0x0f))
+    expect(bytes.subarray(2, 5)).toEqual(seq(0x1b, 0x52, 0x0f))
+    expect(bytes.subarray(5, 7)).toEqual(seq(0x1c, 0x26))
     expect(includes(bytes, seq(0x1b, 0x61, 0x01))).toBe(true) // ESC a 1 居中
     expect(includes(bytes, seq(0x1b, 0x45, 0x01))).toBe(true) // ESC E 1 粗体开
     expect(includes(bytes, seq(0x1b, 0x45, 0x00))).toBe(true) // ESC E 0 粗体关
@@ -151,10 +161,11 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
     expect(includes(bytes, seq(0x1d, 0x56, 0x42, 0x00))).toBe(true) // GS V 66 0 切纸（cutPaper=true）
   })
 
-  it('58mm 默认模板全指令链 + 32 列 divider（80mm divider 不出现）', async () => {
+  it('58mm 默认模板全指令链 + FS & + 32 列 divider（80mm divider 不出现）', async () => {
     const bytes = await gen(DEFAULT_TEMPLATE_58MM)
     expect(bytes.subarray(0, 2)).toEqual(seq(0x1b, 0x40))
     expect(includes(bytes, seq(0x1b, 0x52, 0x0f))).toBe(true)
+    expect(includes(bytes, seq(0x1c, 0x26))).toBe(true) // FS & 汉字模式
     expect(includes(bytes, seq(0x1b, 0x61, 0x01))).toBe(true)
     expect(includes(bytes, seq(0x1b, 0x45, 0x01))).toBe(true)
     expect(includes(bytes, seq(0x1b, 0x21, 0x10))).toBe(true)
@@ -227,58 +238,100 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
     expect(includes(bytes, seq(0x1b, 0x61, 0x00))).toBe(true)
   })
 
-  it('Logo 段落：vars.logoBuffer 有 → 光栅 1d 76 30 00；无 → 跳过不发光栅', async () => {
+  it('Logo 段落：vars.logoBuffers 命中 logoId → 光栅 1d 76 30 30（m=0x30 库默认）；未命中/未指定 → 跳过不发光栅', async () => {
     const t = makeTemplate((x) => {
-      x.header.unshift({ type: 'image' })
+      x.header.unshift({ type: 'image', logoId: 7 })
     })
-    const noLogo = await gen(t) // vars 无 logoBuffer
-    expect(includes(noLogo, seq(0x1d, 0x76, 0x30, 0x00))).toBe(false)
+    const noLogo = await gen(t) // vars 无 logoBuffers
+    expect(includes(noLogo, seq(0x1d, 0x76, 0x30, 0x30))).toBe(false)
 
-    const withLogo = await gen(t, SAMPLE_SALE, { ...SAMPLE_VARS, logoBuffer: makeLogoPng() })
-    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x00))).toBe(true)
+    const missingId = await gen(t, SAMPLE_SALE, {
+      ...SAMPLE_VARS,
+      logoBuffers: new Map([[999, makeLogoPng()]])
+    })
+    expect(includes(missingId, seq(0x1d, 0x76, 0x30, 0x30))).toBe(false)
+
+    const withLogo = await gen(t, SAMPLE_SALE, {
+      ...SAMPLE_VARS,
+      logoBuffers: new Map([[7, makeLogoPng()]])
+    })
+    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x30))).toBe(true)
+    // 旧 m=0x00 patch 值不得出现（1d 76 30 00 为非 0x30 模式头）
+    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x00))).toBe(false)
+  })
+
+  it('多 Logo：header/footer 各引用一个 logoId → 两个光栅段均出现', async () => {
+    const t = makeTemplate((x) => {
+      x.header.unshift({ type: 'image', logoId: 1 })
+      x.footer.push({ type: 'image', logoId: 2 })
+    })
+    const bytes = await gen(t, SAMPLE_SALE, {
+      ...SAMPLE_VARS,
+      logoBuffers: new Map([
+        [1, makeLogoPng()],
+        [2, makeLogoPng()]
+      ])
+    })
+    // 两段相同棋盘图 → 光栅头出现两次
+    const head = seq(0x1d, 0x76, 0x30, 0x30)
+    const first = Buffer.from(bytes).indexOf(head)
+    const second = Buffer.from(bytes).indexOf(head, first + 1)
+    expect(first).toBeGreaterThanOrEqual(0)
+    expect(second).toBeGreaterThan(first)
   })
 
   it('58mm + Logo 组合：光栅与 32 列 divider 共存', async () => {
     const t = makeTemplate(
       (x) => {
-        x.header.unshift({ type: 'image' })
+        x.header.unshift({ type: 'image', logoId: 7 })
       },
       DEFAULT_TEMPLATE_58MM
     )
-    const bytes = await gen(t, SAMPLE_SALE, { ...SAMPLE_VARS, logoBuffer: makeLogoPng() })
-    expect(includes(bytes, seq(0x1d, 0x76, 0x30, 0x00))).toBe(true)
+    const bytes = await gen(t, SAMPLE_SALE, {
+      ...SAMPLE_VARS,
+      logoBuffers: new Map([[7, makeLogoPng()]])
+    })
+    expect(includes(bytes, seq(0x1d, 0x76, 0x30, 0x30))).toBe(true)
     expect(includes(bytes, Buffer.from('-'.repeat(32), 'latin1'))).toBe(true)
   })
 
   // ── char-grid 同源几何（items 四列）──
 
-  it('items 表四列几何：列头 + 每行均由 shared char-grid 组合，行宽恰为 PAPER_COLUMNS', async () => {
+  it('items 表四列几何：列头 + 每行行集均由 shared char-grid 组合，每行宽恰为 PAPER_COLUMNS', async () => {
     for (const paper of ['58mm', '80mm'] as const) {
       const base = paper === '58mm' ? DEFAULT_TEMPLATE_58MM : DEFAULT_TEMPLATE_80MM
       const bytes = await gen(base)
-      // 列头行
-      const header = expectedItemRow(paper, '商品', '数量', '单价', '小计')
-      expect(stringWidth(header)).toBe(PAPER_COLUMNS[paper])
-      expect(includes(bytes, iconv.encode(header, 'EUC-CN'))).toBe(true)
-      // 每个明细行
-      for (const item of SAMPLE_SALE.items) {
-        const line = expectedItemRow(paper, item.name, item.quantity, item.unitPrice, item.subtotal)
+      // 列头行集
+      const header = expectedItemLines(paper, '商品', '数量', '单价', '小计')
+      for (const line of header) {
         expect(stringWidth(line)).toBe(PAPER_COLUMNS[paper])
         expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+      }
+      // 每个明细行集（单行名 → 单元素数组）
+      for (const item of SAMPLE_SALE.items) {
+        const lines = expectedItemLines(paper, item.name, item.quantity, item.unitPrice, item.subtotal)
+        for (const line of lines) {
+          expect(stringWidth(line)).toBe(PAPER_COLUMNS[paper])
+          expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+        }
       }
     }
   })
 
-  it('超长商品名截断到名称列宽（truncateToGrid 同源），完整名不出现', async () => {
+  it('超长商品名折行成多行 items（wrapToGrid 同源）：每行满宽、完整名不出现', async () => {
     const longName = '超长商品名称测试一二三四五六七八九十甲乙丙丁戊己庚辛壬癸'
     const sale: SaleReceiptData = {
       items: [{ name: longName, quantity: '1', unitPrice: '1.00', subtotal: '1.00' }]
     }
     const bytes = await gen(DEFAULT_TEMPLATE_80MM, sale)
-    const line = expectedItemRow('80mm', longName, '1', '1.00', '1.00')
-    expect(stringWidth(line)).toBe(PAPER_COLUMNS['80mm'])
-    expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
-    // 未截断的完整商品名不得出现
+    const lines = expectedItemLines('80mm', longName, '1', '1.00', '1.00')
+    // 80mm name 列宽 24 → 40 宽长名折成多行
+    expect(lines.length).toBeGreaterThan(1)
+    for (const line of lines) {
+      expect(stringWidth(line)).toBe(PAPER_COLUMNS['80mm'])
+      expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    }
+    // 未折行的完整商品名不得出现
     expect(includes(bytes, iconv.encode(longName, 'EUC-CN'))).toBe(false)
   })
 
@@ -287,8 +340,10 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
       x.items = { type: 'items', showHeader: false }
     })
     const bytes = await gen(t)
-    const header = expectedItemRow('80mm', '商品', '数量', '单价', '小计')
-    expect(includes(bytes, iconv.encode(header, 'EUC-CN'))).toBe(false)
+    const header = expectedItemLines('80mm', '商品', '数量', '单价', '小计')
+    for (const line of header) {
+      expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(false)
+    }
   })
 
   it('items 自定义列头文案渲染', async () => {
@@ -303,8 +358,50 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
       }
     })
     const bytes = await gen(t)
-    const header = expectedItemRow('80mm', '品名', '数', '价', '计')
-    expect(includes(bytes, iconv.encode(header, 'EUC-CN'))).toBe(true)
+    const header = expectedItemLines('80mm', '品名', '数', '价', '计')
+    for (const line of header) {
+      expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    }
+  })
+
+  it('items.columnWidths 覆盖：名称列按覆盖宽度折行，行宽仍满网格', async () => {
+    const t = makeTemplate((x) => {
+      x.items = { type: 'items', showHeader: true, columnWidths: { name: 28, qty: 4, price: 8, subtotal: 8 } }
+    })
+    const longName = '超长商品名称测试一二三四五六七八九十甲乙丙丁戊己庚辛壬癸'
+    const sale: SaleReceiptData = {
+      items: [{ name: longName, quantity: '1', unitPrice: '1.00', subtotal: '1.00' }]
+    }
+    const bytes = await gen(t, sale)
+    // 覆盖列宽下的期望行集（测试侧独立重算：wrapToGrid(name, 28)）
+    const nameLines = wrapToGrid(longName, 28)
+    for (let i = 0; i < nameLines.length; i++) {
+      const line =
+        i === 0
+          ? padLine(nameLines[i] as string, 28) +
+            padLine(truncateToGrid('1', 4), 4, 'right') +
+            padLine(truncateToGrid('1.00', 8), 8, 'right') +
+            padLine(truncateToGrid('1.00', 8), 8, 'right')
+          : padLine(nameLines[i] as string, 28) + padLine('', 4) + padLine('', 8, 'right') + padLine('', 8, 'right')
+      expect(stringWidth(line)).toBe(PAPER_COLUMNS['80mm'])
+      expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    }
+    // 覆盖 name 列宽 28 > 默认 24：完整前 14 个汉字（28 列）单行出现
+    expect(includes(bytes, iconv.encode(longName.slice(0, 14), 'EUC-CN'))).toBe(true)
+  })
+
+  it('text/total 段落超宽折行：wrapToGrid 逐行进入字节流，不依赖打印机硬件折行', async () => {
+    const longNote = '本店长期供应各类日用百货生鲜果蔬欢迎新老顾客光临惠顾谢谢惠顾'
+    const t = makeTemplate((x) => {
+      x.footer.unshift({ type: 'text', content: longNote, align: 'center' })
+      x.totals.push({ type: 'total', label: `备注: ${longNote}`, align: 'left' })
+    })
+    const bytes = await gen(t)
+    const wrapped = wrapToGrid(longNote, 48)
+    expect(wrapped.length).toBeGreaterThan(1)
+    for (const line of wrapped) {
+      expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    }
   })
 
   // ── GBK 编码与降级（D20）──
@@ -315,8 +412,10 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
     }
     const bytes = await gen(DEFAULT_TEMPLATE_80MM, sale)
     // 降级 '?' 宽 1，参与 char-grid 组合后的行必须出现
-    const line = expectedItemRow('80mm', '?测试品', '1', '2.00', '2.00')
-    expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    const lines = expectedItemLines('80mm', '?测试品', '1', '2.00', '2.00')
+    for (const line of lines) {
+      expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    }
     // 原字符（UTF-8 编码的 U+20000）不得出现在字节流
     expect(includes(bytes, Buffer.from('𠀀', 'utf-8'))).toBe(false)
   })
@@ -398,11 +497,14 @@ describe('golden .bin 字节级 diff', () => {
   it('80mm 含 Logo 模板完整输出与入库基准逐字节一致', async () => {
     const t = makeTemplate(
       (x) => {
-        x.header.unshift({ type: 'image' })
+        x.header.unshift({ type: 'image', logoId: 7 })
       },
       DEFAULT_TEMPLATE_80MM
     )
-    const bytes = await gen(t, SAMPLE_SALE, { ...SAMPLE_VARS, logoBuffer: makeLogoPng() })
+    const bytes = await gen(t, SAMPLE_SALE, {
+      ...SAMPLE_VARS,
+      logoBuffers: new Map([[7, makeLogoPng()]])
+    })
     const expected = readFileSync(join(goldenDir, 'receipt-80mm-with-logo.bin'))
     expect(Buffer.compare(bytes, expected)).toBe(0)
   })
@@ -416,11 +518,14 @@ describe.skipIf(!process.env['GOLDEN_UPDATE'])('GOLDEN_UPDATE 再生模式', () 
 
     const t = makeTemplate(
       (x) => {
-        x.header.unshift({ type: 'image' })
+        x.header.unshift({ type: 'image', logoId: 7 })
       },
       DEFAULT_TEMPLATE_80MM
     )
-    const logo80 = await gen(t, SAMPLE_SALE, { ...SAMPLE_VARS, logoBuffer: makeLogoPng() })
+    const logo80 = await gen(t, SAMPLE_SALE, {
+      ...SAMPLE_VARS,
+      logoBuffers: new Map([[7, makeLogoPng()]])
+    })
     writeFileSync(join(goldenDir, 'receipt-80mm-with-logo.bin'), logo80)
     writeFileSync(join(goldenDir, 'receipt-58mm-default.bin'), await gen(DEFAULT_TEMPLATE_58MM))
 

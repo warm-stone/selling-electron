@@ -101,6 +101,57 @@ describe('template.repo：isValidReceiptTemplate 类型守卫（config_json 落�
     expect(isValidReceiptTemplate(null)).toBe(false)
     expect(isValidReceiptTemplate('json 字符串')).toBe(false)
   })
+
+  it('items.columnWidths：四键正整数且总和 === PAPER_COLUMNS 通过；否则整体拒绝', () => {
+    const good = cloneTemplate('80mm')
+    good.items.columnWidths = { name: 28, qty: 4, price: 8, subtotal: 8 } // 28+4+8+8=48
+    expect(isValidReceiptTemplate(good)).toBe(true)
+
+    const good58 = cloneTemplate('58mm')
+    good58.items.columnWidths = { name: 16, qty: 4, price: 6, subtotal: 6 } // 32
+    expect(isValidReceiptTemplate(good58)).toBe(true)
+
+    // 总和 ≠ PAPER_COLUMNS（44 ≠ 48）
+    const badSum = cloneTemplate('80mm')
+    badSum.items.columnWidths = { name: 20, qty: 4, price: 10, subtotal: 10 }
+    expect(isValidReceiptTemplate(badSum)).toBe(false)
+
+    // 四键不全
+    const badPartial = cloneTemplate('80mm')
+    badPartial.items.columnWidths = { name: 28, qty: 4, price: 8 }
+    expect(isValidReceiptTemplate(badPartial)).toBe(false)
+
+    // 非正整数（0/小数/字符串脏值）
+    const badZero = cloneTemplate('80mm')
+    badZero.items.columnWidths = { name: 0, qty: 4, price: 10, subtotal: 10 }
+    expect(isValidReceiptTemplate(badZero)).toBe(false)
+    const badFraction = cloneTemplate('80mm')
+    badFraction.items.columnWidths = { name: 24.5, qty: 4, price: 10, subtotal: 9.5 }
+    expect(isValidReceiptTemplate(badFraction)).toBe(false)
+    const badString = cloneTemplate('80mm')
+    badString.items.columnWidths = {
+      name: '24' as unknown as number,
+      qty: 4,
+      price: 10,
+      subtotal: 10
+    }
+    expect(isValidReceiptTemplate(badString)).toBe(false)
+
+    // columnWidths 非对象
+    const badShape = cloneTemplate('80mm')
+    ;(badShape.items as unknown as Record<string, unknown>)['columnWidths'] = [24, 4, 10, 10]
+    expect(isValidReceiptTemplate(badShape)).toBe(false)
+  })
+
+  it('Section.logoId：存在时必须为 number（image 段落引用 logos 表行）', () => {
+    const good = cloneTemplate('80mm')
+    good.header.unshift({ type: 'image', logoId: 3 })
+    expect(isValidReceiptTemplate(good)).toBe(true)
+
+    const bad = cloneTemplate('80mm')
+    bad.header.unshift({ type: 'image', logoId: '3' as unknown as number })
+    expect(isValidReceiptTemplate(bad)).toBe(false)
+  })
 })
 
 describe('template.repo create：config_json 序列化 + 校验 + 首个模板自动默认', () => {

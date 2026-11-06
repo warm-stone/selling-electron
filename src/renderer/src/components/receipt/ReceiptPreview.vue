@@ -3,12 +3,12 @@ import { computed } from 'vue'
 import {
   PAPER_COLUMNS,
   padLine,
-  truncateToGrid,
+  wrapToGrid,
   type LineAlign,
   type PaperWidth
 } from '../../../../shared/receipt/char-grid'
 import {
-  ITEM_COLUMN_WIDTHS,
+  resolveColumnWidths,
   type ReceiptItemLine,
   type SaleReceiptData
 } from '../../../../shared/receipt/item-columns'
@@ -26,9 +26,12 @@ import {
  *
  * 与 ESC/POS 生成器（src/main/printing/escpos/）共消费 shared char-grid/
  * item-columns——预览的每一行文本（.receipt-line 的 textContent）与打印侧
- * 字节流解码文本按同一数学产出：text/total 行 = padLine(truncateToGrid(...))，
- * items 行 = buildItemLine（恒等降级；GBK 外字符在预览原样渲染、打印侧降级
- * '?'——GBK 内业务文本两侧行集完全一致，差异见模块 learnings）。
+ * 字节流解码文本按同一数学产出：text/total 行 = interpolate → wrapToGrid
+ * 多行 → 逐行 padLine（char-grid 冻结顺序，超长文案换行不再截断），
+ * items 行 = buildItemLines 的多行形态（恒等降级；名称列 wrapToGrid 折
+ * N 行、数量/单价/小计只在首行、续行右侧三列空白——GBK 外字符在预览
+ * 原样渲染、打印侧降级 '?'，GBK 内业务文本两侧行集完全一致，差异见
+ * 模块 learnings）。
  *
  * 只渲染、不做打印动作（打印按钮由外层 T15 编排）。
  */
@@ -36,8 +39,11 @@ const props = defineProps<{
   template: ReceiptTemplate
   data: SaleReceiptData
   vars: ReceiptVars
-  /** Logo dataURL（image 段落；未传则静默跳过——同 ESC/POS 行为。Buffer 不跨 IPC） */
-  logoUrl?: string
+  /**
+   * logo id → dataURL 映射（image 段落按 logoId 取图；未指定 logoId 或
+   * 无对应图时静默跳过——同 ESC/POS 行为。Buffer 不跨 IPC，值为 dataURL）
+   */
+  logoUrls?: Record<number, string>
 }>()
 
 /** 纸张物理宽度（px，96dpi 圆整）：80mm≈307px、58mm≈221px（E2E 容器宽度断言锚点） */
@@ -50,9 +56,17 @@ const cols = computed(() => PAPER_COLUMNS[props.template.paperWidth])
 const paperWidthPx = computed(() => PAPER_WIDTH_PX[props.template.paperWidth])
 const logoMaxWidth = computed(() => `${cols.value * HALF_CHAR_PX}px`)
 
-/** items 四列宽（%）——shared ITEM_COLUMN_WIDTHS 换算（G7：与生成器同基准） */
+/**
+ * items 四列宽：resolveColumnWidths（模板 columnWidths 覆盖合法则采用、
+ * 否则回落纸宽默认）——G7：与打印侧 buildItemLines 同一列宽基准。
+ */
+const itemWidths = computed(() =>
+  resolveColumnWidths(props.template.paperWidth, props.template.items.columnWidths)
+)
+
+/** items 四列宽（%）——itemWidths 换算（G7：与生成器同基准） */
 const itemCols = computed(() => {
-  const w = ITEM_COLUMN_WIDTHS[props.template.paperWidth]
+  const w = itemWidths.value
   const total = cols.value
   const pct = (n: number): string => `${Number(((n / total) * 100).toFixed(2))}%`
   return [
@@ -69,22 +83,40 @@ interface ItemCell {
   cssAlign: LineAlign
 }
 
-/** 明细行四格文本：与 buildItemLine 恒等降级路径逐格同源（拼接即整行） */
-function cellsOf(item: ReceiptItemLine): ItemCell[] {
-  const w = ITEM_COLUMN_WIDTHS[props.template.paperWidth]
-  return [
-    { key: 'name', text: padLine(truncateToGrid(item.name, w.name), w.name), cssAlign: 'left' },
-    { key: 'qty', text: padLine(truncateToGrid(item.quantity, w.qty), w.qty, 'right'), cssAlign: 'right' },
-    { key: 'price', text: padLine(truncateToGrid(item.unitPrice, w.price), w.price, 'right'), cssAlign: 'right' },
-    { key: 'subtotal', text: padLine(truncateToGrid(item.subtotal, w.subtotal), w.subtotal, 'right'), cssAlign: 'right' }
-  ]
+/**
+ * 明细行多行化：与打印侧 buildItemLines 逐格等价（组合顺序恒等降级 →
+ * wrap → padLine——打印侧 degrade 后 wrap、预览侧原文 wrap，GBK 内文本
+ * 两侧行集一致）。名称列 wrapToGrid(item.name, w.name) 折 N 行：首行四格
+ * [nameLine0, pad(qty,right), pad(price,right), pad(subtotal,right)]，
+ * 续行 [pad(nameLineI), 空串 pad ×3]（右侧三列空白）；每格仍 padLine
+ * 到列宽，拼接后每行宽恰为 PAPER_COLUMNS。
+ */
+function itemRows(item: ReceiptItemLine): ItemCell[][] {
+  const w = itemWidths.value
+  return wrapToGrid(item.name, w.name).map((nameLine, idx): ItemCell[] => {
+    if (idx === 0) {
+      return [
+        { key: 'name', text: padLine(nameLine, w.name), cssAlign: 'left' },
+        { key: 'qty', text: padLine(item.quantity, w.qty, 'right'), cssAlign: 'right' },
+        { key: 'price', text: padLine(item.unitPrice, w.price, 'right'), cssAlign: 'right' },
+        { key: 'subtotal', text: padLine(item.subtotal, w.subtotal, 'right'), cssAlign: 'right' }
+      ]
+    }
+    return [
+      { key: 'name', text: padLine(nameLine, w.name), cssAlign: 'left' },
+      { key: 'qty', text: padLine('', w.qty, 'right'), cssAlign: 'right' },
+      { key: 'price', text: padLine('', w.price, 'right'), cssAlign: 'right' },
+      { key: 'subtotal', text: padLine('', w.subtotal, 'right'), cssAlign: 'right' }
+    ]
+  })
 }
 
 const showItemHeader = computed(() => props.template.items.showHeader ?? true)
 
-const headerCells = computed<ItemCell[]>(() => {
+/** 列头行同样多行化（label 超长也换行）——复用明细行的同源组合数学 */
+const headerRows = computed<ItemCell[][]>(() => {
   const s = props.template.items
-  return cellsOf({
+  return itemRows({
     name: s.nameLabel ?? '商品',
     quantity: s.qtyLabel ?? '数量',
     unitPrice: s.priceLabel ?? '单价',
@@ -92,17 +124,29 @@ const headerCells = computed<ItemCell[]>(() => {
   })
 })
 
-/** text/total 行文本：interpolate → truncate → pad（char-grid 冻结顺序） */
-function lineText(raw: string, align: LineAlign): string {
-  return padLine(truncateToGrid(raw, cols.value), cols.value, align)
+/**
+ * text/total 行文本（多行）：interpolate → wrap → pad（char-grid 冻结
+ * 顺序，与打印侧同序——超长文案换行多行渲染，不再截断）
+ */
+function lineTexts(raw: string, align: LineAlign): string[] {
+  return wrapToGrid(raw, cols.value).map((line) => padLine(line, cols.value, align))
 }
 
-function sectionText(section: Section): string {
-  return lineText(interpolateVariables(section.content ?? '', props.vars), section.align ?? 'left')
+function sectionTexts(section: Section): string[] {
+  return lineTexts(interpolateVariables(section.content ?? '', props.vars), section.align ?? 'left')
 }
 
-function totalText(line: TotalLine): string {
-  return lineText(interpolateVariables(line.label, props.vars), line.align ?? 'left')
+function totalTexts(line: TotalLine): string[] {
+  return lineTexts(interpolateVariables(line.label, props.vars), line.align ?? 'left')
+}
+
+/**
+ * image 段落命中的 logo dataURL（logoId 未指定或无对应图 → undefined；
+ * 预览静默跳过，同打印侧语义）
+ */
+function logoSrcOf(s: Section): string | undefined {
+  if (s.type !== 'image' || s.logoId === undefined) return undefined
+  return props.logoUrls?.[s.logoId]
 }
 
 function lineClasses(line: { bold?: boolean; size?: SectionSize }): Record<string, boolean> {
@@ -140,13 +184,19 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
     data-testid="receipt-paper"
   >
     <template v-for="(s, i) in template.header" :key="`h-${i}`">
-      <div v-if="s.type === 'text'" class="receipt-line" :class="lineClasses(s)" :style="lineStyle(s)">{{
-        sectionText(s)
-      }}</div>
+      <template v-if="s.type === 'text'">
+        <div
+          v-for="(line, j) in sectionTexts(s)"
+          :key="`h-${i}-${j}`"
+          class="receipt-line"
+          :class="lineClasses(s)"
+          :style="lineStyle(s)"
+        >{{ line }}</div>
+      </template>
       <img
-        v-else-if="s.type === 'image' && logoUrl"
+        v-else-if="s.type === 'image' && logoSrcOf(s)"
         class="receipt-logo"
-        :src="logoUrl"
+        :src="logoSrcOf(s)"
         :style="{ maxWidth: logoMaxWidth }"
         alt="店铺 Logo"
       />
@@ -158,31 +208,43 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
         <col v-for="c in itemCols" :key="c.key" :style="{ width: c.pct }" />
       </colgroup>
       <tbody>
-        <tr v-if="showItemHeader" class="receipt-line">
-          <td v-for="c in headerCells" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
-        </tr>
-        <tr v-for="(item, i) in data.items" :key="i" class="receipt-line">
-          <td v-for="c in cellsOf(item)" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
-        </tr>
+        <template v-if="showItemHeader">
+          <tr v-for="(cells, j) in headerRows" :key="`hd-${j}`" class="receipt-line">
+            <td v-for="c in cells" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
+          </tr>
+        </template>
+        <template v-for="(item, i) in data.items" :key="`it-${i}`">
+          <tr v-for="(cells, j) in itemRows(item)" :key="`it-${i}-${j}`" class="receipt-line">
+            <td v-for="c in cells" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
+          </tr>
+        </template>
       </tbody>
     </table>
 
-    <div
-      v-for="(t, i) in template.totals"
-      :key="`t-${i}`"
-      class="receipt-line"
-      :class="lineClasses(t)"
-      :style="lineStyle(t)"
-    >{{ totalText(t) }}</div>
+    <template v-for="(t, i) in template.totals" :key="`t-${i}`">
+      <div
+        v-for="(line, j) in totalTexts(t)"
+        :key="`t-${i}-${j}`"
+        class="receipt-line"
+        :class="lineClasses(t)"
+        :style="lineStyle(t)"
+      >{{ line }}</div>
+    </template>
 
     <template v-for="(s, i) in template.footer" :key="`f-${i}`">
-      <div v-if="s.type === 'text'" class="receipt-line" :class="lineClasses(s)" :style="lineStyle(s)">{{
-        sectionText(s)
-      }}</div>
+      <template v-if="s.type === 'text'">
+        <div
+          v-for="(line, j) in sectionTexts(s)"
+          :key="`f-${i}-${j}`"
+          class="receipt-line"
+          :class="lineClasses(s)"
+          :style="lineStyle(s)"
+        >{{ line }}</div>
+      </template>
       <img
-        v-else-if="s.type === 'image' && logoUrl"
+        v-else-if="s.type === 'image' && logoSrcOf(s)"
         class="receipt-logo"
-        :src="logoUrl"
+        :src="logoSrcOf(s)"
         :style="{ maxWidth: logoMaxWidth }"
         alt="店铺 Logo"
       />

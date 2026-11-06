@@ -8,10 +8,10 @@
  *
  * **纯函数，零 Node/Electron/DOM 依赖**（iconv 等降级实现不可出现在此——
  * GBK 降级经 `degrade` 参数由调用方注入：生成器传 degradeToGbk，
- * 预览默认恒等，见 buildItemLine）。
+ * 预览默认恒等，见 buildItemLines）。
  */
 
-import { padLine, truncateToGrid, type PaperWidth } from './char-grid'
+import { PAPER_COLUMNS, padLine, truncateToGrid, wrapToGrid, type PaperWidth } from './char-grid'
 
 // ═════════════════════ 数据契约（打印/预览共用，display-ready） ═════════════════════
 
@@ -59,37 +59,85 @@ export const ITEM_COLUMN_WIDTHS: Record<PaperWidth, ItemColumnWidths> = {
 
 /**
  * 文本降级函数：字符集降级（如 GBK 外字符 → '?'）由调用方注入。
- * 降级会改变显示宽度（宽字符 → 半角 '?'），必须发生在截断之前，
- * 见 buildItemLine 的组合顺序。
+ * 降级会改变显示宽度（宽字符 → 半角 '?'），必须发生在折行/截断之前，
+ * 见 buildItemLines 的组合顺序。
  */
 export type TextDegrader = (text: string) => string
 
+/** columnWidths 覆盖值是否为正整数（运行时兜底判定的单键检查） */
+function isPositiveInt(v: number | undefined): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0
+}
+
 /**
- * 组合一行 items 网格行（G7 同源：ESC/POS 生成器与 HTML 预览的唯一实现）。
+ * 解析 items 表列宽（模板 columnWidths 覆盖 → 默认冻结值）。
  *
- * 组合顺序（char-grid 冻结契约）：**降级 → truncate → pad**。
- * 拼接后行宽恰为 PAPER_COLUMNS（打印侧几何自洽；与共享 char-grid 同一
- * 顺序组合——两种渲染路径产物几何一致）。
+ * columnWidths **四键齐全且均为正整数且 name+qty+price+subtotal ===
+ * PAPER_COLUMNS[paperWidth]** 时采用，否则回落 ITEM_COLUMN_WIDTHS[paperWidth]
+ * （运行时兜底：模板 JSON 旁路写入的脏值不崩溃；repo 层 isValidItemsSection
+ * 已做同规则的严格校验，正常落库数据不会走到回落分支）。
+ */
+export function resolveColumnWidths(
+  paperWidth: PaperWidth,
+  columnWidths?: Partial<ItemColumnWidths>
+): ItemColumnWidths {
+  if (columnWidths !== undefined) {
+    const { name, qty, price, subtotal } = columnWidths
+    if (
+      isPositiveInt(name) &&
+      isPositiveInt(qty) &&
+      isPositiveInt(price) &&
+      isPositiveInt(subtotal) &&
+      name + qty + price + subtotal === PAPER_COLUMNS[paperWidth]
+    ) {
+      return { name, qty, price, subtotal }
+    }
+  }
+  return ITEM_COLUMN_WIDTHS[paperWidth]
+}
+
+/**
+ * 组合 items 网格行（G7 同源：ESC/POS 生成器与 HTML 预览的唯一实现）。
+ * 名称列超宽**折行**（wrapToGrid，非截断）——折成 N 行网格行返回：
+ * 第一行四列齐备，续行仅名称列延续（数量/单价/小计列为空白列）。
+ *
+ * 组合顺序（char-grid 冻结契约）：**降级 → wrap → pad**。
+ * 拼接后每行宽度恰为 PAPER_COLUMNS（打印侧几何自洽；与共享 char-grid
+ * 同一顺序组合——两种渲染路径产物几何一致）。
  *
  * - `degrade` 默认恒等：renderer 预览无 iconv（G8 零 Node 依赖），
  *   GBK 外字符按原文渲染（与打印侧 '?' 降级的差异已文档化——
  *   GBK 内业务文本两侧行集完全一致）；
  *   ESC/POS 生成器传入 degradeToGbk（gb2312-encoder）。
- * - 名称列左对齐，数量/单价/小计列右对齐。
+ * - 名称列左对齐（wrapToGrid 后 padLine），数量/单价/小计列右对齐
+ *   （超宽仍 truncateToGrid——数字列不折行，维持收银小票惯例）。
+ * - `columnWidths` 模板列宽覆盖（resolveColumnWidths 校验/回落）。
  */
-export function buildItemLine(
+export function buildItemLines(
   name: string,
   qty: string,
   price: string,
   subtotal: string,
   paperWidth: PaperWidth,
-  degrade: TextDegrader = (s) => s
-): string {
-  const w = ITEM_COLUMN_WIDTHS[paperWidth]
-  return (
-    padLine(truncateToGrid(degrade(name), w.name), w.name) +
-    padLine(truncateToGrid(degrade(qty), w.qty), w.qty, 'right') +
-    padLine(truncateToGrid(degrade(price), w.price), w.price, 'right') +
-    padLine(truncateToGrid(degrade(subtotal), w.subtotal), w.subtotal, 'right')
-  )
+  degrade: TextDegrader = (s) => s,
+  columnWidths?: Partial<ItemColumnWidths>
+): string[] {
+  const w = resolveColumnWidths(paperWidth, columnWidths)
+  // 冻结契约顺序：降级 → wrap（降级改变宽度，必须发生在折行前）
+  const nameLines = wrapToGrid(degrade(name), w.name)
+  const qtyCell = padLine(truncateToGrid(degrade(qty), w.qty), w.qty, 'right')
+  const priceCell = padLine(truncateToGrid(degrade(price), w.price), w.price, 'right')
+  const subtotalCell = padLine(truncateToGrid(degrade(subtotal), w.subtotal), w.subtotal, 'right')
+
+  const lines: string[] = []
+  for (let i = 0; i < nameLines.length; i++) {
+    const nameCell = padLine(nameLines[i] as string, w.name)
+    if (i === 0) {
+      lines.push(nameCell + qtyCell + priceCell + subtotalCell)
+    } else {
+      // 续行：名称列延续，数量/单价/小计三列为空白列（同列宽 pad）
+      lines.push(nameCell + padLine('', w.qty) + padLine('', w.price, 'right') + padLine('', w.subtotal, 'right'))
+    }
+  }
+  return lines
 }

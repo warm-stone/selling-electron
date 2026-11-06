@@ -3,6 +3,7 @@ import type {
   AppSettings,
   CheckoutItem,
   IpcChannels,
+  LogoInfo,
   PrintTemplate,
   Product,
   PurchaseInputItem,
@@ -31,7 +32,8 @@ interface PrintingPreviewResult {
   sale: SaleDetail
   data: SaleReceiptData
   vars: ReceiptVars
-  logoUrl: string | null
+  /** Logo dataURL 集合（logoId → dataURL；未引用/读取失败 → 无该 key） */
+  logoUrls: Record<number, string>
 }
 
 /**
@@ -116,19 +118,26 @@ const api = {
       ipcRenderer.invoke('products:delete', { id })
   },
 
-  // ── 设置（Task 19：店铺信息 / 打印配置 / Logo）──
+  // ── 设置（Task 19：店铺信息 / 打印配置；多 Logo 架构）──
   settings: {
     /** 全量设置（缺 key 走默认值：通道 spooler、auto_cut true 等） */
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     /** 增量保存（Partial upsert，事务写入；返回保存后的全量设置） */
     set: (patch: Partial<AppSettings>): Promise<AppSettings> =>
       ipcRenderer.invoke('settings:set', patch),
-    /** Logo 上传（主进程原生对话框选 png → 复制 userData/logos/logo.png）；取消时原值不变 */
-    uploadLogo: (): Promise<{ logo_path: string | null }> =>
-      ipcRenderer.invoke('settings:uploadLogo'),
-    /** Logo 缩略图数据源（主进程读文件转 dataURL；未设置/文件缺失返回 null） */
-    getLogoDataUrl: (): Promise<{ data_url: string | null }> =>
-      ipcRenderer.invoke('settings:getLogoDataUrl')
+    /** Logo 列表（主进程读文件转 dataURL；文件缺失的行自动跳过） */
+    listLogos: (): Promise<LogoInfo[]> => ipcRenderer.invoke('settings:listLogos'),
+    /**
+     * Logo 上传（主进程原生对话框选 png → 复制 userData/logos/<uuid>.png +
+     * 入库）；用户取消时列表不变。返回完整最新列表。
+     */
+    uploadLogo: (): Promise<LogoInfo[]> => ipcRenderer.invoke('settings:uploadLogo'),
+    /**
+     * 删除 Logo（DB 行 + 文件；模板引用残留由渲染端跳过）。
+     * 返回完整最新列表。
+     */
+    deleteLogo: (id: number): Promise<LogoInfo[]> =>
+      ipcRenderer.invoke('settings:deleteLogo', { id })
   },
 
   // ── 打印设置（Task 19：打印机枚举 + 测试打印）──
@@ -138,7 +147,7 @@ const api = {
     printers: (): Promise<{ name: string; is_default: boolean }[]> =>
       ipcRenderer.invoke('printing:printers'),
     /**
-     * 测试打印（发送最小 ESC/POS 字节：init + 居中 test + 全切）。
+     * 测试打印（真实生成链路：样例数据 + 当前默认模板 → ESC/POS 字节）。
      * req 为设置页当前打印表单值；走串行队列（PrintQueue），失败返回
      * { ok:false, error }（error 首段含通道名）。
      */
@@ -151,7 +160,7 @@ const api = {
     }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('printing:testPrint', req),
     /**
-     * 小票预览（Task 15）：返回模板/明细/vars/logoUrl——与打印字节同一组装
+     * 小票预览（Task 15）：返回模板/明细/vars/logoUrls——与打印字节同一组装
      * 源头（G7）。与 index.d.ts 的 PrintingPreviewResult 保持结构同步。
      */
     preview: (saleId: number): Promise<PrintingPreviewResult> =>

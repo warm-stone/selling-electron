@@ -2,6 +2,7 @@ import type {
   AppSettings,
   CheckoutItem,
   IpcChannels,
+  LogoInfo,
   PrintTemplate,
   Product,
   PurchaseInputItem,
@@ -63,8 +64,12 @@ export interface ProductsApi {
 export interface SettingsApi {
   get: () => Promise<AppSettings>
   set: (patch: Partial<AppSettings>) => Promise<AppSettings>
-  uploadLogo: () => Promise<{ logo_path: string | null }>
-  getLogoDataUrl: () => Promise<{ data_url: string | null }>
+  /** Logo 列表（主进程读文件转 dataURL；文件缺失的行自动跳过） */
+  listLogos: () => Promise<LogoInfo[]>
+  /** Logo 上传（原生对话框选 png → 复制 userData/logos/<uuid>.png + 入库）；取消时列表不变 */
+  uploadLogo: () => Promise<LogoInfo[]>
+  /** 删除 Logo（DB 行 + 文件；模板引用残留由渲染端跳过）；返回完整最新列表 */
+  deleteLogo: (id: number) => Promise<LogoInfo[]>
 }
 
 /** 测试打印请求：AppSettings 的打印子集（设置页「打印设置」卡片当前表单值） */
@@ -75,7 +80,7 @@ export type PrintTestRequest = Pick<
 
 /**
  * 小票预览结果（Task 15）：printing:preview res 的运行时结构超集——
- * T3 契约只声明 template+sale，data/vars/logoUrl 为主进程 PreviewPayload
+ * T3 契约只声明 template+sale，data/vars/logoUrls 为主进程 PreviewPayload
  * 附加字段（与打印字节同一组装源头，G7）。
  * 与 src/preload/index.ts 的同名声明保持结构同步。
  */
@@ -86,8 +91,8 @@ export interface PrintingPreviewResult {
   data: SaleReceiptData
   /** 变量插槽值（纯字符串） */
   vars: ReceiptVars
-  /** Logo dataURL（未设置/读取失败 → null；Buffer 不跨 IPC） */
-  logoUrl: string | null
+  /** Logo dataURL 集合（logoId → dataURL；未引用/读取失败 → 无该 key；Buffer 不跨 IPC） */
+  logoUrls: Record<number, string>
 }
 
 export interface PrintingApi {

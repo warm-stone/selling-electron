@@ -277,4 +277,102 @@ test.describe.serial('Task 16：小票模板编辑器（表单 + 实时预览 + 
       `PASS (${new Date().toISOString()}): 结账预览弹窗使用默认模板 '${SECOND_NAME}'，含特征行 '${MARKER_TEXT}'。\n`
     )
   })
+
+  test('明细列宽配置：单项填写 → 红字警示 + 保存阻断；四列齐全总和 48 → 预览列宽联动 + 落库；清空 → JSON 无 columnWidths', async () => {
+    const { page } = app
+
+    // 前序结账闭环用例把页面留在了收银台（预览弹窗未关）——先关弹窗再导航回模板编辑器
+    await page.getByRole('button', { name: '取消' }).click()
+    await page.locator('.el-overlay-dialog').waitFor({ state: 'hidden' })
+    await page.locator('.el-menu-item').filter({ hasText: '小票模板' }).click()
+    await waitForRoute(page, '/template-editor')
+
+    await page.getByTestId('tpl-item').filter({ hasText: DEFAULT_NAME }).click()
+    await expect(page.getByTestId('tpl-name')).toHaveValue(DEFAULT_NAME)
+
+    /** el-input-number 输入（fill + Enter commit） */
+    const fillWidth = async (testid: string, v: string): Promise<void> => {
+      const input = page.getByTestId(testid).locator('input')
+      await input.fill(v)
+      await input.press('Enter')
+    }
+
+    // 只填名称列宽（其余留空）→ 已填键不全 → 红字警示
+    await fillWidth('tpl-col-w-name', '20')
+    await expect(page.getByTestId('tpl-col-w-sum')).toContainText('合计 20 / 48')
+    await expect(page.getByTestId('tpl-col-w-warn')).toBeVisible()
+
+    // 保存阻断：warning toast（不落库）
+    await page.getByTestId('tpl-save').click()
+    await expect(page.locator('.el-message--warning').first()).toBeVisible()
+
+    // 补齐四列：20 + 4 + 12 + 12 = 48（80mm 总列数）→ 警示消失
+    await fillWidth('tpl-col-w-qty', '4')
+    await fillWidth('tpl-col-w-price', '12')
+    await fillWidth('tpl-col-w-subtotal', '12')
+    await expect(page.getByTestId('tpl-col-w-sum')).toContainText('合计 48 / 48')
+    await expect(page.getByTestId('tpl-col-w-warn')).toHaveCount(0)
+
+    // 预览列宽联动：名称列 24/48=50% → 20/48≈41.67%（colgroup 经 resolveColumnWidths 换算）
+    await expect(page.locator('.receipt-items col').first()).toHaveAttribute(
+      'style',
+      /width:\s*41\.67%/
+    )
+
+    // 保存成功 → config_json 含四键 columnWidths
+    await page.getByTestId('tpl-save').click()
+    await expect(page.locator('.el-message--success').filter({ hasText: '已保存' }).first()).toBeVisible()
+    const readConfig = (): Record<string, unknown> => {
+      const db = new Database(app.dbPath)
+      try {
+        const row = db
+          .prepare('SELECT config_json FROM print_templates WHERE id = ?')
+          .get(defaultTemplateId) as { config_json: string }
+        return JSON.parse(row.config_json) as Record<string, unknown>
+      } finally {
+        db.close()
+      }
+    }
+    expect((readConfig().items as { columnWidths?: Record<string, number> }).columnWidths).toEqual({
+      name: 20,
+      qty: 4,
+      price: 12,
+      subtotal: 12
+    })
+
+    // 清空四项（未覆盖形态）→ 保存 → JSON 不含 columnWidths 字段（保持模板干净）
+    await fillWidth('tpl-col-w-name', '')
+    await fillWidth('tpl-col-w-qty', '')
+    await fillWidth('tpl-col-w-price', '')
+    await fillWidth('tpl-col-w-subtotal', '')
+    await expect(page.getByTestId('tpl-col-w-sum')).toContainText('合计 0 / 48')
+    await page.getByTestId('tpl-save').click()
+    await expect(page.locator('.el-message--success').filter({ hasText: '已保存' }).first()).toBeVisible()
+    expect(readConfig().config_json ?? JSON.stringify(readConfig())).not.toContain('columnWidths')
+
+    await page.screenshot({ path: `${EVIDENCE_DIR}/task-16-column-widths.png`, fullPage: true })
+  })
+
+  test('image 段落：Logo 选择控件（列表为空 → select 禁用 + 上传入口 + 引导提示，文案输入已替换）', async () => {
+    const { page } = app
+
+    await page.getByTestId('tpl-item').filter({ hasText: DEFAULT_NAME }).click()
+    await expect(page.getByTestId('tpl-name')).toHaveValue(DEFAULT_NAME)
+
+    const firstRow = page.getByTestId('tpl-row-header').first()
+    await selectOption(page, firstRow.getByTestId('tpl-type'), '图片 Logo')
+
+    const logoSelect = firstRow.getByTestId('tpl-logo-select')
+    // el-select 根 div 的可见性由内部 tooltip wrapper 控制（Playwright 判 hidden），
+    // 断言落在内部 input 上（同 selectOption helper 的定位方式）
+    const logoInput = logoSelect.locator('input')
+    await expect(logoInput).toBeVisible()
+    // E2E 隔离库 logos 为空：select 禁用 + 引导上传提示
+    await expect(logoInput).toBeDisabled()
+    await expect(firstRow.getByTestId('tpl-logo-upload')).toBeVisible()
+    await expect(firstRow.getByText('请先在 设置→小票Logo 上传')).toBeVisible()
+
+    // image 段落不再渲染文案输入（替换为 Logo 选择行）
+    await expect(firstRow.getByTestId('tpl-content')).toHaveCount(0)
+  })
 })

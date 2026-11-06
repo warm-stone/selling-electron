@@ -8,6 +8,7 @@
  */
 
 import type { LineAlign, PaperWidth } from './char-grid'
+import type { ItemColumnWidths } from './item-columns'
 
 /** 段落类型：文本 / 图片（Logo）/ 分隔线 */
 export type SectionType = 'text' | 'image' | 'divider'
@@ -18,7 +19,7 @@ export type SectionSize = 'normal' | 'doubleHeight' | 'doubleWidth' | 'quad'
 /**
  * 模板段落（header/footer 数组元素）。
  * - type='text'：content 为文案，可含 `{变量}` 插槽
- * - type='image'：content 为 Logo 图片标识/路径（读取由渲染编排层负责）
+ * - type='image'：引用 logos 表行（logoId）；读取/注入由渲染编排层负责
  * - type='divider'：按纸宽打印分隔线
  */
 export interface Section {
@@ -27,6 +28,8 @@ export interface Section {
   align?: LineAlign
   size?: SectionSize
   bold?: boolean
+  /** image 段落引用的 logo 行 id（logos 表；缺省=未指定，渲染时跳过） */
+  logoId?: number
 }
 
 /**
@@ -42,6 +45,8 @@ export interface ItemsSection {
   qtyLabel?: string
   priceLabel?: string
   subtotalLabel?: string
+  /** 列宽覆盖（四键齐全且和=PAPER_COLUMNS 才生效，缺省回落默认） */
+  columnWidths?: Partial<ItemColumnWidths>
 }
 
 /** 合计区行（label 可含 `{变量}` 插槽，如 `合计: ￥{total}`） */

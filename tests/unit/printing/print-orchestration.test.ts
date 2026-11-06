@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   appSettingsToPrintSettings,
+  collectSectionLogoIds,
   createPrintOrchestrator,
   parseTemplateRow,
   pngBufferToDataUrl,
@@ -14,10 +15,11 @@ import { encodeGbk } from '../../../src/main/printing/escpos/gb2312-encoder'
 import type { AppSettings, PrintTemplate, SaleDetail } from '../../../src/shared/types'
 
 /**
- * Task 15 — 打印编排单测（DI 注入 mock 数据/通道，**不走真打印机**）：
- *  - buildReceiptPayload 组装（vars formatMoney 元显示 + items display-ready + 同源模板）
+ * 打印编排单测（DI 注入 mock 数据/通道，**不走真打印机**）：
+ *  - buildReceiptPayload 组装（vars formatMoney 元显示 + items display-ready + 同源模板
+ *    + 多 Logo logoBuffers 收集/缺 logo warn）
  *  - voided 单 footer 前追加「=== 已作废 ===」段落（D19，预览/打印同源）
- *  - printSale：生成字节（1b40 开头 / GBK 店名 / 1d564200 全切结尾）传入串行队列
+ *  - printSale：生成字节（1b40 开头 / FS & 汉字模式 / GBK 店名 / 1d564200 全切结尾）传入串行队列
  *  - 连续 printSale 严格串行（队列不交叠）；坏 config_json 回落内置默认模板
  */
 
@@ -61,7 +63,6 @@ const SETTINGS: AppSettings = {
   shop_name: '测试便利店',
   shop_phone: '13800000000',
   receipt_note: '谢谢惠顾，欢迎再次光临',
-  logo_path: null,
   printer_channel: 'tcp',
   printer_name: null,
   tcp_host: '127.0.0.1',
@@ -103,7 +104,7 @@ function makeDeps(
     getSaleDetail: vi.fn(() => SALE),
     getDefaultTemplate: vi.fn(() => TEMPLATE_ROW),
     getSettings: vi.fn(() => SETTINGS),
-    readLogoFile: vi.fn(async () => null),
+    readLogoById: vi.fn(async () => null),
     createChannel: vi.fn(() => channel),
     ...overrides
   }
@@ -176,6 +177,26 @@ describe('pngBufferToDataUrl', () => {
   })
 })
 
+describe('collectSectionLogoIds（image 段落 logoId 收集）', () => {
+  it('header/footer 中 image+logoId 段落的 id 去重升序；text/divider/无 logoId 的 image 不算', () => {
+    const template: ReceiptTemplate = {
+      ...DEFAULT_TEMPLATES['80mm'],
+      header: [
+        { type: 'image', logoId: 9 },
+        { type: 'text', content: '店名' },
+        { type: 'image' }
+      ],
+      footer: [
+        { type: 'divider' },
+        { type: 'image', logoId: 3 },
+        { type: 'image', logoId: 9 }
+      ]
+    }
+    expect(collectSectionLogoIds(template)).toEqual([3, 9])
+    expect(collectSectionLogoIds(DEFAULT_TEMPLATES['80mm'])).toEqual([])
+  })
+})
+
 // ─────────────────────────── 组装（G7 同源核心） ───────────────────────────
 
 describe('buildReceiptPayload（vars + items display-ready 组装）', () => {
@@ -194,7 +215,7 @@ describe('buildReceiptPayload（vars + items display-ready 组装）', () => {
     })
   })
 
-  it('data.items：数量/单价/小计 display-ready（formatMoney 恰 2 位小数，buildItemLine 直接输入）', async () => {
+  it('data.items：数量/单价/小计 display-ready（formatMoney 恰 2 位小数，buildItemLines 直接输入）', async () => {
     const { deps } = makeDeps()
     const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
 
@@ -212,13 +233,62 @@ describe('buildReceiptPayload（vars + items display-ready 组装）', () => {
     expect(payload.template.footer.some((s) => s.content === '=== 已作废 ===')).toBe(false)
   })
 
-  it('模板无 image 段落 → 不读 Logo 文件（readLogoFile 零调用）', async () => {
-    const readLogoFile = vi.fn(async () => Buffer.from('png'))
-    const { deps } = makeDeps({ readLogoFile })
+  it('模板无 image 段落引用 → 不读 Logo 文件（readLogoById 零调用），logoBuffers 为空 Map', async () => {
+    const readLogoById = vi.fn(async () => Buffer.from('png'))
+    const { deps } = makeDeps({ readLogoById })
     const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
 
-    expect(payload.logoBuffer).toBeNull()
-    expect(readLogoFile).not.toHaveBeenCalled()
+    expect(payload.logoBuffers.size).toBe(0)
+    expect(readLogoById).not.toHaveBeenCalled()
+  })
+
+  it('模板含 image+logoId 段落 → 逐 id 读取进 logoBuffers（多 Logo 收集，去重不重复读）', async () => {
+    const pngA = Buffer.from('png-a')
+    const pngB = Buffer.from('png-b')
+    const template: ReceiptTemplate = {
+      ...DEFAULT_TEMPLATES['80mm'],
+      header: [{ type: 'image', logoId: 5 }, ...DEFAULT_TEMPLATES['80mm'].header],
+      footer: [...DEFAULT_TEMPLATES['80mm'].footer, { type: 'image', logoId: 5 }, { type: 'image', logoId: 8 }]
+    }
+    const readLogoById = vi.fn(async (id: number) => (id === 5 ? pngA : pngB))
+    const { deps } = makeDeps({
+      getDefaultTemplate: vi.fn(() => ({
+        ...TEMPLATE_ROW,
+        config_json: JSON.stringify(template)
+      })),
+      readLogoById
+    })
+    const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
+
+    expect(payload.logoBuffers.get(5)).toBe(pngA)
+    expect(payload.logoBuffers.get(8)).toBe(pngB)
+    expect(payload.logoBuffers.size).toBe(2)
+    // 重复引用的 id 只读一次
+    expect(readLogoById).toHaveBeenCalledTimes(2)
+  })
+
+  it('logo 读不到（行/文件缺失）→ console.warn 诊断且不进 logoBuffers，不影响组装', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const template: ReceiptTemplate = {
+        ...DEFAULT_TEMPLATES['80mm'],
+        header: [{ type: 'image', logoId: 42 }, ...DEFAULT_TEMPLATES['80mm'].header]
+      }
+      const { deps } = makeDeps({
+        getDefaultTemplate: vi.fn(() => ({
+          ...TEMPLATE_ROW,
+          config_json: JSON.stringify(template)
+        })),
+        readLogoById: vi.fn(async () => null)
+      })
+      const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
+
+      expect(payload.logoBuffers.size).toBe(0)
+      expect(warnSpy).toHaveBeenCalledWith('[print] 模板引用 logoId=42 但文件不可读，已跳过')
+      expect(payload.vars.shopName).toBe('测试便利店')
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('未找到销售单 → 抛可诊断错误（id 回显）', async () => {
@@ -247,7 +317,7 @@ describe('buildReceiptPayload voided 单（D19：预览与打印同源加印作�
 })
 
 describe('previewSale（printing:preview 载荷）', () => {
-  it('与 buildReceiptPayload 同源：template/sale/data/vars 一致 + logoUrl null（无 Logo）', async () => {
+  it('与 buildReceiptPayload 同源：template/sale/data/vars 一致 + logoUrls 为空对象（无 Logo）', async () => {
     const { deps } = makeDeps()
     const orchestrator = createPrintOrchestrator(deps)
     const payload = await orchestrator.buildReceiptPayload(7)
@@ -257,39 +327,44 @@ describe('previewSale（printing:preview 载荷）', () => {
     expect(preview.sale).toEqual(payload.sale)
     expect(preview.data).toEqual(payload.data)
     expect(preview.vars).toEqual(payload.vars)
-    expect(preview.logoUrl).toBeNull()
+    expect(preview.logoUrls).toEqual({})
   })
 
-  it('模板含 image 段落 + Logo 文件存在 → logoBuffer 转 dataURL（Buffer 不跨 IPC）', async () => {
-    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47])
-    const templateWithLogo: ReceiptTemplate = {
+  it('模板含 image+logoId 段落 + Logo 文件存在 → logoBuffers 转 logoUrls 集合（Buffer 不跨 IPC）', async () => {
+    const pngA = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    const pngB = Buffer.from([0x00, 0x01])
+    const templateWithLogos: ReceiptTemplate = {
       ...DEFAULT_TEMPLATES['80mm'],
-      header: [{ type: 'image' }, ...DEFAULT_TEMPLATES['80mm'].header]
+      header: [{ type: 'image', logoId: 5 }, ...DEFAULT_TEMPLATES['80mm'].header],
+      footer: [...DEFAULT_TEMPLATES['80mm'].footer, { type: 'image', logoId: 8 }]
     }
     const { deps } = makeDeps({
       getDefaultTemplate: vi.fn(() => ({
         ...TEMPLATE_ROW,
-        config_json: JSON.stringify(templateWithLogo)
+        config_json: JSON.stringify(templateWithLogos)
       })),
-      readLogoFile: vi.fn(async () => png)
+      readLogoById: vi.fn(async (id: number) => (id === 5 ? pngA : pngB))
     })
     const preview = await createPrintOrchestrator(deps).previewSale(7)
 
-    expect(preview.logoUrl).toBe(pngBufferToDataUrl(png))
-    expect(preview.logoUrl).toMatch(/^data:image\/png;base64,/)
+    expect(preview.logoUrls).toEqual({
+      5: pngBufferToDataUrl(pngA),
+      8: pngBufferToDataUrl(pngB)
+    })
+    expect(preview.logoUrls[5]).toMatch(/^data:image\/png;base64,/)
   })
 })
 
 // ─────────────────────────── 打印（字节 → 串行队列） ───────────────────────────
 
 describe('printSale（生成字节 → enqueuePrintJob）', () => {
-  it('字节以 1b40 1b520f 开头（init + 中文页），含 GBK 店名与明细行，以 1d564200 全切结尾', async () => {
+  it('字节以 1b40 1b520f 1c26 开头（init + 中文页 + 汉字模式），含 GBK 店名与明细行，以 1d564200 全切结尾', async () => {
     const { deps, sent } = makeDeps()
     await createPrintOrchestrator(deps).printSale(7)
 
     expect(sent).toHaveLength(1)
     const hex = Buffer.from(sent[0]!).toString('hex')
-    expect(hex.startsWith('1b401b520f')).toBe(true)
+    expect(hex.startsWith('1b401b520f1c26')).toBe(true)
     // GBK 店名与明细行（组装数据真实进入字节——同源证据）
     expect(hex).toContain(encodeGbk('测试便利店').toString('hex'))
     expect(hex).toContain(encodeGbk('可口可乐 330ml').toString('hex'))

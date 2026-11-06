@@ -9,12 +9,17 @@ import {
   DocumentChecked,
   DocumentCopy,
   Plus,
-  QuestionFilled
+  QuestionFilled,
+  Upload
 } from '@element-plus/icons-vue'
 import ReceiptPreview from '@renderer/components/receipt/ReceiptPreview.vue'
-import type { LineAlign, PaperWidth } from '../../../shared/receipt/char-grid'
+import { PAPER_COLUMNS, type LineAlign, type PaperWidth } from '../../../shared/receipt/char-grid'
 import { DEFAULT_TEMPLATES } from '../../../shared/receipt/default-template'
-import type { SaleReceiptData } from '../../../shared/receipt/item-columns'
+import {
+  ITEM_COLUMN_WIDTHS,
+  type ItemColumnWidths,
+  type SaleReceiptData
+} from '../../../shared/receipt/item-columns'
 import type {
   ReceiptTemplate,
   ReceiptVars,
@@ -31,10 +36,14 @@ import { formatMoney, parseMoneyToCents } from '../../../shared/utils/money'
  *
  * 实时预览数据流：表单 draft（reactive）→ previewTemplate（computed，即
  * 表单的响应式 watch，**不保存也即时刷新**）→ ReceiptPreview（T12 组件，
- * 样例数据 shopName='测试商店' / 两行商品）。
+ * 样例数据 shopName='测试商店' / 三行商品含超长名；logo 列表经设置页
+ * 上传，image 段落按 logoId 选用并传入预览渲染）。
  * 表单字段与 shared/receipt/template-schema 的 ReceiptTemplate 一一对应
  * （type/align/size 枚举逐字复用），保存经 repo 校验守卫落库。
  */
+
+/** window.api.settings 的 Logo 条目类型（preload 契约：listLogos/uploadLogo/deleteLogo 返回） */
+type LogoInfo = Awaited<ReturnType<typeof window.api.settings.listLogos>>[number]
 
 type Option<T extends string> = { value: T; label: string }
 
@@ -67,11 +76,12 @@ const VAR_SLOTS = [
   { slot: '{itemCount}', desc: '总件数' }
 ] as const
 
-// ── 实时预览样例数据（虚构店铺 + 两行商品；金额经 shared/utils/money 组装——G1）──
+// ── 实时预览样例数据（虚构店铺 + 三行商品，含超长中文名验证名称列折行；金额经 shared/utils/money 组装——G1）──
 const SAMPLE_ITEMS: SaleReceiptData = {
   items: [
     { name: '经典奶茶（大杯）', quantity: '2', unitPrice: '15.00', subtotal: '30.00' },
-    { name: '现烤菠萝包', quantity: '1', unitPrice: '6.50', subtotal: '6.50' }
+    { name: '现烤菠萝包', quantity: '1', unitPrice: '6.50', subtotal: '6.50' },
+    { name: '招牌秘制香辣鸡腿堡超级套餐（含饮品小食各一份）', quantity: '1', unitPrice: '39.90', subtotal: '39.90' }
   ]
 }
 
@@ -102,6 +112,12 @@ interface TemplateDraft {
     qtyLabel: string
     priceLabel: string
     subtotalLabel: string
+    /**
+     * 列宽覆盖（Partial：undefined 键 = 未覆盖，沿用纸宽默认）。
+     * 恒为对象（空对象起步）便于 el-input-number 直接绑定；
+     * 序列化时未覆盖键不写入 JSON（见 serializeColumnWidths）。
+     */
+    columnWidths: Partial<ItemColumnWidths>
   }
   totals: TotalLine[]
   footer: Section[]
@@ -122,7 +138,9 @@ function draftFromTemplate(name: string, t: ReceiptTemplate): TemplateDraft {
       nameLabel: t.items.nameLabel ?? '商品',
       qtyLabel: t.items.qtyLabel ?? '数量',
       priceLabel: t.items.priceLabel ?? '单价',
-      subtotalLabel: t.items.subtotalLabel ?? '小计'
+      subtotalLabel: t.items.subtotalLabel ?? '小计',
+      // {...undefined} = {}：空覆盖起步；已保存的覆盖键浅拷贝保留
+      columnWidths: { ...t.items.columnWidths }
     },
     totals: t.totals.map((x) => ({ ...x })),
     footer: t.footer.map((s) => ({ ...s }))
@@ -146,6 +164,24 @@ const selected = computed<PrintTemplate | null>(
 )
 const isDraft = computed(() => selectedId.value === null)
 
+/**
+ * 列宽覆盖序列化：只写入已填键（undefined 键不落 JSON，保持模板干净）；
+ * 全空 → undefined（不写入 columnWidths 字段，沿用纸宽默认）。
+ */
+function serializeColumnWidths(): Partial<ItemColumnWidths> | undefined {
+  const src = draft.items.columnWidths
+  const out: Partial<ItemColumnWidths> = {}
+  let filled = false
+  for (const key of ['name', 'qty', 'price', 'subtotal'] as const) {
+    const v = src[key]
+    if (v !== undefined) {
+      out[key] = v
+      filled = true
+    }
+  }
+  return filled ? out : undefined
+}
+
 function buildTemplate(): ReceiptTemplate {
   return {
     paperWidth: draft.paperWidth,
@@ -156,7 +192,8 @@ function buildTemplate(): ReceiptTemplate {
       nameLabel: draft.items.nameLabel,
       qtyLabel: draft.items.qtyLabel,
       priceLabel: draft.items.priceLabel,
-      subtotalLabel: draft.items.subtotalLabel
+      subtotalLabel: draft.items.subtotalLabel,
+      columnWidths: serializeColumnWidths()
     },
     totals: draft.totals,
     footer: draft.footer,
@@ -165,6 +202,74 @@ function buildTemplate(): ReceiptTemplate {
 }
 
 const previewTemplate = computed<ReceiptTemplate>(() => buildTemplate())
+
+// ── 列宽配置联动（校验规则与 shared resolveColumnWidths 一致：四键齐全 + 总和 = 总列数）──
+
+/** 当前纸宽默认列宽（输入框 placeholder 展示） */
+const defaultWidths = computed<ItemColumnWidths>(() => ITEM_COLUMN_WIDTHS[draft.paperWidth])
+
+/** 当前纸宽总列数（「合计 X / 48」展示与保存校验基准） */
+const paperColumns = computed(() => PAPER_COLUMNS[draft.paperWidth])
+
+/** 已填列宽键集合（undefined = 未覆盖） */
+const filledWidthKeys = computed<Array<keyof ItemColumnWidths>>(() =>
+  (['name', 'qty', 'price', 'subtotal'] as const).filter(
+    (k) => draft.items.columnWidths[k] !== undefined
+  )
+)
+
+/** 已填列宽总和 */
+const columnWidthsSum = computed(() =>
+  filledWidthKeys.value.reduce((sum, k) => sum + (draft.items.columnWidths[k] ?? 0), 0)
+)
+
+/** 列宽覆盖不合法：已填任一键但未四键齐全，或齐全而总和 ≠ 总列数（全空 = 未覆盖，合法） */
+const columnWidthsInvalid = computed(() => {
+  const keys = filledWidthKeys.value
+  if (keys.length === 0) return false
+  if (keys.length < 4) return true
+  return columnWidthsSum.value !== paperColumns.value
+})
+
+/** el-input-number 写入（EP 清空 emit null/undefined → 归一为未覆盖 undefined） */
+function setColumnWidth(key: keyof ItemColumnWidths, val: number | null | undefined): void {
+  draft.items.columnWidths[key] = val ?? undefined
+}
+
+// ── Logo 列表（设置页上传的多 Logo：image 段落选择 + 预览渲染）──
+
+const logos = ref<LogoInfo[]>([])
+const uploadingLogo = ref(false)
+
+/** logo id → dataURL 映射（ReceiptPreview 预览渲染用） */
+const logoUrlsMap = computed<Record<number, string>>(() =>
+  Object.fromEntries(logos.value.map((l) => [l.id, l.data_url]))
+)
+
+async function loadLogos(): Promise<void> {
+  logos.value = await window.api.settings.listLogos()
+}
+
+/** image 段落当前选中 logo 的缩略图 dataURL（未选中 → undefined） */
+function logoThumbUrl(logoId: number | undefined): string | undefined {
+  if (logoId === undefined) return undefined
+  return logos.value.find((l) => l.id === logoId)?.data_url
+}
+
+async function onUploadLogo(): Promise<void> {
+  uploadingLogo.value = true
+  try {
+    const next = await window.api.settings.uploadLogo()
+    // 原生对话框用户取消 → 列表不变（长度不变不 toast，避免误导）
+    const added = next.length > logos.value.length
+    logos.value = next
+    if (added) ElMessage.success('Logo 已上传')
+  } catch (err) {
+    ElMessage.error(`Logo 上传失败：${ipcErrorMessage(err)}`)
+  } finally {
+    uploadingLogo.value = false
+  }
+}
 
 // ── IPC 错误文案（Electron invoke 序列化前缀剥除——T8 模式）──
 
@@ -224,7 +329,6 @@ function moveLine(target: ListTarget, idx: number, step: -1 | 1): void {
 }
 
 function contentPlaceholder(type: Section['type']): string {
-  if (type === 'image') return 'Logo 在系统设置中上传'
   if (type === 'divider') return '分隔线无需内容'
   return '文案，支持 {变量} 插槽'
 }
@@ -246,6 +350,13 @@ function duplicateDraft(): void {
 
 async function save(): Promise<void> {
   if (!draft.name.trim()) return
+  // 列宽覆盖保存前校验：已填任一键时必须四键齐全且总和 = 纸宽总列数
+  if (columnWidthsInvalid.value) {
+    ElMessage.warning(
+      `明细列宽需四列齐全且总和等于 ${paperColumns.value}（当前合计 ${columnWidthsSum.value}）`
+    )
+    return
+  }
   saving.value = true
   const configJson = JSON.stringify(buildTemplate())
   try {
@@ -327,6 +438,12 @@ onMounted(async () => {
     ElMessage.error(`模板加载失败：${ipcErrorMessage(err)}`)
   } finally {
     loading.value = false
+  }
+  // Logo 列表独立加载：失败不阻断模板编辑（image 段落选择降级为空列表 + 引导上传）
+  try {
+    await loadLogos()
+  } catch (err) {
+    ElMessage.warning(`Logo 列表加载失败：${ipcErrorMessage(err)}`)
   }
 })
 </script>
@@ -479,7 +596,41 @@ onMounted(async () => {
                 <el-select v-model="s.type" data-testid="tpl-type">
                   <el-option v-for="o in TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
                 </el-select>
+                <!-- image 段落：Logo 选择（多 Logo；清空 = 未指定）+ 缩略图 + 上传入口 -->
+                <div v-if="s.type === 'image'" class="logo-picker">
+                  <el-select
+                    v-model="s.logoId"
+                    data-testid="tpl-logo-select"
+                    class="logo-picker__select"
+                    placeholder="未指定 Logo"
+                    clearable
+                    :disabled="logos.length === 0"
+                  >
+                    <el-option v-for="l in logos" :key="l.id" :value="l.id" :label="l.display_name" />
+                  </el-select>
+                  <el-image
+                    v-if="logoThumbUrl(s.logoId)"
+                    class="logo-picker__thumb"
+                    :src="logoThumbUrl(s.logoId)"
+                    fit="contain"
+                    alt="已选 Logo 缩略图"
+                  />
+                  <el-button
+                    text
+                    type="primary"
+                    :icon="Upload"
+                    data-testid="tpl-logo-upload"
+                    :loading="uploadingLogo"
+                    @click="onUploadLogo"
+                  >
+                    上传
+                  </el-button>
+                  <span v-if="logos.length === 0" class="logo-picker__hint">
+                    请先在 设置→小票Logo 上传
+                  </span>
+                </div>
                 <el-input
+                  v-else
                   v-model="s.content"
                   data-testid="tpl-content"
                   :disabled="s.type !== 'text'"
@@ -521,7 +672,7 @@ onMounted(async () => {
             <div class="tpl-group__head">
               <h4 class="tpl-group__title">
                 明细列
-                <span class="tpl-group__sub">商品行四列表头文案（列宽随纸宽自动适配）</span>
+                <span class="tpl-group__sub">商品行四列表头文案与列宽（留空沿用纸宽默认）</span>
               </h4>
             </div>
             <div class="tpl-items">
@@ -540,6 +691,70 @@ onMounted(async () => {
               <el-form-item label="小计列">
                 <el-input v-model="draft.items.subtotalLabel" data-testid="tpl-col-subtotal" />
               </el-form-item>
+
+              <el-form-item label="名称列宽">
+                <el-input-number
+                  :model-value="draft.items.columnWidths.name"
+                  data-testid="tpl-col-w-name"
+                  class="tpl-width-input"
+                  :min="1"
+                  :precision="0"
+                  :placeholder="`默认 ${defaultWidths.name}`"
+                  controls-position="right"
+                  @update:model-value="(v: number | undefined) => setColumnWidth('name', v)"
+                />
+              </el-form-item>
+              <el-form-item label="数量列宽">
+                <el-input-number
+                  :model-value="draft.items.columnWidths.qty"
+                  data-testid="tpl-col-w-qty"
+                  class="tpl-width-input"
+                  :min="1"
+                  :precision="0"
+                  :placeholder="`默认 ${defaultWidths.qty}`"
+                  controls-position="right"
+                  @update:model-value="(v: number | undefined) => setColumnWidth('qty', v)"
+                />
+              </el-form-item>
+              <el-form-item label="单价列宽">
+                <el-input-number
+                  :model-value="draft.items.columnWidths.price"
+                  data-testid="tpl-col-w-price"
+                  class="tpl-width-input"
+                  :min="1"
+                  :precision="0"
+                  :placeholder="`默认 ${defaultWidths.price}`"
+                  controls-position="right"
+                  @update:model-value="(v: number | undefined) => setColumnWidth('price', v)"
+                />
+              </el-form-item>
+              <el-form-item label="小计列宽">
+                <el-input-number
+                  :model-value="draft.items.columnWidths.subtotal"
+                  data-testid="tpl-col-w-subtotal"
+                  class="tpl-width-input"
+                  :min="1"
+                  :precision="0"
+                  :placeholder="`默认 ${defaultWidths.subtotal}`"
+                  controls-position="right"
+                  @update:model-value="(v: number | undefined) => setColumnWidth('subtotal', v)"
+                />
+              </el-form-item>
+
+              <div
+                class="tpl-items__widths"
+                :class="{ 'is-invalid': columnWidthsInvalid }"
+                data-testid="tpl-col-w-sum"
+              >
+                <span>合计 {{ columnWidthsSum }} / {{ paperColumns }}</span>
+                <span
+                  v-if="columnWidthsInvalid"
+                  class="tpl-items__widths-warn"
+                  data-testid="tpl-col-w-warn"
+                >
+                  已填列宽须四列齐全且总和等于 {{ paperColumns }}，留空则沿用默认
+                </span>
+              </div>
             </div>
           </section>
 
@@ -629,7 +844,41 @@ onMounted(async () => {
                 <el-select v-model="s.type" data-testid="tpl-type">
                   <el-option v-for="o in TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
                 </el-select>
+                <!-- image 段落：Logo 选择（多 Logo；清空 = 未指定）+ 缩略图 + 上传入口 -->
+                <div v-if="s.type === 'image'" class="logo-picker">
+                  <el-select
+                    v-model="s.logoId"
+                    data-testid="tpl-logo-select"
+                    class="logo-picker__select"
+                    placeholder="未指定 Logo"
+                    clearable
+                    :disabled="logos.length === 0"
+                  >
+                    <el-option v-for="l in logos" :key="l.id" :value="l.id" :label="l.display_name" />
+                  </el-select>
+                  <el-image
+                    v-if="logoThumbUrl(s.logoId)"
+                    class="logo-picker__thumb"
+                    :src="logoThumbUrl(s.logoId)"
+                    fit="contain"
+                    alt="已选 Logo 缩略图"
+                  />
+                  <el-button
+                    text
+                    type="primary"
+                    :icon="Upload"
+                    data-testid="tpl-logo-upload"
+                    :loading="uploadingLogo"
+                    @click="onUploadLogo"
+                  >
+                    上传
+                  </el-button>
+                  <span v-if="logos.length === 0" class="logo-picker__hint">
+                    请先在 设置→小票Logo 上传
+                  </span>
+                </div>
                 <el-input
+                  v-else
                   v-model="s.content"
                   data-testid="tpl-content"
                   :disabled="s.type !== 'text'"
@@ -675,7 +924,12 @@ onMounted(async () => {
           <span class="tpl-preview__hint">编辑即时刷新，无需保存 · 样例数据（{{ sampleVars.shopName }}）</span>
         </div>
         <div class="tpl-preview__stage">
-          <ReceiptPreview :template="previewTemplate" :data="SAMPLE_ITEMS" :vars="sampleVars" />
+          <ReceiptPreview
+            :template="previewTemplate"
+            :data="SAMPLE_ITEMS"
+            :vars="sampleVars"
+            :logo-urls="logoUrlsMap"
+          />
         </div>
       </section>
     </section>
@@ -965,6 +1219,54 @@ onMounted(async () => {
 .tpl-items__switch {
   grid-column: 1 / -1;
   margin-bottom: 10px;
+}
+
+/* ── 列宽输入（与列头文案输入同列对齐）+ 合计提示 ── */
+.tpl-width-input {
+  width: 100%;
+}
+
+.tpl-items__widths {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.tpl-items__widths.is-invalid {
+  color: var(--el-color-danger);
+}
+
+.tpl-items__widths-warn {
+  margin-left: 6px;
+}
+
+/* ── image 段落：Logo 选择行（select + 缩略图 + 上传）── */
+.logo-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.logo-picker__select {
+  flex: 1;
+  min-width: 0;
+}
+
+.logo-picker__thumb {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.logo-picker__hint {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 /* ── 实时预览（底部常驻，T12 ReceiptPreview 同源渲染） ── */

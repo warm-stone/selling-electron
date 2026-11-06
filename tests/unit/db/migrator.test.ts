@@ -15,7 +15,8 @@ const USER_TABLES = [
   'sale_items',
   'stock_movements',
   'print_templates',
-  'settings'
+  'settings',
+  'logos'
 ] as const
 
 function tableNames(db: Database.Database): string[] {
@@ -61,20 +62,20 @@ afterEach(() => {
 })
 
 describe('migrator：迁移执行器', () => {
-  it('全新 DB 迁移后 user_version=1 且 8 张用户表按具名断言齐全', () => {
+  it('全新 DB 迁移后 user_version=2 且 9 张用户表按具名断言齐全（含 002 logos）', () => {
     const db = newDb()
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(1)
+    expect(db.pragma('user_version', { simple: true })).toBe(2)
 
     const names = tableNames(db)
     for (const t of USER_TABLES) {
       expect(names, `缺少用户表 ${t}`).toContain(t)
     }
-    expect(namedUserTables(db)).toHaveLength(8)
+    expect(namedUserTables(db)).toHaveLength(9)
   })
 
-  it('幂等：同一文件二次迁移不重复建表、user_version 保持 1', () => {
+  it('幂等：同一文件二次迁移不重复建表、user_version 保持 2', () => {
     const dbPath = join(dir, 'pos.db')
 
     const first = new Database(dbPath)
@@ -84,7 +85,7 @@ describe('migrator：迁移执行器', () => {
     const second = newDb()
     migrate(second)
 
-    expect(second.pragma('user_version', { simple: true })).toBe(1)
+    expect(second.pragma('user_version', { simple: true })).toBe(2)
     for (const t of USER_TABLES) {
       expect(countTable(second, t), `${t} 应只存在一份`).toBe(1)
     }
@@ -115,15 +116,15 @@ describe('database：连接初始化', () => {
 
     expect(db.pragma('journal_mode', { simple: true })).toBe('wal')
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
-    expect(db.pragma('user_version', { simple: true })).toBe(1)
-    expect(namedUserTables(db)).toHaveLength(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(2)
+    expect(namedUserTables(db)).toHaveLength(9)
   })
 
   it('initDatabase 同目录重复调用幂等（复用同一连接）', () => {
     const a = initDatabase(dir)
     const b = initDatabase(dir)
     expect(b).toBe(a)
-    expect(namedUserTables(b)).toHaveLength(8)
+    expect(namedUserTables(b)).toHaveLength(9)
   })
 
   it('getDatabase 返回当前连接；未初始化的模块实例抛错', async () => {

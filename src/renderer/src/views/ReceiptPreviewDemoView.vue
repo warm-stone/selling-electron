@@ -37,6 +37,9 @@ const SAMPLES: Record<SampleKey, SaleReceiptData> = {
   empty: { items: [] }
 }
 
+/** demo Logo 的 id（模拟设置页上传后 image 段落的 logoId 引用；生产路径经设置页上传，T19） */
+const DEMO_LOGO_ID = 1
+
 /** 1×1 PNG dataURL（Logo 段落渲染示意；生产路径经设置页上传，T19） */
 const LOGO_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -47,10 +50,17 @@ const withLogo = ref(false)
 
 const data = computed<SaleReceiptData>(() => SAMPLES[sampleKey.value])
 
+/** image 段落引用的 logo 表（id → dataURL；与设置页上传列表同构） */
+const logoUrls = computed<Record<number, string>>(() => {
+  const map: Record<number, string> = {}
+  if (withLogo.value) map[DEMO_LOGO_ID] = LOGO_DATA_URL
+  return map
+})
+
 const template = computed<ReceiptTemplate>(() => {
   const base = DEFAULT_TEMPLATES[paperWidth.value]
   const t = JSON.parse(JSON.stringify(base)) as ReceiptTemplate
-  if (withLogo.value) t.header.unshift({ type: 'image' })
+  if (withLogo.value) t.header.unshift({ type: 'image', logoId: DEMO_LOGO_ID })
   return t
 })
 
@@ -74,7 +84,7 @@ const vars = computed<ReceiptVars>(() => {
   <div class="demo-page">
     <aside class="demo-panel">
       <h2 class="demo-panel__title">小票预览 Demo</h2>
-      <p class="demo-panel__hint">同源渲染（G7）：文本行 = char-grid padLine / items 行 = buildItemLine，与 ESC/POS 字节流同一数学。</p>
+      <p class="demo-panel__hint">同源渲染（G7）：文本行 = char-grid wrapToGrid/padLine 多行 / items 行 = buildItemLines 折行多行，与 ESC/POS 字节流同一数学。</p>
 
       <el-form label-position="top">
         <el-form-item label="纸宽（网格列数）">
@@ -109,7 +119,7 @@ const vars = computed<ReceiptVars>(() => {
           :template="template"
           :data="data"
           :vars="vars"
-          :logo-url="withLogo ? LOGO_DATA_URL : undefined"
+          :logo-urls="logoUrls"
         />
       </div>
     </section>

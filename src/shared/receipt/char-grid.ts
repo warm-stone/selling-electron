@@ -102,3 +102,67 @@ export function padLine(s: string, cols: number, align: LineAlign = 'left'): str
   }
   return ' '.repeat(left) + s + ' '.repeat(right)
 }
+
+/**
+ * 按显示宽度折行（word-wrap）：空格分词、逐 token 贪婪填充，
+ * 超行宽 token 逐字符硬断（宽字符不拆半）。空串输入返回 ['']。
+ *
+ * - 断行不吞非空格字符（与 truncateToGrid 的「丢弃尾部」语义互补：
+ *   超长文本折成多行而非截断）；空格是断点，断点处吞并
+ *   （连续空格折叠、词间换行不留尾随/前导空格）；
+ * - 按 code point 迭代（复用 codePointWidth），UTF-16 代理对安全；
+ * - 每行显示宽度 ≤ cols；单个超宽字符（如 cols<2 时的 emoji）独占
+ *   一行越界（不吞字符优先于不越界）；
+ * - cols<=0 防御返回 [s]（正常调用方保证 cols 为正，此为脏值兜底）。
+ */
+export function wrapToGrid(s: string, cols: number): string[] {
+  if (cols <= 0) return [s]
+  if (s === '') return ['']
+
+  const lines: string[] = []
+  let current = ''
+  let currentWidth = 0
+
+  /** 追加一段宽度确定 ≤ cols 的文本（current 非空时词间补单空格；放不下则断行） */
+  const appendPiece = (piece: string, pieceWidth: number): void => {
+    if (current === '') {
+      current = piece
+      currentWidth = pieceWidth
+      return
+    }
+    if (currentWidth + 1 + pieceWidth <= cols) {
+      current += ' ' + piece
+      currentWidth += 1 + pieceWidth
+      return
+    }
+    lines.push(current)
+    current = piece
+    currentWidth = pieceWidth
+  }
+
+  for (const token of s.split(' ')) {
+    if (token === '') continue // 连续/前后空格：视为断点折叠
+    const tokenWidth = stringWidth(token)
+    if (tokenWidth <= cols) {
+      appendPiece(token, tokenWidth)
+      continue
+    }
+    // token 自身超行宽：逐字符硬断（不拆宽字符，行内不越界）
+    let piece = ''
+    let pieceWidth = 0
+    for (const ch of token) {
+      const w = codePointWidth(ch.codePointAt(0) as number)
+      if (pieceWidth + w > cols) {
+        if (piece !== '') appendPiece(piece, pieceWidth)
+        piece = ch
+        pieceWidth = w
+      } else {
+        piece += ch
+        pieceWidth += w
+      }
+    }
+    if (piece !== '') appendPiece(piece, pieceWidth)
+  }
+  lines.push(current)
+  return lines
+}

@@ -184,11 +184,24 @@ export interface AppSettings {
   shop_name: string
   shop_phone: string
   receipt_note: string
-  logo_path: string | null
   printer_channel: PrinterChannel
   printer_name: string | null
   tcp_host: string | null
   tcp_port: number | null
   com_port: string | null
   auto_cut: boolean
+}
+
+// ══════════════ Logo（多 Logo 架构） ══════════════
+
+/**
+ * Logo 信息（settings:listLogos / uploadLogo / deleteLogo 返回行）。
+ * data_url 由主进程读 logos 目录文件转 dataURL（MIME 固定 image/png——
+ * 上传已限定；renderer 无任意文件读权限）；文件缺失的行被跳过。
+ */
+export interface LogoInfo {
+  id: number
+  display_name: string
+  /** PNG dataURL（data:image/png;base64,...） */
+  data_url: string
 }

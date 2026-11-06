@@ -1,18 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
-import { createSettingsRepo } from '../../../src/main/db/repositories/settings.repo'
+import { createLogoRepo, type LogoRow } from '../../../src/main/db/repositories/logo.repo'
 import {
   DEFAULT_APP_SETTINGS,
   appSettingsPatchToKv,
   importLogoFile,
-  readLogoDataUrl,
+  removeLogoFile,
+  rowsToLogoInfos,
   rowsToAppSettings
 } from '../../../src/main/ipc/settings.ipc'
-import { TEST_PRINT_BYTES, toPrintSettings } from '../../../src/main/ipc/printing.ipc'
+import { buildTestPrintBytes, TEST_PRINT_SALE, toPrintSettings } from '../../../src/main/ipc/printing.ipc'
+import { DEFAULT_TEMPLATES } from '../../../src/shared/receipt/default-template'
+import type { PrintTemplate } from '../../../src/shared/types'
+import { encodeGbk } from '../../../src/main/printing/escpos/gb2312-encoder'
 import { rmTempDirSync } from '../../helpers/cleanup'
 
 let dir: string
@@ -34,18 +38,39 @@ afterEach(() => {
 const PNG_1PX_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
+/** 打开已迁移库并登记（logo/settings repo 共用） */
+function openDb(): Database.Database {
+  const db = new Database(join(dir, 'pos.db'))
+  openDbs.push(db)
+  migrate(db)
+  return db
+}
+
+/** 默认模板行（80mm，测试打印样例依赖） */
+const TEMPLATE_ROW_80: PrintTemplate = {
+  id: 1,
+  name: '默认小票（80mm）',
+  paper_width: '80mm',
+  config_json: JSON.stringify(DEFAULT_TEMPLATES['80mm']),
+  is_default: true,
+  created_at: '2026-11-01 00:00:00',
+  updated_at: '2026-11-01 00:00:00'
+}
+
 describe('settings.ipc 纯映射：rowsToAppSettings', () => {
-  it('空表 → 全默认值（通道默认 spooler，auto_cut 默认 true）', () => {
+  it('空表 → 全默认值（通道默认 spooler，auto_cut 默认 true；logo_path 已从契约移除）', () => {
     expect(rowsToAppSettings({})).toEqual(DEFAULT_APP_SETTINGS)
     expect(DEFAULT_APP_SETTINGS.printer_channel).toBe('spooler')
     expect(DEFAULT_APP_SETTINGS.auto_cut).toBe(true)
+    expect('logo_path' in DEFAULT_APP_SETTINGS).toBe(false)
   })
 
-  it('KV 行 → AppSettings 类型化映射（端口 string→number，auto_cut 字符串→boolean）', () => {
+  it('KV 行 → AppSettings 类型化映射（端口 string→number，auto_cut 字符串→boolean）；DB 残留 logo_path 行被忽略', () => {
     const settings = rowsToAppSettings({
       shop_name: '我的小店',
       shop_phone: '13800000000',
       receipt_note: '谢谢惠顾',
+      // 旧单 Logo 时代残留行：不再映射，无害（不做迁移）
       logo_path: '/tmp/logos/logo.png',
       printer_channel: 'tcp',
       printer_name: 'XP-58',
@@ -58,7 +83,6 @@ describe('settings.ipc 纯映射：rowsToAppSettings', () => {
       shop_name: '我的小店',
       shop_phone: '13800000000',
       receipt_note: '谢谢惠顾',
-      logo_path: '/tmp/logos/logo.png',
       printer_channel: 'tcp',
       printer_name: 'XP-58',
       tcp_host: '192.168.1.50',
@@ -74,15 +98,13 @@ describe('settings.ipc 纯映射：rowsToAppSettings', () => {
       tcp_port: '不是端口',
       printer_name: '',
       tcp_host: '',
-      com_port: '',
-      logo_path: ''
+      com_port: ''
     })
     expect(settings.printer_channel).toBe('spooler')
     expect(settings.tcp_port).toBeNull()
     expect(settings.printer_name).toBeNull()
     expect(settings.tcp_host).toBeNull()
     expect(settings.com_port).toBeNull()
-    expect(settings.logo_path).toBeNull()
   })
 
   it('auto_cut 非法值回落默认 true', () => {
@@ -98,8 +120,7 @@ describe('settings.ipc 纯映射：appSettingsPatchToKv（settings:set 序列化
   })
 
   it('null 归一为空串（可空字段清除路径：null ≡ 空串）', () => {
-    expect(appSettingsPatchToKv({ logo_path: null, printer_name: null, tcp_port: null })).toEqual({
-      logo_path: '',
+    expect(appSettingsPatchToKv({ printer_name: null, tcp_port: null })).toEqual({
       printer_name: '',
       tcp_port: ''
     })
@@ -129,49 +150,172 @@ describe('settings.ipc 纯映射：appSettingsPatchToKv（settings:set 序列化
   })
 })
 
-describe('settings.ipc Logo 文件助手', () => {
-  it('importLogoFile：复制到 logosDir/logo.png + 写 settings.logo_path（不存 DB BLOB）', async () => {
-    const db = new Database(join(dir, 'pos.db'))
-    openDbs.push(db)
-    migrate(db)
-    const repo = createSettingsRepo(db)
+describe('settings.ipc 多 Logo 文件助手', () => {
+  it('importLogoFile：复制到 logosDir/<uuid>.png + INSERT logos 行（display_name 默认原文件名去扩展）', async () => {
+    const db = openDb()
+    const repo = createLogoRepo(db)
 
-    const src = join(dir, 'src-logo.png')
+    const src = join(dir, '店招图.png')
     writeFileSync(src, Buffer.from(PNG_1PX_BASE64, 'base64'))
     const logosDir = join(dir, 'logos')
 
-    const dest = await importLogoFile(src, logosDir, repo)
+    const row = await importLogoFile(src, logosDir, repo)
 
-    expect(dest).toBe(join(logosDir, 'logo.png'))
-    expect(existsSync(dest)).toBe(true)
-    // 源被复制（保留），目标字节一致
-    expect(repo.get('logo_path')).toBe(dest)
+    // 唯一文件名：uuid.png（非原名），文件已复制，DB 行带展示名
+    expect(row.filename).toMatch(/^[0-9a-f-]{36}\.png$/)
+    expect(existsSync(join(logosDir, row.filename))).toBe(true)
+    expect(row.display_name).toBe('店招图')
+    // 源文件保留（复制语义）
+    expect(existsSync(src)).toBe(true)
   })
 
-  it('readLogoDataUrl：有效 png → data:image/png;base64 前缀 dataURL', async () => {
-    const logoPath = join(dir, 'logo.png')
-    writeFileSync(logoPath, Buffer.from(PNG_1PX_BASE64, 'base64'))
+  it('importLogoFile：同名重复上传互不覆盖（两次导入两行两文件）', async () => {
+    const db = openDb()
+    const repo = createLogoRepo(db)
 
-    const dataUrl = await readLogoDataUrl(logoPath)
-    expect(dataUrl).toMatch(/^data:image\/png;base64,/)
-    expect(dataUrl!.endsWith(PNG_1PX_BASE64)).toBe(true)
+    const src = join(dir, 'same.png')
+    writeFileSync(src, Buffer.from(PNG_1PX_BASE64, 'base64'))
+    const logosDir = join(dir, 'logos')
+
+    const first = await importLogoFile(src, logosDir, repo)
+    const second = await importLogoFile(src, logosDir, repo)
+
+    expect(first.filename).not.toBe(second.filename)
+    expect(repo.list()).toHaveLength(2)
   })
 
-  it('readLogoDataUrl 优雅降级：null 路径 / 文件缺失 → null 不抛错', async () => {
-    expect(await readLogoDataUrl(null)).toBeNull()
-    expect(await readLogoDataUrl(join(dir, '不存在.png'))).toBeNull()
+  it('rowsToLogoInfos：逐行读文件转 dataURL（data:image/png;base64 前缀）', async () => {
+    const db = openDb()
+    const repo = createLogoRepo(db)
+    const logosDir = join(dir, 'logos')
+    mkdirSync(logosDir, { recursive: true })
+
+    const a = repo.insert('a.png', '店招 A')
+    const b = repo.insert('b.png', '店招 B')
+    writeFileSync(join(logosDir, 'a.png'), Buffer.from(PNG_1PX_BASE64, 'base64'))
+    writeFileSync(join(logosDir, 'b.png'), Buffer.from(PNG_1PX_BASE64, 'base64'))
+
+    const infos = await rowsToLogoInfos(repo.list(), logosDir)
+    expect(infos).toEqual([
+      { id: a.id, display_name: '店招 A', data_url: `data:image/png;base64,${PNG_1PX_BASE64}` },
+      { id: b.id, display_name: '店招 B', data_url: `data:image/png;base64,${PNG_1PX_BASE64}` }
+    ])
+  })
+
+  it('rowsToLogoInfos：文件缺失的行被跳过（优雅降级，不抛错），其余行正常返回', async () => {
+    const logosDir = join(dir, 'logos')
+    mkdirSync(logosDir, { recursive: true })
+
+    const rows: LogoRow[] = [
+      { id: 1, filename: 'a.png', display_name: 'A', created_at: '2026-11-01 00:00:00' },
+      { id: 2, filename: 'missing.png', display_name: 'B', created_at: '2026-11-01 00:00:00' },
+      { id: 3, filename: 'c.png', display_name: 'C', created_at: '2026-11-01 00:00:00' }
+    ]
+    writeFileSync(join(logosDir, 'a.png'), Buffer.from(PNG_1PX_BASE64, 'base64'))
+    writeFileSync(join(logosDir, 'c.png'), Buffer.from(PNG_1PX_BASE64, 'base64'))
+
+    const infos = await rowsToLogoInfos(rows, logosDir)
+    expect(infos.map((i) => i.id)).toEqual([1, 3])
+  })
+
+  it('removeLogoFile：删 DB 行 + 删文件；文件已缺失时行删除仍成功（不抛错）', async () => {
+    const db = openDb()
+    const repo = createLogoRepo(db)
+    const logosDir = join(dir, 'logos')
+
+    const src = writePng(dir, 'src.png')
+    const row = await importLogoFile(src, logosDir, repo)
+    expect(existsSync(join(logosDir, row.filename))).toBe(true)
+
+    await removeLogoFile(row.id, logosDir, repo)
+    expect(repo.getById(row.id)).toBeUndefined()
+    expect(existsSync(join(logosDir, row.filename))).toBe(false)
+
+    // 文件已缺失的行（手工删文件后再删 logo）：DB 行删除成功
+    const row2 = repo.insert('ghost.png', '幽灵')
+    await removeLogoFile(row2.id, logosDir, repo)
+    expect(repo.getById(row2.id)).toBeUndefined()
+  })
+
+  it('removeLogoFile：行不存在抛可诊断错误（id 回显）', async () => {
+    const db = openDb()
+    const repo = createLogoRepo(db)
+    await expect(removeLogoFile(999, join(dir, 'logos'), repo)).rejects.toThrow(/id=999/)
   })
 })
 
-describe('printing.ipc 测试打印（纯部分）', () => {
-  it('TEST_PRINT_BYTES 与 T4 契约字节逐段对齐（init/居中/test/全切）', () => {
-    const hex = Buffer.from(TEST_PRINT_BYTES).toString('hex')
-    // ESC @ 初始化
-    expect(hex.startsWith('1b40')).toBe(true)
-    // ESC a 1 居中 + 'test' ASCII
-    expect(hex).toContain('1b6101' + Buffer.from('test', 'ascii').toString('hex'))
-    // LF×2 + GS V 66 0 全切（T4 FULL_CUT 前置走纸同构）
-    expect(hex.endsWith('0a0a' + '1d564200')).toBe(true)
+/** 写入 1px PNG 并返回路径（importLogoFile/removeLogoFile 测试辅助） */
+function writePng(dirPath: string, name: string): string {
+  const p = join(dirPath, name)
+  writeFileSync(p, Buffer.from(PNG_1PX_BASE64, 'base64'))
+  return p
+}
+
+describe('printing.ipc 测试打印（真实生成链路）', () => {
+  it('buildTestPrintBytes：默认模板 + 样例数据 → init/中文页/汉字模式/中文/折行/全切全链路字节', async () => {
+    const bytes = Buffer.from(
+      await buildTestPrintBytes({
+        getDefaultTemplate: () => TEMPLATE_ROW_80,
+        readLogoById: async () => null
+      })
+    )
+    const hex = bytes.toString('hex')
+
+    // ESC @ 初始化 + ESC R 15 中文页 + FS & 汉字模式（真机修复指令链）
+    expect(hex.startsWith('1b401b520f1c26')).toBe(true)
+    // 样例中文店名（GBK）与超长商品名折行段进入字节流
+    expect(hex).toContain(encodeGbk('测试商店').toString('hex'))
+    expect(hex).toContain(encodeGbk('可口可乐330ml').toString('hex'))
+    // 超长名折行：完整名不出现，首段（前 24 列 = 12 个汉字）出现
+    const longName = TEST_PRINT_SALE.items[1]?.name ?? ''
+    expect(hex).not.toContain(encodeGbk(longName).toString('hex'))
+    expect(hex).toContain(encodeGbk(longName.slice(0, 12)).toString('hex'))
+    // cutPaper=true：GS V 66 0 全切结尾
+    expect(hex.endsWith('1d564200')).toBe(true)
+    // 真实生成链路产物远大于纯 ASCII 假字节
+    expect(bytes.length).toBeGreaterThan(200)
+  })
+
+  it('buildTestPrintBytes：坏 config_json 回落内置默认模板（同 parseTemplateRow 兜底）', async () => {
+    const bytes = Buffer.from(
+      await buildTestPrintBytes({
+        getDefaultTemplate: () => ({ ...TEMPLATE_ROW_80, config_json: '{oops' }),
+        readLogoById: async () => null
+      })
+    )
+    const hex = bytes.toString('hex')
+    expect(hex.startsWith('1b401b520f1c26')).toBe(true)
+    // 回落模板的默认列头「商品/数量/单价/小计」
+    expect(hex).toContain(encodeGbk('商品').toString('hex'))
+  })
+
+  it('buildTestPrintBytes：模板含 image 段落且 logo 可读 → 光栅注入；logo 读不到 → 自然跳过', async () => {
+    const png = Buffer.from(PNG_1PX_BASE64, 'base64')
+    const templateWithImage = JSON.parse(
+      JSON.stringify({ ...DEFAULT_TEMPLATES['80mm'], header: [{ type: 'image', logoId: 7 }] })
+    ) as typeof DEFAULT_TEMPLATES['80mm']
+    const row: PrintTemplate = {
+      ...TEMPLATE_ROW_80,
+      config_json: JSON.stringify(templateWithImage)
+    }
+
+    const withLogo = Buffer.from(
+      await buildTestPrintBytes({
+        getDefaultTemplate: () => row,
+        readLogoById: async () => png
+      })
+    )
+    expect(withLogo.toString('hex')).toContain('1d763030') // GS v 0 光栅（m=0x30 库默认）
+
+    const noLogo = Buffer.from(
+      await buildTestPrintBytes({
+        getDefaultTemplate: () => row,
+        readLogoById: async () => null
+      })
+    )
+    expect(noLogo.toString('hex')).not.toContain('1d7630')
+    // 缺 logo 不影响其余链路
+    expect(noLogo.toString('hex').startsWith('1b401b520f1c26')).toBe(true)
   })
 
   it('toPrintSettings：请求归一（脏通道回落 spooler；可空字符串 → 空串；端口透传）', () => {

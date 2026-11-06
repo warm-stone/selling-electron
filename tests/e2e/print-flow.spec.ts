@@ -127,6 +127,7 @@ test.describe.serial('Task 15：打印编排（结账→预览→打印→失败
     // mock server 收到字节：含 ESC @（init），以 GS V 66 0（全切）结尾，长度 > 200
     await expect.poll(receivedHex, { timeout: 5_000 }).toContain('1b40')
     expect(receivedHex()).toContain('1b520f') // ESC R 15 中文页
+    expect(receivedHex()).toContain('1c26') // FS & 汉字模式（真机修复指令链）
     await expect
       .poll(
         () => (receivedHex().endsWith('1d564200') ? 'cut-ok' : 'pending'),
