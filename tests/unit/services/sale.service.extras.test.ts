@@ -148,7 +148,7 @@ describe('checkout：附加信息校验（service 层镜像校验）', () => {
           }
         ),
       'SALE_EXTRAS_PHONE_REQUIRED',
-      '填写客户姓名或地址时，电话不能为空'
+      '填写客户信息时，电话不能为空'
     )
     expect(count('sales')).toBe(0)
     expect(count('customers')).toBe(0)
@@ -169,6 +169,40 @@ describe('checkout：附加信息校验（service 层镜像校验）', () => {
     )
     expect(count('sales')).toBe(0)
     expect(count('customers')).toBe(0)
+  })
+
+  it('★customer.note 有 phone 无 → SALE_EXTRAS_PHONE_REQUIRED（备注缝隙 L2），零落库', () => {
+    const cola = addProduct('可乐', { barcode: 'EX02N', stock: 10 })
+    expectReject(
+      () =>
+        svc().checkout(
+          [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+          {
+            customer: { name: '', phone: '', address: '', note: 'VIP 备注' }
+          }
+        ),
+      'SALE_EXTRAS_PHONE_REQUIRED',
+      '填写客户信息时，电话不能为空'
+    )
+    expect(count('sales')).toBe(0)
+    expect(count('customers')).toBe(0)
+    expect(count('sale_extras')).toBe(0)
+  })
+
+  it('★customer.note + phone → 合法（客户建档，note 有载体）', () => {
+    const cola = addProduct('可乐', { barcode: 'EX02P', stock: 10 })
+    const receipt = svc().checkout(
+      [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+      {
+        customer: { name: '', phone: '13800005678', address: '', note: 'VIP 备注' }
+      }
+    )
+    expect(count('customers')).toBe(1)
+    expect(customerRow(1)).toMatchObject({
+      phone: '13800005678',
+      note: 'VIP 备注'
+    })
+    expect(extraRow(receipt.id).customer_id).toBe(1)
   })
 
   it('subsidy=true 无 name → SALE_EXTRAS_SUBSIDY_REQUIRES_CUSTOMER（有电话也不行），零落库', () => {
@@ -309,18 +343,21 @@ describe('checkout：附加信息落库', () => {
     expect(recentSalespersons()).toEqual(['赵六'])
   })
 
-  it('只有 note 非空的 customer → 不建档（customer_id=null）但写附加行', () => {
+  it('customer 全空 + order_note → 不建档（customer_id=null）但写附加行（note-only 已被 L2 校验拒绝，此为合法等价形态）', () => {
     const cola = addProduct('可乐', { barcode: 'EX10', stock: 10 })
     const receipt = svc().checkout(
       [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
-      { customer: { name: '', phone: '', address: '', note: '回头客' } }
+      {
+        customer: { name: '', phone: '', address: '', note: '' },
+        order_note: '回头客'
+      }
     )
     expect(count('customers')).toBe(0)
     expect(extraRow(receipt.id)).toEqual({
       sale_id: receipt.id,
       customer_id: null,
       is_national_subsidy: 0,
-      order_note: null,
+      order_note: '回头客',
       salesperson: null
     })
   })
@@ -607,8 +644,28 @@ describe('updateExtra：修改销售附加信息', () => {
           customer: { name: '赵九', phone: '', address: '', note: '' }
         }),
       'SALE_EXTRAS_PHONE_REQUIRED',
-      '填写客户姓名或地址时，电话不能为空'
+      '填写客户信息时，电话不能为空'
     )
+  })
+
+  it('★patch.customer 只带 note 无 phone → SALE_EXTRAS_PHONE_REQUIRED（备注缝隙 L2，与 checkout 同规则）', () => {
+    const cola = addProduct('可乐', { barcode: 'EX22N', stock: 10 })
+    const service = svc()
+    const receipt = service.checkout([
+      { product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }
+    ])
+
+    expectReject(
+      () =>
+        service.updateExtra(receipt.id, {
+          customer: { name: '', phone: '   ', address: '', note: '老客户' }
+        }),
+      'SALE_EXTRAS_PHONE_REQUIRED',
+      '填写客户信息时，电话不能为空'
+    )
+    // 校验先于写入：未建档、未写附加行
+    expect(count('customers')).toBe(0)
+    expect(count('sale_extras')).toBe(0)
   })
 
   it('salesperson 非空 → sale_extras 更新 + recent_salespersons 写入（事务内）', () => {

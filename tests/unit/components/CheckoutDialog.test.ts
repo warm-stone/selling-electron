@@ -146,7 +146,7 @@ describe('CheckoutDialog 校验规则矩阵（镜像后端 + 备注缝隙收紧�
       await flushPromises()
 
       expect(w.emitted('confirm')).toBeUndefined()
-      expect(w.text()).toContain('填写客户姓名或地址时，电话不能为空')
+      expect(w.text()).toContain('填写客户信息时，电话不能为空')
     } finally {
       vi.useRealTimers()
     }
@@ -171,7 +171,7 @@ describe('CheckoutDialog 校验规则矩阵（镜像后端 + 备注缝隙收紧�
     }
   })
 
-  it('★客户备注缝隙：只填客户备注无电话 → UI 层阻断（后端会静默丢弃 note）', async () => {
+  it('★客户备注缝隙（L2 修复）：只填客户备注无电话 → 阻断（UI+service 双防线，文案统一）', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       const w = mountDialog()
@@ -184,7 +184,7 @@ describe('CheckoutDialog 校验规则矩阵（镜像后端 + 备注缝隙收紧�
       await flushPromises()
 
       expect(w.emitted('confirm')).toBeUndefined()
-      expect(w.text()).toContain('填写客户信息需提供电话')
+      expect(w.text()).toContain('填写客户信息时，电话不能为空')
     } finally {
       vi.useRealTimers()
     }

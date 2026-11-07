@@ -388,7 +388,7 @@ test.describe.serial('客户与附加信息（T14）：快单/建档/关联/校�
     await dlg.getByTestId('checkout-customer-name').fill('赵敏')
     await page.getByTestId('checkout-dialog-confirm').click()
     await expect(
-      dlg.locator('.el-form-item__error').filter({ hasText: '填写客户姓名或地址时，电话不能为空' })
+      dlg.locator('.el-form-item__error').filter({ hasText: '填写客户信息时，电话不能为空' })
     ).toBeVisible()
     await expect(dlg).toBeVisible() // 弹窗不关，可修改后重试
 

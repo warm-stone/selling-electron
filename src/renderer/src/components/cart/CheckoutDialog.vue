@@ -13,11 +13,11 @@ import type { CheckoutExtrasInput, Customer } from '../../../../shared/types'
  * 旧直连结账完全一致；取消直接关闭，购物车完整保留、零落库。
  *
  * 校验规则镜像后端 SaleService（错误文案逐字一致）：
- * - name/address 非空 ⇒ phone 必填（'填写客户姓名或地址时，电话不能为空'）
+ * - name/address/note 任一非空 ⇒ phone 必填（'填写客户信息时，电话不能为空'）
  * - 国补开 ⇒ name + phone 必填（'参与国补需填写客户姓名和电话'）
- * - ★客户备注缝隙（issues.md，UI 层收紧）：客户信息组以电话为锚——任一客户
- *   字段（含 note）有值而电话为空即阻断（'填写客户信息需提供电话'），防止
- *   「只填客户备注」被后端静默丢弃（phone 空 → 不建档 → note 无载体）。
+ * - ★客户备注缝隙（issues.md L2 修复）：客户信息组以电话为锚——任一客户字段
+ *   （含 note）有值而电话为空即阻断，防止「只填客户备注」无载体（phone 空 →
+ *   不建档 → note 无处安放）；service 层已镜像同规则（UI+service 双防线）。
  */
 
 const props = defineProps<{
@@ -70,8 +70,9 @@ const matchedCustomer = ref<Customer | null>(null)
 const salespersons = ref<string[]>([])
 
 /**
- * 校验规则（镜像后端 + 备注缝隙收紧）。规则间按优先级短路：国补 > name/address
- * > note；同一 phone 字段覆盖三种触发，文案与后端逐字一致保证提示不漂移。
+ * 校验规则（镜像后端 + 备注缝隙收紧）。规则间按优先级短路：国补 > 客户字段；
+ * 同一 phone 字段覆盖 name/address/note 三种触发（统一文案），与后端逐字
+ * 一致保证提示不漂移。
  */
 const rules: FormRules = {
   phone: [
@@ -81,12 +82,14 @@ const rules: FormRules = {
         if ((value ?? '').trim() !== '') return callback()
         // 国补开 ⇒ phone 必填（后端规则二，文案逐字一致）
         if (form.isNationalSubsidy) return callback(new Error('参与国补需填写客户姓名和电话'))
-        // name/address 非空 ⇒ phone 必填（后端规则一，文案逐字一致）
-        if (form.name.trim() !== '' || form.address.trim() !== '') {
-          return callback(new Error('填写客户姓名或地址时，电话不能为空'))
+        // name/address/note 任一非空 ⇒ phone 必填（后端规则一，文案逐字一致）
+        if (
+          form.name.trim() !== '' ||
+          form.address.trim() !== '' ||
+          form.note.trim() !== ''
+        ) {
+          return callback(new Error('填写客户信息时，电话不能为空'))
         }
-        // ★备注缝隙（UI 层收紧）：只填客户备注不填电话是无效输入（后端静默丢 note）
-        if (form.note.trim() !== '') return callback(new Error('填写客户信息需提供电话'))
         callback()
       }
     }

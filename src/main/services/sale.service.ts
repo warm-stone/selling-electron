@@ -135,19 +135,22 @@ function trimTo(s: string | null | undefined): string {
 /**
  * 结账附加信息校验（service 层镜像校验——IPC 可直达，前端规则不是防线）。
  * 全字段 trim 后判定；extras 为 null/undefined 或 customer 四字段全空
- * → 视为无客户信息（合法——散客快单路径）。
+ * → 视为无客户信息（合法——散客快单路径）；name/address/note 任一非空
+ * ⇒ phone 必填（备注缝隙 L2：note 需电话建档承载，service 镜像 UI 收紧）。
  */
 function assertValidExtras(extras: CheckoutExtrasInput | undefined): void {
   if (extras == null) return
   const customer = extras.customer
   if (
     customer != null &&
-    (trimTo(customer.name) !== '' || trimTo(customer.address) !== '') &&
+    (trimTo(customer.name) !== '' ||
+      trimTo(customer.address) !== '' ||
+      trimTo(customer.note) !== '') &&
     trimTo(customer.phone) === ''
   ) {
     throw new SaleServiceError(
       'SALE_EXTRAS_PHONE_REQUIRED',
-      '填写客户姓名或地址时，电话不能为空'
+      '填写客户信息时，电话不能为空'
     )
   }
   if (extras.is_national_subsidy === true) {
@@ -485,15 +488,17 @@ export function createSaleService(db: Database.Database) {
         const nameT = trimTo(customerPatch?.name)
         const phoneT = trimTo(customerPatch?.phone)
         const addressT = trimTo(customerPatch?.address)
+        const noteT = trimTo(customerPatch?.note)
 
+        // 备注缝隙 L2：name/address/note 任一非空 ⇒ phone 必填（与 checkout 同规则）
         if (
           customerPatch != null &&
-          (nameT !== '' || addressT !== '') &&
+          (nameT !== '' || addressT !== '' || noteT !== '') &&
           phoneT === ''
         ) {
           throw new SaleServiceError(
             'SALE_EXTRAS_PHONE_REQUIRED',
-            '填写客户姓名或地址时，电话不能为空'
+            '填写客户信息时，电话不能为空'
           )
         }
 
@@ -524,7 +529,7 @@ export function createSaleService(db: Database.Database) {
               name: nameT,
               phone: phoneT,
               address: addressT,
-              note: trimTo(customerPatch.note)
+              note: noteT
             })
           }
         }
