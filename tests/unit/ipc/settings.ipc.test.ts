@@ -5,10 +5,13 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
 import { createLogoRepo, type LogoRow } from '../../../src/main/db/repositories/logo.repo'
+import { createSettingsRepo } from '../../../src/main/db/repositories/settings.repo'
+import { RECENT_SALESPERSONS_KEY } from '../../../src/main/services/salesperson-history'
 import {
   DEFAULT_APP_SETTINGS,
   appSettingsPatchToKv,
   importLogoFile,
+  readRecentSalespersons,
   removeLogoFile,
   rowsToLogoInfos,
   rowsToAppSettings
@@ -147,6 +150,53 @@ describe('settings.ipc 纯映射：appSettingsPatchToKv（settings:set 序列化
       ...DEFAULT_APP_SETTINGS,
       ...patch
     })
+  })
+})
+
+describe('settings.ipc 读通道：readRecentSalespersons（settings:getRecentSalespersons 数据源）', () => {
+  it('repo 无 key（get → null）→ []（新装/从未记录场景）', () => {
+    const db = openDb()
+    const repo = createSettingsRepo(db)
+    expect(repo.get(RECENT_SALESPERSONS_KEY)).toBeNull()
+    expect(readRecentSalespersons(repo)).toEqual([])
+  })
+
+  it('repo 返回合法 JSON 数组字符串 → 复原列表', () => {
+    const db = openDb()
+    const repo = createSettingsRepo(db)
+    repo.set(RECENT_SALESPERSONS_KEY, '["张三","李四"]')
+    expect(readRecentSalespersons(repo)).toEqual(['张三', '李四'])
+  })
+
+  it('repo 返回损坏 JSON → []（脏值防御，不抛错）', () => {
+    const db = openDb()
+    const repo = createSettingsRepo(db)
+    repo.set(RECENT_SALESPERSONS_KEY, '{oops')
+    expect(readRecentSalespersons(repo)).toEqual([])
+  })
+
+  it('白名单不泄漏回归：settings 表存在 recent_salespersons 行时 rowsToAppSettings 返回对象无该键（恰好白名单 9 键）', () => {
+    const db = openDb()
+    const repo = createSettingsRepo(db)
+    repo.set(RECENT_SALESPERSONS_KEY, '["x"]')
+    // 前置成立性：行确实已写入 settings 表
+    expect(repo.get(RECENT_SALESPERSONS_KEY)).toBe('["x"]')
+
+    const settings = rowsToAppSettings(repo.getAll())
+    expect('recent_salespersons' in settings).toBe(false)
+    expect(Object.keys(settings).sort()).toEqual(
+      [
+        'auto_cut',
+        'com_port',
+        'printer_channel',
+        'printer_name',
+        'receipt_note',
+        'shop_name',
+        'shop_phone',
+        'tcp_host',
+        'tcp_port'
+      ].sort()
+    )
   })
 })
 

@@ -7,13 +7,14 @@ import type { AppSettings, LogoInfo, PrinterChannel } from '../../shared/types'
 import { createSettingsRepo, type SettingsRepo } from '../db/repositories/settings.repo'
 import { createLogoRepo, type LogoRepo, type LogoRow } from '../db/repositories/logo.repo'
 import { pngBufferToDataUrl } from '../printing/print.service'
+import { parseRecentSalespersons, RECENT_SALESPERSONS_KEY } from '../services/salesperson-history'
 
 /**
  * 系统设置 IPC 薄层（Task 19；多 Logo 架构改造）。
  *
  * 通道：settings:get / settings:set / settings:listLogos /
- * settings:uploadLogo / settings:deleteLogo（preload 暴露
- * window.api.settings.*，与 T9/T10 的命名空间 API 统一模式一致）。
+ * settings:uploadLogo / settings:deleteLogo / settings:getRecentSalespersons
+ * （preload 暴露 window.api.settings.*，与 T9/T10 的命名空间 API 统一模式一致）。
  *
  * 本文件分两部分：
  *  1. 纯映射/文件助手（rowsToAppSettings / appSettingsPatchToKv /
@@ -100,6 +101,23 @@ export function appSettingsPatchToKv(patch: Partial<AppSettings>): Record<string
   if (patch.com_port !== undefined) kv['com_port'] = str(patch.com_port)
   if (patch.auto_cut !== undefined) kv['auto_cut'] = patch.auto_cut ? '1' : '0'
   return kv
+}
+
+/** 最近销售人员读取所需的最小 repo 面（结构兼容 SettingsRepo） */
+interface RecentSalespersonsReaderRepo {
+  get(key: string): string | null
+}
+
+/**
+ * 读取最近销售人员队列（settings:getRecentSalespersons 数据源）：
+ * settings KV 的 recent_salespersons JSON 字符串 → string[]。
+ * 三态天然容错（parseRecentSalespersons 脏值防御）：repo 无 key
+ * （get → null）/ 空串 / 损坏 JSON / 非数组 → []。
+ * ★ recent_salespersons 不进 AppSettings 白名单（定案：独立通道读，
+ *   settings:get 不泄漏）；写侧随结账事务组装（不做独立写通道）。
+ */
+export function readRecentSalespersons(repo: RecentSalespersonsReaderRepo): string[] {
+  return parseRecentSalespersons(repo.get(RECENT_SALESPERSONS_KEY))
 }
 
 // ════════════════ Logo 文件助手（多 Logo 架构，可单测） ════════════════
@@ -198,6 +216,11 @@ export function registerSettingsIpc(db: Database.Database): void {
     repo.setMany(appSettingsPatchToKv(req ?? {}))
     return currentSettings()
   })
+
+  ipcMain.handle(
+    'settings:getRecentSalespersons',
+    (_event, _req: {} | undefined): string[] => readRecentSalespersons(repo)
+  )
 
   /** Logo 列表：DB 行 + 文件读取 → LogoInfo[]（文件缺失行自动跳过） */
   ipcMain.handle('settings:listLogos', async (): Promise<LogoInfo[]> => currentLogoInfos())
