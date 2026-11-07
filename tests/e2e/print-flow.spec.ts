@@ -109,6 +109,11 @@ test.describe.serial('Task 15：打印编排（结账→预览→打印→失败
 
     await page.locator('.cart-panel__checkout').click()
 
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
+
     // 预览弹窗：单号（标题）+ 店名（首行 vars）+ 9 行 receipt-line（G7 同源渲染）
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
@@ -170,6 +175,11 @@ test.describe.serial('Task 15：打印编排（结账→预览→打印→失败
     await scanBarcode(app.electronApp, COLA_BARCODE)
     await expect(page.locator('.cart-row')).toHaveCount(1)
     await page.locator('.cart-panel__checkout').click()
+
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
 
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()

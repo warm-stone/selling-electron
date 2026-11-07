@@ -97,6 +97,10 @@ test.describe.serial('F3 QA · B：边界案例', () => {
 
     // 结账成功（负库存放行）
     await page.locator('.cart-panel__checkout').click()
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
     await expect(dialog).toContainText('合计: ￥5.00')
@@ -178,6 +182,10 @@ test.describe.serial('F3 QA · B：边界案例', () => {
     await scanBarcode(app.electronApp, REF_BARCODE)
     await expect(cartRow(page, REF_NAME)).toHaveCount(1)
     await page.locator('.cart-panel__checkout').click()
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
     const saleNo = (await dialog.locator('.el-dialog__title').textContent())!.match(

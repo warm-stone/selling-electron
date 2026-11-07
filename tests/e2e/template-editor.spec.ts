@@ -269,6 +269,13 @@ test.describe.serial('Task 16：小票模板编辑器（表单 + 实时预览 + 
       .dblclick()
     await page.locator('.cart-panel__checkout').click()
 
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
+    // 下方 dialog 过滤正则含「结账」亦命中本确认弹窗——等其销毁后再断言，避免瞬时双匹配
+    await expect(confirmBtn).toBeHidden()
+
     const dialog = page.locator('.el-dialog').filter({ hasText: /小票|预览|结账/ })
     await expect(dialog).toBeVisible()
     await expect(dialog).toContainText(MARKER_TEXT)

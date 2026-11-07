@@ -273,6 +273,11 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
     const { page } = app
     await page.locator('.cart-panel__checkout').click()
 
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
+
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
 
@@ -384,6 +389,10 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
     await expect(page.locator('.cart-panel__total-value')).toHaveText('¥5.00')
 
     await page.locator('.cart-panel__checkout').click()
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
     const saleNo = (
@@ -576,7 +585,10 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
     await expect(page.locator('.cart-row')).toHaveCount(1)
     await expect(page.locator('.cart-panel__total-value')).toHaveText('¥8.00')
     await page.locator('.cart-panel__checkout').click()
-
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
     const saleNo = (
@@ -686,7 +698,10 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
     await scanBarcode(app.electronApp, P3_BARCODE)
     await expect(page.locator('.cart-row')).toHaveCount(1)
     await page.locator('.cart-panel__checkout').click()
-
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()
     const saleNo = (

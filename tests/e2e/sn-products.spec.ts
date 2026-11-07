@@ -82,9 +82,13 @@ async function gotoMenu(page: Page, label: string, route: string): Promise<void>
   await waitForRoute(page, route)
 }
 
-/** 收银台结账 → 等小票预览弹窗 → 关闭（返回弹窗 locator 供断言） */
+/** 收银台结账 → 确认弹窗（T10）→ 等小票预览弹窗（返回弹窗 locator 供断言） */
 async function checkoutAndWaitPreview(page: Page) {
   await page.locator('.cart-panel__checkout').click()
+  // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+  const confirmBtn = page.locator('.checkout-dialog__confirm')
+  await expect(confirmBtn).toBeVisible()
+  await confirmBtn.click()
   const preview = page.locator('.el-dialog').filter({ hasText: '小票预览' })
   await expect(preview).toBeVisible()
   return preview

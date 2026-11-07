@@ -246,6 +246,11 @@ test.describe.serial('收银台：扫码/双击加购/购物车编辑/结账', (
 
     await page.locator('.cart-panel__checkout').click()
 
+    // Task 10：结账改为弹窗确认——散客快单不填字段直接确认（extras undefined 快单路径）
+    const confirmBtn = page.locator('.checkout-dialog__confirm')
+    await expect(confirmBtn).toBeVisible()
+    await confirmBtn.click()
+
     // Task 15：占位 dialog 已替换为小票预览弹窗（同源 ReceiptPreview 渲染）
     const dialog = page.locator('.el-dialog').filter({ hasText: '小票预览' })
     await expect(dialog).toBeVisible()

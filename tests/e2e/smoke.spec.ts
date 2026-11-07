@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { path: '/products', label: '商品管理' },
   { path: '/purchases', label: '进货管理' },
   { path: '/sales-history', label: '销售记录' },
+  { path: '/customers', label: '客户管理' },
   { path: '/reports', label: '报表统计' },
   { path: '/settings', label: '系统设置' }
 ]
@@ -21,6 +22,7 @@ const IMPLEMENTED_ROUTES = new Set([
   '/products',
   '/settings',
   '/sales-history',
+  '/customers',
   '/pos',
   '/reports',
   '/template-editor'
@@ -36,9 +38,9 @@ test.describe.serial('应用骨架冒烟：导航与路由', () => {
     if (app) await closeApp(app)
   })
 
-  test('侧边导航渲染 7 个中文菜单项', async () => {
+  test('侧边导航渲染 8 个中文菜单项', async () => {
     const items = app.page.locator('.el-menu-item')
-    await expect(items).toHaveCount(7)
+    await expect(items).toHaveCount(8)
     for (const { label } of NAV_ITEMS) {
       await expect(items.filter({ hasText: label })).toHaveCount(1)
     }
