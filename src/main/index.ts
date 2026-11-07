@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db/database'
+import { registerCustomersIpc } from './ipc/customers.ipc'
 import { registerReportsExportIpc } from './ipc/reports-export.ipc'
 import { registerReportsIpc } from './ipc/reports.ipc'
 import { registerPrintingIpc } from './ipc/printing.ipc'
@@ -70,6 +71,7 @@ if (!gotTheLock) {
     const db = initDatabase()
     registerProductsIpc(db)
     registerSalesIpc(db)
+    registerCustomersIpc(db) // 计划任务 7：客户管理（list/create/update；T11 CustomersView 消费）
     registerPurchasesIpc(db) // Task 9：进货管理（IPC 统一装配模式）
     registerReportsExportIpc(db) // Task 17：报表导出（reports:export；数据源走 report.service——T14 统一）
     registerReportsIpc(db) // Task 14：日/月报查询（reports:daily/monthly；剔除 voided + SQL 分桶）
