@@ -6,7 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { VueWrapper } from '@vue/test-utils'
 import SalesHistoryView from '../../../src/renderer/src/views/SalesHistoryView.vue'
-import type { Customer, Sale, SaleDetail, SaleExtraInfo } from '../../../src/shared/types'
+import type {
+  Customer,
+  Sale,
+  SaleDetail,
+  SaleExtraInfo,
+  SaleListItem
+} from '../../../src/shared/types'
 
 /**
  * customer-order-extras 计划任务 12 — 销售明细弹窗附加信息区组件测试。
@@ -19,6 +25,12 @@ import type { Customer, Sale, SaleDetail, SaleExtraInfo } from '../../../src/sha
  *   （显式解绑）；电话新值 → customer 裸值对象（命中回传档案原值防 PUT 覆盖丢数据）
  * - 保存后刷新（updateExtra 返回明细即回填展示区+重拍表单快照）；失败 ElMessage.error
  *   中文文案（SALE_ALREADY_VOIDED）；保存中 loading 防双击
+ *
+ * 需求变更 W1 追加：
+ * - 列表平铺五新列：国补单（el-tag success「国补」+四值列）/ 散客单（'—' 占位 +
+ *   国补 false 纯文本「否」——零 .el-tag）；列序锁定（五列在「状态」后、「操作」前）
+ * - 筛选区三新控件：姓名/电话 300ms 防抖（窗口内不重查）+ trim 后传参 + 空/纯空格
+ *   整键不传；国补三态 select（是/否传布尔、「全部」整键不传——watch 直触无防抖）
  *
  * window.api 走 vi.hoisted 前置 stub：SalesHistoryView → printing.store 链在模块
  * 顶层即读 window.api.invoke（import 时求值），beforeEach 里赋值来不及。
@@ -76,6 +88,19 @@ function makeSale(patch: Partial<Sale> = {}): Sale {
   }
 }
 
+/** 列表行（契约 sales:list res）；默认全 null 平铺列 = 散客/无附加行旧单形态 */
+function makeSaleListItem(patch: Partial<SaleListItem> = {}): SaleListItem {
+  return {
+    ...makeSale(),
+    is_national_subsidy: false,
+    salesperson: null,
+    order_note: null,
+    customer_name: null,
+    customer_phone: null,
+    ...patch
+  }
+}
+
 function makeDetail(patch: Partial<SaleDetail> = {}): SaleDetail {
   return {
     ...makeSale(),
@@ -126,7 +151,7 @@ function makeExtras(patch: Partial<SaleExtraInfo> = {}): SaleExtraInfo {
 
 /** invoke 路由返回值（测试内按需覆写） */
 let detailResponse: SaleDetail = makeDetail()
-let salesListResponse: Sale[] = [makeSale()]
+let salesListResponse: SaleListItem[] = [makeSaleListItem()]
 
 function mountView(): VueWrapper {
   return mount(SalesHistoryView, {
@@ -145,7 +170,7 @@ async function openDetailDialog(wrapper: VueWrapper): Promise<void> {
 
 beforeEach(() => {
   detailResponse = makeDetail()
-  salesListResponse = [makeSale()]
+  salesListResponse = [makeSaleListItem()]
   api.invoke.mockReset().mockImplementation(async (channel: string) => {
     if (channel === 'sales:list') return salesListResponse
     if (channel === 'sales:detail') return detailResponse
@@ -487,3 +512,145 @@ describe('明细弹窗：保存 patch 组装与结果刷新', () => {
     expect(messageSuccessSpy).toHaveBeenCalledWith('附加信息已保存')
   })
 })
+
+describe('列表平铺五新列（需求变更 W1）', () => {
+  it('国补单五列全渲染（含 el-tag 国补）；散客单 — 占位 + 国补纯文本「否」', async () => {
+    salesListResponse = [
+      makeSaleListItem({
+        id: 1,
+        customer_name: '张三',
+        customer_phone: '13800001111',
+        is_national_subsidy: true,
+        salesperson: '李销售',
+        order_note: '含安装服务'
+      }),
+      makeSaleListItem({ id: 2, sale_no: '20261107-0002' })
+    ]
+    const wrapper = mountView()
+    await flushPromises()
+
+    // 列序锁定：五新列恰在「状态」后、「操作」前（操作列保持最右——UI 惯例）
+    const headers = wrapper
+      .findAll('.sales-history__table th .cell')
+      .map((c) => c.text())
+      .filter((t) => t.length > 0)
+    expect(headers).toEqual([
+      '单号',
+      '时间',
+      '商品数',
+      '合计（元）',
+      '状态',
+      '姓名',
+      '电话',
+      '是否国补',
+      '销售人员',
+      '订单备注',
+      '操作'
+    ])
+
+    const names = wrapper.findAll('[data-testid="list-customer-name"]')
+    expect(names).toHaveLength(2)
+    expect(names[0]!.text()).toBe('张三')
+    expect(names[1]!.text()).toBe('—')
+    const phones = wrapper.findAll('[data-testid="list-customer-phone"]')
+    expect(phones[0]!.text()).toBe('13800001111')
+    expect(phones[1]!.text()).toBe('—')
+    const salespersons = wrapper.findAll('[data-testid="list-salesperson"]')
+    expect(salespersons[0]!.text()).toBe('李销售')
+    expect(salespersons[1]!.text()).toBe('—')
+    const notes = wrapper.findAll('[data-testid="list-order-note"]')
+    expect(notes[0]!.text()).toBe('含安装服务')
+    expect(notes[1]!.text()).toBe('—')
+
+    // 国补惯例（ReportsView 第四处）：true → el-tag success「国补」；false → 纯文本「否」
+    const subsidies = wrapper.findAll('[data-testid="list-subsidy"]')
+    expect(subsidies).toHaveLength(2)
+    expect(subsidies[0]!.find('.el-tag').classes()).toContain('el-tag--success')
+    expect(subsidies[0]!.find('.el-tag').text()).toBe('国补')
+    expect(subsidies[1]!.text()).toBe('否')
+    expect(subsidies[1]!.find('.el-tag').exists()).toBe(false)
+  })
+})
+
+describe('筛选区三新控件传参（需求变更 W1）', () => {
+  it('输入姓名：300ms 防抖窗口内不重查，窗口后以 trim 值调 sales:list', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const wrapper = mountView()
+      await flushPromises()
+      api.invoke.mockClear()
+
+      await wrapper.find('[data-testid="filter-customer-name"]').setValue('  张三 ')
+      await vi.advanceTimersByTimeAsync(299)
+      expect(api.invoke).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(api.invoke).toHaveBeenCalledTimes(1)
+      expect(api.invoke).toHaveBeenCalledWith(
+        'sales:list',
+        expect.objectContaining({ customer_name: '张三' })
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('输入电话：trim 值传 customer_phone；清成纯空格 → 整键不传', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const wrapper = mountView()
+      await flushPromises()
+      api.invoke.mockClear()
+
+      const phone = wrapper.find('[data-testid="filter-customer-phone"]')
+      await phone.setValue(' 138 ')
+      await vi.advanceTimersByTimeAsync(300)
+      expect(api.invoke).toHaveBeenCalledWith(
+        'sales:list',
+        expect.objectContaining({ customer_phone: '138' })
+      )
+
+      api.invoke.mockClear()
+      await phone.setValue('   ')
+      await vi.advanceTimersByTimeAsync(300)
+      expect(api.invoke).toHaveBeenCalledTimes(1)
+      const payload = (api.invoke.mock.lastCall?.[1] ?? {}) as Record<string, unknown>
+      expect('customer_phone' in payload).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('国补三态 select：是/否即时传布尔（watch 直触无防抖）；全部 → 整键不传', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    api.invoke.mockClear()
+
+    setSubsidyFilter(wrapper, true)
+    await flushPromises()
+    expect(api.invoke).toHaveBeenCalledTimes(1)
+    expect(api.invoke).toHaveBeenCalledWith(
+      'sales:list',
+      expect.objectContaining({ is_national_subsidy: true })
+    )
+
+    api.invoke.mockClear()
+    setSubsidyFilter(wrapper, false)
+    await flushPromises()
+    expect(api.invoke).toHaveBeenCalledWith(
+      'sales:list',
+      expect.objectContaining({ is_national_subsidy: false })
+    )
+
+    api.invoke.mockClear()
+    setSubsidyFilter(wrapper, 'all')
+    await flushPromises()
+    expect(api.invoke).toHaveBeenCalledTimes(1)
+    const payload = (api.invoke.mock.lastCall?.[1] ?? {}) as Record<string, unknown>
+    expect('is_national_subsidy' in payload).toBe(false)
+  })
+})
+
+/** 三态 select 走 setupState 直达（el-select 下拉交互 jsdom 不便——照 setSalesperson 先例） */
+function setSubsidyFilter(wrapper: VueWrapper, value: 'all' | boolean): void {
+  ;((wrapper.vm as unknown as { subsidyFilter: 'all' | boolean }).subsidyFilter = value)
+}
