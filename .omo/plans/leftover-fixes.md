@@ -39,3 +39,12 @@
 ## 最终验收（四绿）
 
 `npm run typecheck` + `npx vitest run` + `npm run test:e2e` + `npx playwright test -c playwright.qa.config.ts`
+
+---
+
+## 追加需求变更（2026-11-07）：销售记录列表增强 —— ✅ 已完成（commits fd137ae/39f08f7/a64597c）
+
+- 列表新增 5 列：姓名/电话/是否国补/销售人员/订单备注（状态后、操作前；国补 tag 照既有惯例；null → — 占位）
+- 筛选新增 3 项：姓名（模糊）/电话（模糊）/是否国补（全部/是/否 三态——无附加行归非国补，与报表口径一致）
+- 契约：SaleListItem extends Sale（五平铺列）；sales:list req + 三筛选键；双 LEFT JOIN 平铺；全参数绑定 + escapeLike
+- 验收四绿：typecheck 0 错误 / vitest 702 / 基线 e2e 91/91（+3 新场景 10a/10b/10c）/ qa 20/20
