@@ -196,3 +196,12 @@
 - **【关键 flake】scanBarcode 启动初期丢前缀字符**：waitForRoute('/pos') 只保证 URL，POS 搜索框 autofocus 完成前 sendInputEvent 注入丢前几个字符（快照实证：13 位条码只进尾 7 位「0000001」）——高机器负载（同机残留 electron-vite dev 进程）放大竞态窗口；修复：addCola 内 `getByPlaceholder('扫码枪即扫即加')` toBeVisible + click 聚焦后再注入（幂等）。此 flake 属既有 helper 竞态非本次列改动引入，但列插列后首跑即暴露
 - **列插入的存量影响面结论（零适配实证）**：grep 全部 spec 的 td nth——sales-history.spec 只用 `td.first()`（单号列位不变）+ 明细弹窗 items 表（未动）；reports 页新列尾部追加且 nth(2..6) 不变；sales-history 行级 `.el-tag` 断言全部有类型限定（--primary/--danger 与国补 --success 互斥）→ 双套件 91/91 + 20/20 零改动全绿
 - **双套件顺序执行**：基线（globalSetup 构建 out/）跑完再跑 qa（无 globalSetup 复用产物）——同机并行双 playwright 互造负载 flake 已实测教训再现（本机残留 dev 进程即例证）
+
+## 任务：模板编辑器顶部可用变量说明区（RECEIPT_VAR_DOCS 单一事实源）
+
+- **View 里早就有变量清单硬编码（VAR_SLOTS）**：TemplateEditorView 原有 7 变量 popover 提示（缺 companyFooter）——「新增 schema 常量」任务的 MUST NOT DO（不得硬编码在 View）必须解读为**删除既有硬编码**而非只管新增区：popover 与新说明区共同消费 RECEIPT_VAR_DOCS，同一 v-for 结构零布局变化。替换前 grep tests/ 全量确认 E2E 对 popover 变量文案零断言（tpl-vars 无匹配），文案变长无影响面
+- **keyof 带索引签名接口的 satisfies 防漂移是纸老虎**：ReceiptVars 的 `[key: string]: ...` 使 `keyof ReceiptVars` 宽化为 string——`satisfies ReadonlyArray<{ name: keyof ReceiptVars }>` 对拼写错误零拦截。真正防漂移靠组件测试写死期望数组（8 个 slot 字面量 toEqual）：schema 常量改名/增删键测试即红，从常量派生期望 = 同义反复
+- **el-collapse 绋试只测初始展开态**：collapse-item 的 wrap 是 v-show（isActive），初始渲染同步无动画路径 → isVisible() 可靠；折叠交互不测——EP collapse-transition 的 leave JS 钩子依赖 transitionend，jsdom 不推进（同 el-dialog afterLeave 教训），断言收起后隐藏必 flaky
+- **navigator.clipboard stub 手法**：jsdom 无 secure context → clipboard 属性不存在，`Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })` 直接注入；file:// Electron 下真实 API 可用性未知 → 组件侧 try/catch 静默降级（复制是便利非依赖），降级测试断言「writeText 被调 + success toast 未调 + 不抛」三件套
+- **companyFooter 全仓 grep 实证无填充来源**：仅 template-schema.ts 类型定义 + escpos-generator.ts 的 ReceiptPrintVars 同名字段（也是类型），无任何赋值点 → 文档含义标「预留扩展变量（当前未填充，打印时保留原文）」——interpolate 对 undefined 值走未知插槽分支保留原文，语义自洽
+- TemplateEditorView 无模块顶层 window.api 访问（import 链无 store），vi.hoisted 前置 stub 照抄 T12 模式是保险而非硬需求；mount 只需 ElementPlus 插件（无 pinia）+ RO stub（EP select/radio 布局依赖）
