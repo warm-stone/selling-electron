@@ -27,6 +27,7 @@ import type {
   SectionSize,
   TotalLine
 } from '../../../shared/receipt/template-schema'
+import { RECEIPT_VAR_DOCS } from '../../../shared/receipt/template-schema'
 import type { PrintTemplate } from '../../../shared/types'
 import { formatMoney, parseMoneyToCents } from '../../../shared/utils/money'
 
@@ -65,16 +66,6 @@ const SIZE_OPTIONS: Option<SectionSize>[] = [
   { value: 'doubleWidth', label: '倍宽' },
   { value: 'quad', label: '双倍' }
 ]
-
-const VAR_SLOTS = [
-  { slot: '{shopName}', desc: '店铺名称' },
-  { slot: '{shopPhone}', desc: '店铺电话' },
-  { slot: '{receiptNote}', desc: '小票备注' },
-  { slot: '{saleNo}', desc: '小票单号' },
-  { slot: '{datetime}', desc: '打印时间' },
-  { slot: '{total}', desc: '合计金额' },
-  { slot: '{itemCount}', desc: '总件数' }
-] as const
 
 // ── 实时预览样例数据（虚构店铺 + 三行商品，含超长中文名验证名称列折行；金额经 shared/utils/money 组装——G1）──
 const SAMPLE_ITEMS: SaleReceiptData = {
@@ -277,6 +268,26 @@ function ipcErrorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err)
   const m = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
   return m ? (m[1] as string) : raw
+}
+
+// ── 变量说明区（可折叠，默认展开；点击变量复制插槽原文）──
+
+/** 说明区折叠面板展开态（单面板，name='vars'） */
+const varsHelpActive = ref<string[]>(['vars'])
+
+/** 变量插槽原文（与 interpolateVariables 的 `{变量}` 语法一致） */
+function varSlot(name: string): string {
+  return `{${name}}`
+}
+
+/** 点击复制 `{变量}`（file:// 下 clipboard API 可能不可用——静默降级，code 文本可手抄） */
+async function copyVarSlot(name: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(varSlot(name))
+    ElMessage.success('已复制')
+  } catch {
+    // 剪贴板不可用：不弹错（复制是便利非依赖），用户可对照说明手抄
+  }
 }
 
 // ── 列表与选中 ──
@@ -529,6 +540,34 @@ onMounted(async () => {
           </el-button>
         </div>
 
+        <el-collapse v-model="varsHelpActive" class="tpl-vars-help" data-testid="tpl-vars-help">
+          <el-collapse-item name="vars">
+            <template #title>
+              <span class="tpl-vars-help__title" data-testid="tpl-vars-help-toggle">
+                <el-icon class="tpl-vars-help__icon"><QuestionFilled /></el-icon>
+                可用变量（输入 {变量名} 自动替换，点击变量可复制）
+              </span>
+            </template>
+            <p class="tpl-vars-help__intro">
+              变量可输入在头部段落、合计行、底部段落的文案中，打印时替换为实际值；未知变量保留原文。
+            </p>
+            <div class="tpl-vars-help__grid">
+              <button
+                v-for="v in RECEIPT_VAR_DOCS"
+                :key="v.name"
+                type="button"
+                class="tpl-vars-help__item"
+                :title="`点击复制 ${varSlot(v.name)}`"
+                data-testid="tpl-var-item"
+                @click="copyVarSlot(v.name)"
+              >
+                <code>{{ varSlot(v.name) }}</code>
+                <span>{{ v.description }}</span>
+              </button>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+
         <el-form :model="draft" :rules="rules" label-position="top">
           <section class="tpl-group">
             <h4 class="tpl-group__title">基本信息</h4>
@@ -577,9 +616,9 @@ onMounted(async () => {
                 </template>
                 <div class="tpl-vars">
                   <p class="tpl-vars__title">内容可用变量插槽（打印时替换为实值）</p>
-                  <p v-for="v in VAR_SLOTS" :key="v.slot" class="tpl-vars__row">
-                    <code>{{ v.slot }}</code>
-                    <span>{{ v.desc }}</span>
+                  <p v-for="v in RECEIPT_VAR_DOCS" :key="v.name" class="tpl-vars__row">
+                    <code>{{ varSlot(v.name) }}</code>
+                    <span>{{ v.description }}</span>
                   </p>
                 </div>
               </el-popover>
@@ -825,9 +864,9 @@ onMounted(async () => {
                 </template>
                 <div class="tpl-vars">
                   <p class="tpl-vars__title">内容可用变量插槽（打印时替换为实值）</p>
-                  <p v-for="v in VAR_SLOTS" :key="v.slot" class="tpl-vars__row">
-                    <code>{{ v.slot }}</code>
-                    <span>{{ v.desc }}</span>
+                  <p v-for="v in RECEIPT_VAR_DOCS" :key="v.name" class="tpl-vars__row">
+                    <code>{{ varSlot(v.name) }}</code>
+                    <span>{{ v.description }}</span>
                   </p>
                 </div>
               </el-popover>
@@ -1073,6 +1112,91 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── 变量说明区（可折叠紧凑卡片，默认展开——浅底降权，不喧宾夺主）── */
+.tpl-vars-help {
+  margin-top: 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+}
+
+.tpl-vars-help :deep(.el-collapse-item__header) {
+  height: 40px;
+  padding: 0 16px;
+  border-bottom: none;
+  background: transparent;
+}
+
+.tpl-vars-help :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+  background: transparent;
+}
+
+.tpl-vars-help :deep(.el-collapse-item__content) {
+  padding-bottom: 12px;
+}
+
+.tpl-vars-help__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-regular);
+}
+
+.tpl-vars-help__icon {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+}
+
+.tpl-vars-help__intro {
+  margin: 0 0 8px;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.tpl-vars-help__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.tpl-vars-help__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tpl-vars-help__item:hover {
+  background: var(--el-fill-color-light);
+}
+
+.tpl-vars-help__item code {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  font-family: 'NSimSun', 'SimSun', monospace;
+  font-size: 12px;
+  color: var(--el-color-primary);
+}
+
+.tpl-vars-help__item span {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
 }
 
 .tpl-group {

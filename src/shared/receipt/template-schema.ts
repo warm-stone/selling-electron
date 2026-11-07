@@ -90,6 +90,24 @@ export interface ReceiptVars {
 }
 
 /**
+ * 可用变量说明（模板编辑器顶部说明区与段落 popover 展示用；
+ * 与 ReceiptVars 已知键一一对应——含义提炼自各键 JSDoc 与设置页语境。
+ * shopName / shopPhone / receiptNote 取自设置页「店铺信息」，
+ * saleNo / datetime / total / itemCount 来自销售单，companyFooter 为
+ * 预留扩展键（当前无填充来源，interpolate 视为未知插槽保留原文）。
+ */
+export const RECEIPT_VAR_DOCS = [
+  { name: 'shopName', description: '店名（设置页「店铺信息」）' },
+  { name: 'shopPhone', description: '店铺电话（设置页）' },
+  { name: 'receiptNote', description: '小票备注（设置页）' },
+  { name: 'saleNo', description: '销售单号' },
+  { name: 'datetime', description: '交易时间' },
+  { name: 'total', description: '合计金额（元，已格式化两位小数，如 12.00）' },
+  { name: 'itemCount', description: '商品总件数' },
+  { name: 'companyFooter', description: '预留扩展变量（当前未填充，打印时保留原文）' }
+] as const satisfies ReadonlyArray<{ name: keyof ReceiptVars; description: string }>
+
+/**
  * `{变量}` 插槽替换：已知插槽替换为 vars 值，未知插槽保留原文。
  * 使用 function replacer——变量值中的 `$&`/`$1` 等 replace 元字符
  * 按字面量插入，不被二次解释。
