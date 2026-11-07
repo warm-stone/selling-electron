@@ -5,10 +5,15 @@
  * → 逐项实时读 products 快照（SN 行同事务校验 product_sns 台账——D-SN6
  * 拒绝态全部先于任何 INSERT）→ INSERT sales + sale_items（SN 行含 sn 快照）
  * → SN 行台账流转 in_stock→sold + 回写 sale_item_id（D-SN8）→
- * 逐项 stock -= qty（负库存允许 D2）→ INSERT movements(source='sale')。
+ * 逐项 stock -= qty（负库存允许 D2）→ INSERT movements(source='sale')
+ * → 附加信息（计划任务 8，可选：客户 find-or-create + sale_extras +
+ * 销售人员历史写 settings——散客快单零追加）。
  * voidSale：单事务 = 校验 → status='voided' + voided_at → 逐行 stock += qty
  * → SN 行台账回滚 sold→in_stock（D-SN8，按明细行自身 id 定位）→
  * movements(source='void')。作废不物理删除任何行（D3）。
+ * updateExtra：单事务 = 校验（综合已有 sale_extras 行的最终状态——Q5）→
+ * 客户解绑/find-or-create → sale_extras.upsert（全空结果行保留）→
+ * 销售人员历史（非空时）→ 返回装配 extras 的明细。
  *
  * 事务内零 I/O：无 channel/网络/文件/打印调用（G3：打印是落库后异步）。
  * 竞态分析见 learnings：better-sqlite3 同步事务在单条 JS 调用栈内完成，
@@ -17,6 +22,8 @@
 
 import type Database from 'better-sqlite3'
 import type {
+  CheckoutCustomerInput,
+  CheckoutExtrasInput,
   CheckoutItem,
   Sale,
   SaleDetail,
@@ -24,6 +31,15 @@ import type {
 } from '../../shared/types'
 import { createSaleRepo } from '../db/repositories/sale.repo'
 import type { SaleListFilter, SnLedgerRow } from '../db/repositories/sale.repo'
+import { createSaleExtraRepo } from '../db/repositories/sale-extra.repo'
+import type { SaleExtraPatch } from '../db/repositories/sale-extra.repo'
+import { createCustomerRepo } from '../db/repositories/customer.repo'
+import { createSettingsRepo } from '../db/repositories/settings.repo'
+import {
+  RECENT_SALESPERSONS_KEY,
+  parseRecentSalespersons,
+  pushRecentSalesperson
+} from './salesperson-history'
 
 /** service 错误码（IPC 层透传 message 给 renderer） */
 export type SaleErrorCode =
@@ -36,6 +52,8 @@ export type SaleErrorCode =
   | 'SALE_SN_NOT_FOUND'
   | 'SALE_SN_SOLD'
   | 'SALE_SN_PRODUCT_MISMATCH'
+  | 'SALE_EXTRAS_PHONE_REQUIRED'
+  | 'SALE_EXTRAS_SUBSIDY_REQUIRES_CUSTOMER'
 
 /** 带 code 的业务错误（message 为面向用户的中文文案） */
 export class SaleServiceError extends Error {
@@ -50,6 +68,18 @@ export interface SaleListQuery {
   date_from?: string
   date_to?: string
   status?: SaleStatus
+}
+
+/**
+ * sales:updateExtra 的 patch 形状（IpcChannels req 去掉 sale_id）。
+ * undefined 键 = 不动（sale-extra.repo.upsert 的部分键语义）；
+ * customer: null = 显式解绑（与 undefined「不动」刻意区分）。
+ */
+export interface SaleExtraUpdatePatch {
+  is_national_subsidy?: boolean
+  order_note?: string
+  salesperson?: string
+  customer?: CheckoutCustomerInput | null
 }
 
 /** 本地今日 yyyyMMdd（sale_no 日期前缀；与 DDL datetime('now','localtime') 同口径） */
@@ -97,16 +127,129 @@ function assertValidItems(items: CheckoutItem[]): void {
   }
 }
 
+/** trim 后空串归一（null/undefined 输入容错为 ''） */
+function trimTo(s: string | null | undefined): string {
+  return (s ?? '').trim()
+}
+
+/**
+ * 结账附加信息校验（service 层镜像校验——IPC 可直达，前端规则不是防线）。
+ * 全字段 trim 后判定；extras 为 null/undefined 或 customer 四字段全空
+ * → 视为无客户信息（合法——散客快单路径）。
+ */
+function assertValidExtras(extras: CheckoutExtrasInput | undefined): void {
+  if (extras == null) return
+  const customer = extras.customer
+  if (
+    customer != null &&
+    (trimTo(customer.name) !== '' || trimTo(customer.address) !== '') &&
+    trimTo(customer.phone) === ''
+  ) {
+    throw new SaleServiceError(
+      'SALE_EXTRAS_PHONE_REQUIRED',
+      '填写客户姓名或地址时，电话不能为空'
+    )
+  }
+  if (extras.is_national_subsidy === true) {
+    const hasName = customer != null && trimTo(customer.name) !== ''
+    const hasPhone = customer != null && trimTo(customer.phone) !== ''
+    if (!hasName || !hasPhone) {
+      throw new SaleServiceError(
+        'SALE_EXTRAS_SUBSIDY_REQUIRES_CUSTOMER',
+        '参与国补需填写客户姓名和电话'
+      )
+    }
+  }
+}
+
+/**
+ * 「有无任一附加内容」判定（checkout）：customer 四字段（trim 后）全空
+ * 且非国补、备注空、销售人员空 → 不写任何附加行、不建客户
+ * （散客快单路径与现状完全一致）。
+ */
+function hasAnyExtra(extras: CheckoutExtrasInput): boolean {
+  const c = extras.customer
+  const hasCustomerField =
+    c != null &&
+    (trimTo(c.name) !== '' ||
+      trimTo(c.phone) !== '' ||
+      trimTo(c.address) !== '' ||
+      trimTo(c.note) !== '')
+  return (
+    hasCustomerField ||
+    extras.is_national_subsidy === true ||
+    trimTo(extras.order_note) !== '' ||
+    trimTo(extras.salesperson) !== ''
+  )
+}
+
 export function createSaleService(db: Database.Database) {
   const repo = createSaleRepo(db)
+  const saleExtraRepo = createSaleExtraRepo(db)
+  const customerRepo = createCustomerRepo(db)
+  const settingsRepo = createSettingsRepo(db)
+
+  /**
+   * 明细装配：repo 头+行 + sale_extras 旁挂（extras 真装配——替换 T2 占位；
+   * 组装点在 service 层：sale.repo 不跨表装配，保持销售 DAL 单一职责）。
+   */
+  function assembleSaleDetail(saleId: number): SaleDetail | undefined {
+    const core = repo.getDetail(saleId)
+    if (!core) return undefined
+    return { ...core, extras: saleExtraRepo.getWithCustomer(saleId) }
+  }
+
+  /**
+   * 客户 find-or-create（电话=只读查找键——Q1 定案：phone 列永不 UPDATE）。
+   * 命中 → PUT 全量覆盖 name/address/note（空=清空档案值）；
+   * 未命中 → insert 新档。入参须已 trim（调用方保证）。
+   */
+  function findOrCreateCustomer(c: {
+    name: string
+    phone: string
+    address: string
+    note: string
+  }): number {
+    const hit = customerRepo.findByPhone(c.phone)
+    if (hit) {
+      customerRepo.update(hit.id, {
+        name: c.name,
+        address: c.address,
+        note: c.note
+      })
+      return hit.id
+    }
+    return customerRepo.insert(c).id
+  }
+
+  /**
+   * 记录销售人员到 settings recent_salespersons 队列。
+   * 只能在事务内调用（settingsRepo.set 单条 INSERT OR REPLACE 预编译语句
+   * 无自有事务——回滚零残留）。
+   */
+  function rememberSalesperson(name: string): void {
+    const list = pushRecentSalesperson(
+      parseRecentSalespersons(settingsRepo.get(RECENT_SALESPERSONS_KEY)),
+      name
+    )
+    settingsRepo.set(RECENT_SALESPERSONS_KEY, JSON.stringify(list))
+  }
 
   return {
     /**
      * 结账：单事务落 sales + sale_items（快照）+ 扣库存 + movements。
      * 返回头 + items 明细（T11 收银台 / T15 打印编排的核心输入——金额全程整数分）。
+     *
+     * 附加信息（计划任务 8）：extras 可选——不传或全空 = 散客快单路径
+     * （不写任何附加行、不建客户，与现状完全一致）；有任一附加内容则事务内
+     * 追加客户 find-or-create → sale_extras.insert → 销售人员历史写 settings。
+     *
+     * D-SN8 豁免：本事务跨 repo 调用（customer/sale-extra/settings），被调方法
+     * 均单条预编译语句无自有事务，SAVEPOINT 降级安全（sale.repo.ts:3-11 先例）。
      */
-    checkout(items: CheckoutItem[]): SaleDetail {
+    checkout(items: CheckoutItem[], extras?: CheckoutExtrasInput): SaleDetail {
       assertValidItems(items)
+      assertValidExtras(extras)
 
       const run = db.transaction((): SaleDetail => {
         const datePrefix = localDateCompact()
@@ -202,7 +345,32 @@ export function createSaleService(db: Database.Database) {
           })
         }
 
-        const detail = repo.getDetail(saleId)
+        // ── 附加信息写入（FK 顺序：saleId 已落库；散客快单路径零追加）──
+        if (extras != null && hasAnyExtra(extras)) {
+          const customer = extras.customer
+          let customerId: number | null = null
+          if (customer != null && trimTo(customer.phone) !== '') {
+            customerId = findOrCreateCustomer({
+              name: trimTo(customer.name),
+              phone: trimTo(customer.phone),
+              address: trimTo(customer.address),
+              note: trimTo(customer.note)
+            })
+          }
+          const note = trimTo(extras.order_note)
+          const salesperson = trimTo(extras.salesperson)
+          saleExtraRepo.insert(saleId, {
+            customer_id: customerId,
+            is_national_subsidy: extras.is_national_subsidy === true,
+            order_note: note === '' ? null : note,
+            salesperson: salesperson === '' ? null : salesperson
+          })
+          if (salesperson !== '') {
+            rememberSalesperson(salesperson)
+          }
+        }
+
+        const detail = assembleSaleDetail(saleId)
         if (!detail) {
           throw new SaleServiceError('SALE_NOT_FOUND', '销售单不存在')
         }
@@ -274,9 +442,9 @@ export function createSaleService(db: Database.Database) {
       return repo.list(page, filter)
     },
 
-    /** 单据明细（头 + items） */
+    /** 单据明细（头 + items + extras 旁挂） */
     getDetail(saleId: number): SaleDetail {
-      const detail = repo.getDetail(saleId)
+      const detail = assembleSaleDetail(saleId)
       if (!detail) {
         throw new SaleServiceError(
           'SALE_NOT_FOUND',
@@ -284,6 +452,111 @@ export function createSaleService(db: Database.Database) {
         )
       }
       return detail
+    },
+
+    /**
+     * 修改销售附加信息（sales:updateExtra）——自有事务，返回更新后明细。
+     * - 单不存在 → SALE_NOT_FOUND；已作废 → SALE_ALREADY_VOIDED（Q4 定案）
+     * - 校验综合最终状态（Q5 定案）：旧单已勾国补同样要求姓名+电话
+     *   （需读现有 sale_extras 行合并 patch 后判定）
+     * - 客户 patch 语义（Q5）：customer=null 或电话 trim 空 → customer_id 置
+     *   NULL（解绑）；电话非空 → find-or-create（同 checkout 路径，永不 UPDATE
+     *   phone）
+     * - sale_extras 全空结果行保留（不删除）；salesperson trim 后非空 → 更新
+     *   recent_salespersons 缓存（本事务内）
+     * - D-SN8 豁免：同 checkout——跨 repo（customer/sale-extra/settings）被调
+     *   方法均单条预编译语句无自有事务
+     */
+    updateExtra(saleId: number, patch: SaleExtraUpdatePatch): SaleDetail {
+      const run = db.transaction((): SaleDetail => {
+        const sale = repo.getById(saleId)
+        if (!sale) {
+          throw new SaleServiceError(
+            'SALE_NOT_FOUND',
+            `销售单不存在（id=${saleId}）`
+          )
+        }
+        if (sale.status === 'voided') {
+          throw new SaleServiceError('SALE_ALREADY_VOIDED', '该销售单已作废')
+        }
+
+        const existing = saleExtraRepo.getWithCustomer(saleId)
+        const customerPatch = patch.customer
+        const nameT = trimTo(customerPatch?.name)
+        const phoneT = trimTo(customerPatch?.phone)
+        const addressT = trimTo(customerPatch?.address)
+
+        if (
+          customerPatch != null &&
+          (nameT !== '' || addressT !== '') &&
+          phoneT === ''
+        ) {
+          throw new SaleServiceError(
+            'SALE_EXTRAS_PHONE_REQUIRED',
+            '填写客户姓名或地址时，电话不能为空'
+          )
+        }
+
+        // 综合最终状态（Q5）：final = 已有行被 patch 覆盖后的结果
+        const finalSubsidy =
+          patch.is_national_subsidy !== undefined
+            ? patch.is_national_subsidy === true
+            : existing?.is_national_subsidy === true
+        const finalName =
+          customerPatch !== undefined ? nameT : trimTo(existing?.customer?.name)
+        const finalPhone =
+          customerPatch !== undefined
+            ? phoneT
+            : trimTo(existing?.customer?.phone)
+        if (finalSubsidy && (finalName === '' || finalPhone === '')) {
+          throw new SaleServiceError(
+            'SALE_EXTRAS_SUBSIDY_REQUIRES_CUSTOMER',
+            '参与国补需填写客户姓名和电话'
+          )
+        }
+
+        let customerId: number | null | undefined = undefined
+        if (customerPatch !== undefined) {
+          if (customerPatch === null || phoneT === '') {
+            customerId = null
+          } else {
+            customerId = findOrCreateCustomer({
+              name: nameT,
+              phone: phoneT,
+              address: addressT,
+              note: trimTo(customerPatch.note)
+            })
+          }
+        }
+
+        const extraPatch: SaleExtraPatch = {}
+        if (customerId !== undefined) {
+          extraPatch.customer_id = customerId
+        }
+        if (patch.is_national_subsidy !== undefined) {
+          extraPatch.is_national_subsidy = patch.is_national_subsidy
+        }
+        if (patch.order_note !== undefined) {
+          const note = trimTo(patch.order_note)
+          extraPatch.order_note = note === '' ? null : note
+        }
+        if (patch.salesperson !== undefined) {
+          const salesperson = trimTo(patch.salesperson)
+          extraPatch.salesperson = salesperson === '' ? null : salesperson
+          if (salesperson !== '') {
+            rememberSalesperson(salesperson)
+          }
+        }
+        saleExtraRepo.upsert(saleId, extraPatch)
+
+        const detail = assembleSaleDetail(saleId)
+        if (!detail) {
+          throw new SaleServiceError('SALE_NOT_FOUND', '销售单不存在')
+        }
+        return detail
+      })
+
+      return run()
     }
   }
 }

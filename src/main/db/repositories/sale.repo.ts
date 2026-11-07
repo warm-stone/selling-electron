@@ -123,14 +123,18 @@ export function createSaleRepo(db: Database.Database) {
       .all(saleId) as SaleItem[]
   }
 
-  function getDetail(saleId: number): SaleDetail | undefined {
+  /**
+   * 头 + 明细行（不含 extras——T2 占位已替换：sale_extras 旁挂由 service 层
+   * 调 sale-extra.repo.getWithCustomer 装配，本 repo 不跨表 JOIN，保持销售
+   * DAL 单一职责）。消费方：sale.service（checkout/getDetail/updateExtra）
+   * 与 printing.ipc（orchestrator getSaleDetail 接线）。
+   */
+  function getDetail(saleId: number): Omit<SaleDetail, 'extras'> | undefined {
     const sale = db
       .prepare('SELECT * FROM sales WHERE id = ?')
       .get(saleId) as Sale | undefined
     if (!sale) return undefined
-    // T2 契约接线占位：extras 平铺由 sale_extras LEFT JOIN 装配任务（后续 Wave）替换；
-    // 当前无 sale_extras 行写入 → null 即旧单准确语义
-    return { ...sale, items: getSaleItems(sale.id), extras: null }
+    return { ...sale, items: getSaleItems(sale.id) }
   }
 
   return {

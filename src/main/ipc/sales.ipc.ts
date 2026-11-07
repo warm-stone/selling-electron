@@ -8,10 +8,16 @@
 import { ipcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import { createSaleService } from '../services/sale.service'
-import type { CheckoutItem, SaleStatus } from '../../shared/types'
+import type {
+  CheckoutCustomerInput,
+  CheckoutExtrasInput,
+  CheckoutItem,
+  SaleStatus
+} from '../../shared/types'
 
 interface CheckoutRequest {
   items?: CheckoutItem[]
+  extras?: CheckoutExtrasInput
 }
 
 interface VoidRequest {
@@ -28,11 +34,20 @@ interface DetailRequest {
   sale_id?: number
 }
 
+interface UpdateExtraRequest {
+  sale_id?: number
+  is_national_subsidy?: boolean
+  order_note?: string
+  salesperson?: string
+  customer?: CheckoutCustomerInput | null
+}
+
 export function registerSalesIpc(db: Database.Database): void {
   const service = createSaleService(db)
 
   ipcMain.handle('sales:checkout', (_event, req: CheckoutRequest) =>
-    service.checkout(req?.items ?? [])
+    // extras 缺省 undefined = 散客快单路径（service 侧不落 sale_extras 行）
+    service.checkout(req?.items ?? [], req?.extras ?? undefined)
   )
 
   ipcMain.handle('sales:void', (_event, req: VoidRequest) =>
@@ -49,5 +64,16 @@ export function registerSalesIpc(db: Database.Database): void {
 
   ipcMain.handle('sales:detail', (_event, req: DetailRequest) =>
     service.getDetail(req?.sale_id ?? -1)
+  )
+
+  // patch 键缺省 undefined = 不动（sale-extra.repo.upsert 部分键语义）；
+  // customer: null 透传为显式解绑
+  ipcMain.handle('sales:updateExtra', (_event, req: UpdateExtraRequest) =>
+    service.updateExtra(req?.sale_id ?? -1, {
+      is_national_subsidy: req?.is_national_subsidy,
+      order_note: req?.order_note,
+      salesperson: req?.salesperson,
+      customer: req?.customer
+    })
   )
 }

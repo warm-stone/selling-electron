@@ -15,6 +15,7 @@ import type { PrintSettings } from '../printing/print.service'
 import { generateReceiptBytes, type ReceiptPrintVars } from '../printing/escpos/escpos-generator'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
 import { createSaleRepo } from '../db/repositories/sale.repo'
+import { createSaleExtraRepo } from '../db/repositories/sale-extra.repo'
 import { createSettingsRepo } from '../db/repositories/settings.repo'
 import { createTemplateRepo } from '../db/repositories/template.repo'
 import { createLogoRepo } from '../db/repositories/logo.repo'
@@ -141,6 +142,7 @@ export function registerPrintingIpc(db: Database.Database): void {
 
   // ── Task 15：打印编排装配（repo → 编排器；队列随编排器实例级单例串行） ──
   const saleRepo = createSaleRepo(db)
+  const saleExtraRepo = createSaleExtraRepo(db)
   const templateRepo = createTemplateRepo(db)
   const settingsRepo = createSettingsRepo(db)
   const logoRepo = createLogoRepo(db)
@@ -158,7 +160,14 @@ export function registerPrintingIpc(db: Database.Database): void {
   }
 
   const orchestrator = createPrintOrchestrator({
-    getSaleDetail: (saleId) => saleRepo.getDetail(saleId),
+    // extras 真装配（T8 接线）：repo.getDetail 不含 sale_extras，此层补齐
+    // SaleDetail.extras（printing:preview 消费——T2 契约既定）
+    getSaleDetail: (saleId) => {
+      const core = saleRepo.getDetail(saleId)
+      return core === undefined
+        ? undefined
+        : { ...core, extras: saleExtraRepo.getWithCustomer(saleId) }
+    },
     getDefaultTemplate: () => templateRepo.getDefault(),
     getSettings: currentSettings,
     readLogoById
