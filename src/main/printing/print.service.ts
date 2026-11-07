@@ -238,7 +238,10 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
         name: it.product_name,
         quantity: String(it.quantity),
         unitPrice: formatMoney(it.unit_price_cents),
-        subtotal: formatMoney(it.subtotal_cents)
+        subtotal: formatMoney(it.subtotal_cents),
+        // SN 快照透传（D-SN12/T3.3：数据驱动默认行为——sn 非空即渲染副行，
+        // 无模板配置/迁移；getSaleDetail 为 SELECT * 直读 sale_items.sn）
+        sn: it.sn ?? null
       }))
     }
 

@@ -38,4 +38,16 @@ export function registerProductsIpc(db: Database.Database): void {
   ipcMain.handle('products:delete', (_event, req: IpcChannels['products:delete']['req']) =>
     productService.delete(req)
   )
+
+  ipcMain.handle('products:findSn', (_event, req: IpcChannels['products:findSn']['req']) =>
+    productService.findSn(req.sn)
+  )
+
+  ipcMain.handle('products:listSns', (_event, req: IpcChannels['products:listSns']['req']) =>
+    productService.listSns(req.product_id, req.include_sold)
+  )
+
+  ipcMain.handle('products:deleteSn', (_event, req: IpcChannels['products:deleteSn']['req']) =>
+    productService.deleteSn(req.sn_id)
+  )
 }

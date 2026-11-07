@@ -258,6 +258,9 @@ function centsToYuan(cents: number): string {
           <el-table-column label="条码（快照）" min-width="135">
             <template #default="{ row }">{{ row.barcode ?? '—' }}</template>
           </el-table-column>
+          <el-table-column label="SN" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.sn ?? '—' }}</template>
+          </el-table-column>
           <el-table-column prop="quantity" label="数量" width="70" align="center" />
           <el-table-column label="单价（元）" width="100" align="right">
             <template #default="{ row }">{{ centsToYuan(row.unit_price_cents) }}</template>

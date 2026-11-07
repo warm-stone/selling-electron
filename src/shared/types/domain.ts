@@ -12,6 +12,13 @@ import type { PaperWidth } from '../receipt/char-grid'
 
 // ══════════════ 商品 ══════════════
 
+/**
+ * 商品计存类型（products.tracking——D-SN1）：
+ * - 'quantity' 批量计商品（原逻辑：stock 整数计数）
+ * - 'sn' SN 商品（一物一码，逐个录 SN；建后不可互转）
+ */
+export type ProductTracking = 'quantity' | 'sn'
+
 /** 商品（products 表；允许负库存——D2） */
 export interface Product {
   id: number
@@ -20,8 +27,12 @@ export interface Product {
   name: string
   /** 默认售价（分）；nullable——购物车自动带出可改 */
   default_price_cents: number | null
-  /** 允许负数（D2：UI 负库存标红） */
+  /** 允许负数（D2：UI 负库存标红）；SN 商品=在库 SN 数冗余汇总（D-SN13） */
   stock: number
+  /** 计存类型（建后不可改——D-SN1） */
+  tracking: ProductTracking
+  /** SN 前缀（空串=无前缀；仅进货侧扫 SN 自动匹配商品用——D-SN2） */
+  sn_prefix: string
   created_at: string
   updated_at: string
 }
@@ -36,6 +47,8 @@ export interface CartItem {
   barcode: string | null
   quantity: number
   unit_price_cents: number
+  /** SN 行标识；批量计行 null（SN 行 quantity 恒 1、禁合并——D-SN7） */
+  sn: string | null
 }
 
 // ══════════════ 销售 ══════════════
@@ -65,6 +78,8 @@ export interface SaleItem {
   quantity: number
   unit_price_cents: number
   subtotal_cents: number
+  /** SN 快照（D-SN12 小票/明细展示）；批量计行 null */
+  sn: string | null
 }
 
 /** 销售单明细（头 + 行，sales:detail / printing:preview 消费） */
@@ -75,8 +90,11 @@ export interface SaleDetail extends Sale {
 /** 结账请求行（购物车行 → service 内查快照落库） */
 export interface CheckoutItem {
   product_id: number
+  /** SN 行恒 1（service 校验——D-SN7） */
   quantity: number
   unit_price_cents: number
+  /** SN 行必填非空（service 校验）；批量计行 null */
+  sn: string | null
 }
 
 // ══════════════ 进货 ══════════════
@@ -99,6 +117,8 @@ export interface PurchaseItem {
   barcode: string | null
   quantity: number
   cost_price_cents: number
+  /** SN 快照（SN 行每 SN 一行、quantity=1——D-SN10）；批量计行 null */
+  sn: string | null
 }
 
 /** 进货单明细（头 + 行） */
@@ -106,11 +126,27 @@ export interface PurchaseOrderWithItems extends PurchaseOrder {
   items: PurchaseItem[]
 }
 
-/** 进货入库请求行 */
-export interface PurchaseInputItem {
+/**
+ * 进货入库请求行（联合类型——D-SN9/10）：
+ * - quantity 批量计行（原逻辑）
+ * - sn 行：sns 逐个录入，落库展开为每 SN 一行独立 cost_price_cents（值相同）
+ */
+export type PurchaseInputItem =
+  | { kind: 'quantity'; product_id: number; quantity: number; cost_price_cents: number }
+  | { kind: 'sn'; product_id: number; sns: string[]; cost_price_cents: number }
+
+/**
+ * SN 台账行（商品管理 SN 浏览 / findSn 用——D-SN16）。
+ * 已售行带关联销售单号（listSns JOIN sale_items 取，跳转用）；在库为 null。
+ */
+export interface ProductSn {
+  id: number
   product_id: number
-  quantity: number
-  cost_price_cents: number
+  sn: string
+  status: 'in_stock' | 'sold'
+  sale_id: number | null
+  sale_no: string | null
+  created_at: string
 }
 
 // ══════════════ 库存流水 ══════════════

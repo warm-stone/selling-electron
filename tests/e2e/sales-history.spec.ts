@@ -204,20 +204,23 @@ test.describe.serial('Task 13：销售记录查询与作废', () => {
     await expect(detail.locator('.sales-history__detail-meta')).toContainText('10.00')
 
     // 行表格（快照列）：可乐×2 @3.50=7.00；雪碧×1 @3.00=3.00
+    // 列序（SN 波次后）：名 / 条码 / SN（D-SN12 新列，批量计行 '—'）/ 数量 / 单价 / 小计
     const itemRows = detail.locator('.el-table__row')
     await expect(itemRows).toHaveCount(2)
     const colaCells = itemRows.first().locator('td')
     await expect(colaCells.nth(0)).toContainText('E2E 可乐 330ml')
     await expect(colaCells.nth(1)).toContainText('6901234567890')
-    await expect(colaCells.nth(2)).toHaveText('2')
-    await expect(colaCells.nth(3)).toHaveText('3.50')
-    await expect(colaCells.nth(4)).toHaveText('7.00')
+    await expect(colaCells.nth(2)).toHaveText('—')
+    await expect(colaCells.nth(3)).toHaveText('2')
+    await expect(colaCells.nth(4)).toHaveText('3.50')
+    await expect(colaCells.nth(5)).toHaveText('7.00')
     const spriteCells = itemRows.nth(1).locator('td')
     await expect(spriteCells.nth(0)).toContainText('E2E 雪碧 330ml')
     await expect(spriteCells.nth(1)).toContainText('6902345678901')
-    await expect(spriteCells.nth(2)).toHaveText('1')
-    await expect(spriteCells.nth(3)).toHaveText('3.00')
+    await expect(spriteCells.nth(2)).toHaveText('—')
+    await expect(spriteCells.nth(3)).toHaveText('1')
     await expect(spriteCells.nth(4)).toHaveText('3.00')
+    await expect(spriteCells.nth(5)).toHaveText('3.00')
 
     await detail.locator('.el-dialog__close').click()
     await expect(detail).toBeHidden()

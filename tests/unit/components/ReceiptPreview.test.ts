@@ -4,7 +4,7 @@ import iconv from 'iconv-lite'
 import { describe, expect, it } from 'vitest'
 
 import ReceiptPreview from '../../../src/renderer/src/components/receipt/ReceiptPreview.vue'
-import { PAPER_COLUMNS, padLine, stringWidth, wrapToGrid } from '../../../src/shared/receipt/char-grid'
+import { PAPER_COLUMNS, padLine, stringWidth, truncateToGrid, wrapToGrid } from '../../../src/shared/receipt/char-grid'
 import {
   DEFAULT_TEMPLATE_58MM,
   DEFAULT_TEMPLATE_80MM
@@ -281,5 +281,64 @@ describe('与 T4 ESC/POS 字节流对齐（所见即所打，G7 锁定）', () =
       expect(rendered).toBeDefined()
       expect(decoded).toContain(raw)
     }
+  })
+})
+
+describe('SN 副行（D-SN12/T3.1：数据驱动渲染，G7 同源）', () => {
+  /** SN 混合样例：1 SN 行 + 1 批量计行（无 sn——两侧行集都不出现副行） */
+  const SN_DATA: SaleReceiptData = {
+    items: [
+      { name: '华为路由器 AX3', quantity: '1', unitPrice: '199.00', subtotal: '199.00', sn: 'SN861001AB12345' },
+      { name: '可口可乐330ml', quantity: '2', unitPrice: '3.50', subtotal: '7.00' }
+    ]
+  }
+
+  it('58mm：sn 行名称折行后渲染 SN 副行，文本 === char-grid 同源组合；批量计行无副行', () => {
+    const wrapper = mountEl(DEFAULT_TEMPLATE_58MM, SN_DATA)
+    const snRows = wrapper.findAll('[data-testid="receipt-item-sn"]')
+    expect(snRows).toHaveLength(1)
+    // '  SN:SN861001AB12345' 宽 20 → pad 至 32
+    expect(snRows[0]!.element.textContent).toBe(padLine('  SN:SN861001AB12345', 32))
+    // 行序：列头 1 + 名称折行 2（'华为路由器 AX3' 宽 14 > 12）+ 副行 1 + 批量行名称折行 2
+    const rows = wrapper.findAll('.receipt-items tr.receipt-line')
+    expect(rows).toHaveLength(1 + 2 + 1 + 2)
+    // 副行排在名称行集之后（index 3，恰为名称两行之后）
+    expect(rows[3]!.element.textContent).toBe(padLine('  SN:SN861001AB12345', 32))
+  })
+
+  it("58mm 超长 SN 截断：保留前 26 列 + '*'，行宽恰 32，全码不出现（R3）", () => {
+    const long = 'SN-VERY-LONG-IDENTIFIER-000123456789'
+    const data: SaleReceiptData = {
+      items: [{ name: '蓝牙耳机', quantity: '1', unitPrice: '49.00', subtotal: '49.00', sn: long }]
+    }
+    const wrapper = mountEl(DEFAULT_TEMPLATE_58MM, data)
+    const snRow = wrapper.find('[data-testid="receipt-item-sn"]')
+    expect(snRow.exists()).toBe(true)
+    const text = snRow.element.textContent ?? ''
+    expect(stringWidth(text)).toBe(32)
+    expect(text.trimEnd()).toBe('  SN:' + truncateToGrid(long, 26) + '*')
+    expect(text.includes(long)).toBe(false)
+  })
+
+  it('sn 行文本可在生成字节流的 GBK 解码中逐行找到（副行字节级同源，所见即所打）', async () => {
+    const wrapper = mountEl(DEFAULT_TEMPLATE_80MM, SN_DATA)
+    const bytes = await generateReceiptBytes(DEFAULT_TEMPLATE_80MM, SN_DATA, SAMPLE_VARS)
+    const decoded = iconv.decode(Buffer.from(bytes), 'EUC-CN')
+    const snRows = wrapper.findAll('[data-testid="receipt-item-sn"]')
+    expect(snRows).toHaveLength(1)
+    const text = snRows[0]!.element.textContent ?? ''
+    // 80mm 可用 43 列 ≥ 15 列原码 → 副行无截断，预览文本与字节流逐字一致
+    expect(stringWidth(text)).toBe(PAPER_COLUMNS['80mm'])
+    expect(decoded).toContain(text)
+  })
+
+  it('sn=null 行不渲染副行（批量计行零行为变化——数据驱动默认行为）', () => {
+    const data: SaleReceiptData = {
+      items: [{ name: '可乐', quantity: '1', unitPrice: '2.00', subtotal: '2.00', sn: null }]
+    }
+    const wrapper = mountEl(DEFAULT_TEMPLATE_80MM, data)
+    expect(wrapper.find('[data-testid="receipt-item-sn"]').exists()).toBe(false)
+    // 无 sn 销售的行集与旧版完全一致：列头 1 + 明细 1
+    expect(wrapper.findAll('.receipt-items tr.receipt-line')).toHaveLength(2)
   })
 })

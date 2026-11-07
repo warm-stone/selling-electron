@@ -6,6 +6,8 @@ import type {
   LogoInfo,
   PrintTemplate,
   Product,
+  ProductSn,
+  ProductTracking,
   PurchaseInputItem,
   PurchaseOrderWithItems,
   Sale,
@@ -103,19 +105,34 @@ const api = {
       name: string
       default_price_cents: number | null
       stock: number
+      tracking: ProductTracking
+      sn_prefix?: string
     }): Promise<Product> => ipcRenderer.invoke('products:create', req),
-    /** 编辑名称/默认售价（条码不可改——契约 products:update 语义） */
+    /** 编辑名称/默认售价/SN 前缀（条码/tracking 不可改——契约 products:update 语义） */
     update: (req: {
       id: number
       name: string
       default_price_cents: number | null
+      sn_prefix?: string
     }): Promise<Product> => ipcRenderer.invoke('products:update', req),
     /** 手动调整库存为绝对目标值（主进程写流水 source='manual'——G5） */
     updateStock: (req: { id: number; stock: number }): Promise<Product> =>
       ipcRenderer.invoke('products:updateStock', req),
     /** 硬删商品；返回 willOrphan=删除时关联的历史单据行数 */
     delete: (id: number): Promise<{ ok: true; willOrphan: number }> =>
-      ipcRenderer.invoke('products:delete', { id })
+      ipcRenderer.invoke('products:delete', { id }),
+    /** 按 SN 精查（收银扫码第一优先级 D-SN5；未命中/已删除返回 null） */
+    findSn: (sn: string): Promise<{ sn: ProductSn; product: Product } | null> =>
+      ipcRenderer.invoke('products:findSn', { sn }),
+    /** 商品 SN 列表（默认在库；includeSold 含已售，已售行带关联单号） */
+    listSns: (productId: number, includeSold: boolean): Promise<ProductSn[]> =>
+      ipcRenderer.invoke('products:listSns', {
+        product_id: productId,
+        include_sold: includeSold
+      }),
+    /** 删在库 SN（逻辑删除 + stock-1 + manual 流水；已售拒绝） */
+    deleteSn: (snId: number): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('products:deleteSn', { sn_id: snId })
   },
 
   // ── 设置（Task 19：店铺信息 / 打印配置；多 Logo 架构）──

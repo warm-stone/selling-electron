@@ -11,7 +11,7 @@
  * 预览默认恒等，见 buildItemLines）。
  */
 
-import { PAPER_COLUMNS, padLine, truncateToGrid, wrapToGrid, type PaperWidth } from './char-grid'
+import { PAPER_COLUMNS, padLine, stringWidth, truncateToGrid, wrapToGrid, type PaperWidth } from './char-grid'
 
 // ═════════════════════ 数据契约（打印/预览共用，display-ready） ═════════════════════
 
@@ -29,6 +29,13 @@ export interface ReceiptItemLine {
   unitPrice: string
   /** 小计（元，已格式化） */
   subtotal: string
+  /**
+   * SN 快照（D-SN12 小票明细展示 SN；批量计行 null/缺省）。
+   * **数据驱动默认行为（T3.3 决策）**：非空即渲染 SN 副行——不加模板
+   * 配置项、零模板迁移，所有存量模板自动获得 SN 展示。可选字段：
+   * 组装方（打印/预览/测试样例）不带 sn 的构造零改动、字节零变化。
+   */
+  sn?: string | null
 }
 
 /** 小票打印数据（明细行集合；单号/时间等经 ReceiptVars 插槽传入） */
@@ -140,4 +147,51 @@ export function buildItemLines(
     }
   }
   return lines
+}
+
+// ═════════════════════ SN 副行（D-SN12 / T3.1，数据驱动默认行为） ═════════════════════
+
+/** SN 副行前缀：两格缩进 + ASCII 标签（显示宽 5——58mm 32 列下保持最小可读） */
+export const SN_LINE_PREFIX = '  SN:'
+
+/**
+ * SN 截断标记：ASCII '*'（显示宽 1，GBK 确定可编码）。
+ *
+ * 不用全角省略号 '…'（U+2026）：其 GBK 编码 A1AD 为双字节全角（纸面 2 列），
+ * 而 char-grid 按宽 1 计、预览拉丁等宽字体亦按窄渲染——三处宽度语义不一致，
+ * 会破坏「每行宽恰为 PAPER_COLUMNS」的纸面几何（58mm 33 列溢出触发硬件换行）。
+ * ASCII '*' 在 char-grid / GBK 纸面 / 等宽预览三侧宽度恒为 1，G7 几何自洽。
+ * 全码保存在数据层（sale_items.sn），纸面截断仅显示用途（R3）。
+ */
+export const SN_TRUNCATION_MARKER = '*'
+
+/**
+ * 组合明细行 SN 副行（G7 同源：ESC/POS 生成器与 HTML 预览的唯一实现）。
+ *
+ * - sn 为 null/undefined/空串 → 返回空数组（批量计行无副行——数据驱动，
+ *   无模板配置，T3.3）；
+ * - 副行格式 `'  SN:<value>'`（前缀宽 5），整行 padLine 到 PAPER_COLUMNS
+ *   （与 items 网格行同一满宽不变量）；
+ * - 超长 SN **截断**而非折行（一物一码的机读标识不值得占多行纸面）：
+ *   保留前 avail-1 列 + 单个 '*' 标记；avail = 纸宽列数 - 前缀宽
+ *   （58mm=27、80mm=43）；
+ * - 组合顺序沿用 char-grid 冻结契约：**降级 → 截断 → pad**（降级改变宽度，
+ *   必须发生在截断前）；`degrade` 默认恒等（预览侧），打印侧注入 degradeToGbk；
+ * - 副行恒为常规字号（打印侧在 items 的 resetBodyState 基准态下输出，
+ *   不随倍宽/倍高段落放大——T3.1）。
+ */
+export function buildSnLines(
+  sn: string | null | undefined,
+  paperWidth: PaperWidth,
+  degrade: TextDegrader = (s) => s
+): string[] {
+  if (sn === null || sn === undefined || sn === '') return []
+  const cols = PAPER_COLUMNS[paperWidth]
+  const value = degrade(sn)
+  const avail = cols - stringWidth(SN_LINE_PREFIX)
+  const cell =
+    stringWidth(value) > avail
+      ? truncateToGrid(value, avail - 1) + SN_TRUNCATION_MARKER
+      : value
+  return [padLine(SN_LINE_PREFIX + cell, cols)]
 }

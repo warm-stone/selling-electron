@@ -10,17 +10,47 @@
  *   product_id 断链置 NULL（DDL 未带 ON DELETE SET NULL，由本层等价补齐）；
  *   stock_movements.product_id 为 NOT NULL FK，无法断链，随商品清除
  *   （计划 DDL 约束下的必然选择，决策记录 learnings）。
+ *   SN 台账同理：product_sns.product_id 亦为 NOT NULL FK，行无法断链存续，
+ *   随商品清除（在库 SN 由 service 层守卫拦截——D-SN15；已售历史靠
+ *   sale_items.sn / purchase_items.sn 快照列保留——D-SN12）。
+ * - SN 台账读方法（findSnActive/listSns）：仅 deleted=0（D-SN3/4 逻辑删除语义），
+ *   已售行经 sale_item_id LEFT JOIN sales 补 sale_id/sale_no（提示原单号用——D-SN17）。
  */
 
 import type Database from 'better-sqlite3'
-import type { Product, StockMovementSource } from '../../../shared/types'
+import type { Product, ProductSn, ProductTracking, StockMovementSource } from '../../../shared/types'
 
-/** 新商品（落库前形态；stock 即初始库存，允许负值——D2） */
+/** 新商品（落库前形态；stock 即初始库存，允许负值——D2；SN 商品由 service 强制 0——D-SN11） */
 export interface NewProduct {
   barcode: string | null
   name: string
   default_price_cents: number | null
   stock: number
+  /** 计存类型（建后不可改——D-SN1） */
+  tracking: ProductTracking
+  /** SN 前缀（空串=无前缀；仅 SN 商品非空——D-SN2） */
+  sn_prefix: string
+}
+
+/**
+ * product_sns 原始行（repo 内部行映射）。sale_id/sale_no 由 LEFT JOIN
+ * sale_items + sales 补全（已售行；在库为 NULL）——供 service 组装 ProductSn
+ * DTO 及已售提示原单号（D-SN17）。
+ */
+export interface ProductSnRow {
+  id: number
+  product_id: number
+  sn: string
+  status: 'in_stock' | 'sold'
+  deleted: number
+  purchase_item_id: number | null
+  sale_item_id: number | null
+  /** 关联销售单 id（JOIN sale_items；在库为 NULL） */
+  sale_id: number | null
+  /** 关联销售单号（JOIN sales；在库为 NULL） */
+  sale_no: string | null
+  created_at: string
+  updated_at: string
 }
 
 /**
@@ -32,8 +62,15 @@ export interface ProductRow extends Product {
   willOrphan: number
 }
 
+/** 前缀互斥校验用行（D-SN14；name 供冲突文案「与商品「X」的前缀冲突」） */
+export interface ProductPrefixRow {
+  id: number
+  name: string
+  sn_prefix: string
+}
+
 const PRODUCT_COLUMNS =
-  'id, barcode, name, default_price_cents, stock, created_at, updated_at'
+  'id, barcode, name, default_price_cents, stock, tracking, sn_prefix, created_at, updated_at'
 
 /** 每行附删除影响计数（子查询聚合，避免 N+1） */
 const WILL_ORPHAN_EXPR =
@@ -62,12 +99,12 @@ export function createProductRepo(db: Database.Database) {
      ORDER BY p.id DESC`
   )
   const insertProductStmt = db.prepare(
-    `INSERT INTO products (barcode, name, default_price_cents, stock)
-     VALUES (?, ?, ?, ?)`
+    `INSERT INTO products (barcode, name, default_price_cents, stock, tracking, sn_prefix)
+     VALUES (?, ?, ?, ?, ?, ?)`
   )
   const updateProductStmt = db.prepare(
     `UPDATE products
-     SET name = ?, default_price_cents = ?, updated_at = datetime('now','localtime')
+     SET name = ?, default_price_cents = ?, sn_prefix = ?, updated_at = datetime('now','localtime')
      WHERE id = ?`
   )
   const updateStockStmt = db.prepare(
@@ -96,6 +133,59 @@ export function createProductRepo(db: Database.Database) {
     'DELETE FROM stock_movements WHERE product_id = ?'
   )
   const deleteProductStmt = db.prepare('DELETE FROM products WHERE id = ?')
+
+  // ── SN 台账（product_sns）──
+  // 已售行补关联销售单号（LEFT JOIN sale_items + sales；在库行两列均 NULL）
+  const SN_SALE_JOIN =
+    `FROM product_sns ps
+     LEFT JOIN sale_items si ON si.id = ps.sale_item_id
+     LEFT JOIN sales s ON s.id = si.sale_id`
+  const getSnBySnStmt = db.prepare(
+    `SELECT ps.*, si.sale_id AS sale_id, s.sale_no AS sale_no
+     ${SN_SALE_JOIN}
+     WHERE ps.sn = ? AND ps.deleted = 0`
+  )
+  const getSnByIdStmt = db.prepare(
+    `SELECT ps.*, si.sale_id AS sale_id, s.sale_no AS sale_no
+     ${SN_SALE_JOIN}
+     WHERE ps.id = ?`
+  )
+  const listSnsStmt = db.prepare(
+    `SELECT ps.id, ps.product_id, ps.sn, ps.status, ps.created_at,
+            si.sale_id AS sale_id, s.sale_no AS sale_no
+     ${SN_SALE_JOIN}
+     WHERE ps.product_id = ? AND ps.deleted = 0
+     ORDER BY ps.id`
+  )
+  const listInStockSnsStmt = db.prepare(
+    `SELECT ps.id, ps.product_id, ps.sn, ps.status, ps.created_at,
+            si.sale_id AS sale_id, s.sale_no AS sale_no
+     ${SN_SALE_JOIN}
+     WHERE ps.product_id = ? AND ps.deleted = 0 AND ps.status = 'in_stock'
+     ORDER BY ps.id`
+  )
+  const softDeleteSnStmt = db.prepare(
+    `UPDATE product_sns
+     SET deleted = 1, updated_at = datetime('now','localtime')
+     WHERE id = ?`
+  )
+  const countInStockSnsStmt = db.prepare(
+    `SELECT COUNT(*) AS n FROM product_sns
+     WHERE product_id = ? AND status = 'in_stock' AND deleted = 0`
+  )
+  const deleteSnsByProductStmt = db.prepare(
+    'DELETE FROM product_sns WHERE product_id = ?'
+  )
+  const listSnPrefixesStmt = db.prepare(
+    `SELECT id, name, sn_prefix FROM products
+     WHERE tracking = 'sn' AND sn_prefix != ''
+     ORDER BY id`
+  )
+  const listSnPrefixesExcludingStmt = db.prepare(
+    `SELECT id, name, sn_prefix FROM products
+     WHERE tracking = 'sn' AND sn_prefix != '' AND id != ?
+     ORDER BY id`
+  )
 
   function rowById(id: number): Product | undefined {
     return getByIdStmt.get(id) as Product | undefined
@@ -131,7 +221,9 @@ export function createProductRepo(db: Database.Database) {
           input.barcode,
           input.name,
           input.default_price_cents,
-          input.stock
+          input.stock,
+          input.tracking,
+          input.sn_prefix
         )
         const id = Number(result.lastInsertRowid)
         if (input.stock !== 0) {
@@ -142,10 +234,13 @@ export function createProductRepo(db: Database.Database) {
       return run()
     },
 
-    /** 更新名称/默认售价（条码不可改——契约 products:update 语义） */
-    update(id: number, input: { name: string; default_price_cents: number | null }): Product {
+    /** 更新名称/默认售价/SN 前缀（条码/tracking 不可改——契约 products:update 语义） */
+    update(
+      id: number,
+      input: { name: string; default_price_cents: number | null; sn_prefix: string }
+    ): Product {
       const run = db.transaction((): Product => {
-        updateProductStmt.run(input.name, input.default_price_cents, id)
+        updateProductStmt.run(input.name, input.default_price_cents, input.sn_prefix, id)
         return rowById(id)!
       })
       return run()
@@ -175,7 +270,11 @@ export function createProductRepo(db: Database.Database) {
     },
 
     /**
-     * 硬删商品（D15）。事务：断链历史引用（快照行保留）→ 清库存流水 → 删商品。
+     * 硬删商品（D15）。事务：断链历史引用（快照行保留）→ 清库存流水 →
+     * 清 SN 台账 → 删商品。
+     * product_sns 行无法断链存续（product_id NOT NULL FK + foreign_keys=ON，
+     * 与 stock_movements 同类约束），随商品清除；在库 SN 由 service 层守卫
+     * 拦截（D-SN15），已售历史靠 sale_items.sn / purchase_items.sn 快照保留（D-SN12）。
      * @returns willOrphan 断链前的 sale_items + purchase_items 关联行数
      */
     delete(id: number): number {
@@ -186,10 +285,55 @@ export function createProductRepo(db: Database.Database) {
         detachSaleItemsStmt.run(id)
         detachPurchaseItemsStmt.run(id)
         deleteMovementsStmt.run(id)
+        deleteSnsByProductStmt.run(id)
         deleteProductStmt.run(id)
         return willOrphan
       })
       return run()
+    },
+
+    // ── SN 台账（D-SN3/4/16）──
+
+    /**
+     * 按 SN 精查未删除行（JOIN products 语义由 FK 保证——product 必在，
+     * 两步读等价且复用 getByIdStmt 避免列名冲突映射）。
+     * 收银扫码第一优先级（D-SN5）+ 进货查重（D-SN17）共用。
+     */
+    findSnActive(sn: string): { sn_row: ProductSnRow; product: Product } | null {
+      const sn_row = getSnBySnStmt.get(sn) as ProductSnRow | undefined
+      if (!sn_row) return null
+      const product = getByIdStmt.get(sn_row.product_id) as Product | undefined
+      return product ? { sn_row, product } : null
+    },
+
+    /** 按 id 查 SN 台账行（含已删/已售——deleteSn 守卫判据） */
+    getSnById(snId: number): ProductSnRow | undefined {
+      return getSnByIdStmt.get(snId) as ProductSnRow | undefined
+    },
+
+    /** 商品 SN 列表（D-SN16）；includeSold=false 仅在库，已售行带关联单号 */
+    listSns(productId: number, includeSold: boolean): ProductSn[] {
+      const stmt = includeSold ? listSnsStmt : listInStockSnsStmt
+      return stmt.all(productId) as ProductSn[]
+    },
+
+    /** SN 逻辑删除（D-SN3/4：partial unique index 仅约束 deleted=0，删后 SN 可重新入库） */
+    softDeleteSn(snId: number): void {
+      softDeleteSnStmt.run(snId)
+    },
+
+    /** 在库 SN 计数（商品删除守卫——D-SN15；亦作 stock 冗余一致性断言基准——D-SN13） */
+    countInStockSns(productId: number): number {
+      return (countInStockSnsStmt.get(productId) as { n: number }).n
+    },
+
+    /** 全部非空 SN 前缀（tracking='sn'；excludeProductId 供编辑自身排除——D-SN14） */
+    listSnPrefixes(excludeProductId?: number): ProductPrefixRow[] {
+      return (
+        excludeProductId === undefined
+          ? listSnPrefixesStmt.all()
+          : listSnPrefixesExcludingStmt.all(excludeProductId)
+      ) as ProductPrefixRow[]
     }
   }
 }

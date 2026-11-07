@@ -5,6 +5,8 @@ import type {
   LogoInfo,
   PrintTemplate,
   Product,
+  ProductSn,
+  ProductTracking,
   PurchaseInputItem,
   PurchaseOrderWithItems,
   Sale,
@@ -51,14 +53,23 @@ export interface ProductsApi {
     name: string
     default_price_cents: number | null
     stock: number
+    tracking: ProductTracking
+    sn_prefix?: string
   }) => Promise<Product>
   update: (req: {
     id: number
     name: string
     default_price_cents: number | null
+    sn_prefix?: string
   }) => Promise<Product>
   updateStock: (req: { id: number; stock: number }) => Promise<Product>
   delete: (id: number) => Promise<{ ok: true; willOrphan: number }>
+  /** 按 SN 精查（收银扫码第一优先级 D-SN5；未命中/已删除返回 null） */
+  findSn: (sn: string) => Promise<{ sn: ProductSn; product: Product } | null>
+  /** 商品 SN 列表（默认在库；includeSold 含已售，已售行带关联单号） */
+  listSns: (productId: number, includeSold: boolean) => Promise<ProductSn[]>
+  /** 删在库 SN（逻辑删除 + stock-1 + manual 流水；已售拒绝） */
+  deleteSn: (snId: number) => Promise<{ ok: true }>
 }
 
 export interface SettingsApi {

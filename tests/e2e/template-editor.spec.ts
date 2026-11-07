@@ -281,9 +281,12 @@ test.describe.serial('Task 16：小票模板编辑器（表单 + 实时预览 + 
   test('明细列宽配置：单项填写 → 红字警示 + 保存阻断；四列齐全总和 48 → 预览列宽联动 + 落库；清空 → JSON 无 columnWidths', async () => {
     const { page } = app
 
-    // 前序结账闭环用例把页面留在了收银台（预览弹窗未关）——先关弹窗再导航回模板编辑器
+    // 前序结账闭环用例把页面留在了收银台（预览弹窗未关）——先关弹窗再导航回模板编辑器。
+    // 定位收窄到预览弹窗自身：SN 波次后 PosView 常驻挂载 SnEntryDialog（关闭态
+    // overlay 节点仍在 DOM——Element Plus 标准行为），宽泛的 .el-overlay-dialog
+    // 会命中双元素触发 strict violation
     await page.getByRole('button', { name: '取消' }).click()
-    await page.locator('.el-overlay-dialog').waitFor({ state: 'hidden' })
+    await page.getByRole('dialog', { name: /小票预览/ }).waitFor({ state: 'hidden' })
     await page.locator('.el-menu-item').filter({ hasText: '小票模板' }).click()
     await waitForRoute(page, '/template-editor')
 

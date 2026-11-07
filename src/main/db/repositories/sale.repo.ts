@@ -7,6 +7,8 @@
  *   （嵌套事务安全，见 docs/api.md#transaction）。
  * - `dailyCount` 是 sale_no 序列的计数查询（D18 按日序列），必须在调用方
  *   事务内执行才有意义（service.checkout 保证）。
+ * - SN 台账（product_sns）SQL 属销售事务所有，直接写在本 repo（架构约定：
+ *   事务 owner 写自己的 SQL，不越界 import product.repo——D-SN8）。
  */
 
 import type Database from 'better-sqlite3'
@@ -24,7 +26,7 @@ export interface NewSale {
   item_count: number
 }
 
-/** 新销售明细行（含商品快照——G4） */
+/** 新销售明细行（含商品快照——G4；sn 为 SN 行快照，批量计行 null——D-SN12） */
 export interface NewSaleItem {
   product_id: number | null
   product_name: string
@@ -32,14 +34,27 @@ export interface NewSaleItem {
   quantity: number
   unit_price_cents: number
   subtotal_cents: number
+  sn: string | null
 }
 
-/** 商品快照读取（checkout 事务内实时读 products） */
+/** SN 台账行（checkout 事务内校验读取——D-SN6 拒绝态判定） */
+export interface SnLedgerRow {
+  id: number
+  status: 'in_stock' | 'sold'
+  product_id: number
+  sale_item_id: number | null
+  /** 已售时关联单号（SALE_SN_SOLD 文案引导作废用）；在库为 null */
+  sale_no: string | null
+}
+
+/** 商品快照读取（checkout/void 事务内实时读 products） */
 export interface ProductSnapshot {
   id: number
   name: string
   barcode: string | null
   stock: number
+  /** 计类型（SN 行防御性校验：sn 行要求 tracking='sn'——D-SN1 商品二分） */
+  tracking: 'quantity' | 'sn'
 }
 
 /** 流水写入参数 */
@@ -68,8 +83,8 @@ export function createSaleRepo(db: Database.Database) {
   )
   const insertSaleItemStmt = db.prepare(
     `INSERT INTO sale_items
-       (sale_id, product_id, product_name, barcode, quantity, unit_price_cents, subtotal_cents)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+       (sale_id, product_id, product_name, barcode, quantity, unit_price_cents, subtotal_cents, sn)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   )
   const insertMovementStmt = db.prepare(
     `INSERT INTO stock_movements
@@ -77,12 +92,29 @@ export function createSaleRepo(db: Database.Database) {
      VALUES (?, ?, ?, ?, ?, ?)`
   )
   const getProductStmt = db.prepare(
-    'SELECT id, name, barcode, stock FROM products WHERE id = ?'
+    'SELECT id, name, barcode, stock, tracking FROM products WHERE id = ?'
   )
   const adjustStockStmt = db.prepare(
     `UPDATE products
      SET stock = stock + ?, updated_at = datetime('now', 'localtime')
      WHERE id = ?`
+  )
+  const findSnStmt = db.prepare(
+    `SELECT ps.id, ps.status, ps.product_id, ps.sale_item_id, s.sale_no
+     FROM product_sns ps
+     LEFT JOIN sale_items si ON si.id = ps.sale_item_id
+     LEFT JOIN sales s ON s.id = si.sale_id
+     WHERE ps.sn = ? AND ps.deleted = 0`
+  )
+  const markSnSoldStmt = db.prepare(
+    `UPDATE product_sns
+     SET status = 'sold', sale_item_id = ?, updated_at = datetime('now', 'localtime')
+     WHERE id = ? AND deleted = 0`
+  )
+  const restoreSnStmt = db.prepare(
+    `UPDATE product_sns
+     SET status = 'in_stock', sale_item_id = NULL, updated_at = datetime('now', 'localtime')
+     WHERE sale_item_id = ? AND deleted = 0`
   )
 
   function getSaleItems(saleId: number): SaleItem[] {
@@ -100,27 +132,36 @@ export function createSaleRepo(db: Database.Database) {
   }
 
   return {
-    /** 插销售头 + 明细快照行（内嵌事务；外层事务内自动 SAVEPOINT）→ saleId */
-    createSaleWithItems(sale: NewSale, items: NewSaleItem[]): number {
-      const run = db.transaction((): number => {
+    /**
+     * 插销售头 + 明细快照行（内嵌事务；外层事务内自动 SAVEPOINT）
+     * → { saleId, itemIds }（itemIds 与入参 items 逐行对应——SN 台账回写
+     * sale_item_id 用，D-SN8）。
+     */
+    createSaleWithItems(
+      sale: NewSale,
+      items: NewSaleItem[]
+    ): { saleId: number; itemIds: number[] } {
+      const run = db.transaction((): { saleId: number; itemIds: number[] } => {
         const result = insertSaleStmt.run(
           sale.sale_no,
           sale.total_cents,
           sale.item_count
         )
         const saleId = Number(result.lastInsertRowid)
-        for (const item of items) {
-          insertSaleItemStmt.run(
+        const itemIds = items.map((item) => {
+          const r = insertSaleItemStmt.run(
             saleId,
             item.product_id,
             item.product_name,
             item.barcode,
             item.quantity,
             item.unit_price_cents,
-            item.subtotal_cents
+            item.subtotal_cents,
+            item.sn
           )
-        }
-        return saleId
+          return Number(r.lastInsertRowid)
+        })
+        return { saleId, itemIds }
       })
       return run()
     },
@@ -196,6 +237,28 @@ export function createSaleRepo(db: Database.Database) {
     /** 事务内实时读商品快照 + 当前库存（checkout/void 复原共用） */
     getProductSnapshot(productId: number): ProductSnapshot | undefined {
       return getProductStmt.get(productId) as ProductSnapshot | undefined
+    },
+
+    /** 事务内按 SN 查台账行（deleted=0；checkout 校验读取——D-SN6） */
+    findSnForSale(sn: string): SnLedgerRow | undefined {
+      return findSnStmt.get(sn) as SnLedgerRow | undefined
+    },
+
+    /**
+     * SN 台账流转 in_stock→sold + 回写销售去向行（D-SN8）。
+     * 返回实际更新行数（service 防御性断言 ===1 用）。
+     */
+    markSnSold(snRowId: number, saleItemId: number): number {
+      return Number(markSnSoldStmt.run(saleItemId, snRowId).changes)
+    },
+
+    /**
+     * SN 台账回滚 sold→in_stock + 清空销售去向（D-SN8 作废链路，按明细行
+     * 自身 id 定位）。商品硬删时 product_sns 已被删除级联软删 →
+     * WHERE deleted=0 命中 0 行，静默跳过（与库存复原的 skip 语义一致）。
+     */
+    restoreSnBySaleItem(saleItemId: number): void {
+      restoreSnStmt.run(saleItemId)
     },
 
     /** 库存增减（delta 正负皆可；负库存允许——D2 无 CHECK 拦截） */

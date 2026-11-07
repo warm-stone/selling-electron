@@ -42,7 +42,8 @@ const SALE: SaleDetail = {
       barcode: '6901234567890',
       quantity: 2,
       unit_price_cents: 350,
-      subtotal_cents: 700
+      subtotal_cents: 700,
+      sn: null
     },
     {
       id: 2,
@@ -52,7 +53,8 @@ const SALE: SaleDetail = {
       barcode: null,
       quantity: 1,
       unit_price_cents: 350,
-      subtotal_cents: 350
+      subtotal_cents: 350,
+      sn: null
     }
   ]
 }
@@ -215,14 +217,29 @@ describe('buildReceiptPayload（vars + items display-ready 组装）', () => {
     })
   })
 
-  it('data.items：数量/单价/小计 display-ready（formatMoney 恰 2 位小数，buildItemLines 直接输入）', async () => {
+  it('data.items：数量/单价/小计 display-ready + sn 快照透传（display-ready，buildItemLines/buildSnLines 直接输入）', async () => {
     const { deps } = makeDeps()
     const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
 
     expect(payload.data.items).toEqual([
-      { name: '可口可乐 330ml', quantity: '2', unitPrice: '3.50', subtotal: '7.00' },
-      { name: '早餐面包（已断链快照）', quantity: '1', unitPrice: '3.50', subtotal: '3.50' }
+      { name: '可口可乐 330ml', quantity: '2', unitPrice: '3.50', subtotal: '7.00', sn: null },
+      { name: '早餐面包（已断链快照）', quantity: '1', unitPrice: '3.50', subtotal: '3.50', sn: null }
     ])
+  })
+
+  it('data.items 透传 SN 快照：sn 非空行带原值（预览/打印共用本数据源渲染副行——D-SN12）', async () => {
+    const snSale: SaleDetail = {
+      ...SALE,
+      items: [{ ...SALE.items[0]!, sn: 'SN861001AB12345' }, SALE.items[1]!]
+    }
+    const { deps } = makeDeps({ getSaleDetail: vi.fn(() => snSale) })
+    const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
+
+    expect(payload.data.items[0]).toMatchObject({ sn: 'SN861001AB12345' })
+    expect(payload.data.items[1]).toMatchObject({ sn: null })
+    // previewSale 同源携带（printing:preview → ReceiptPreview 渲染 SN 副行的数据链）
+    const preview = await createPrintOrchestrator(deps).previewSale(7)
+    expect(preview.data.items[0]).toMatchObject({ sn: 'SN861001AB12345' })
   })
 
   it('模板行 config_json 解析为 ReceiptTemplate；completed 单 footer 无作废段落', async () => {

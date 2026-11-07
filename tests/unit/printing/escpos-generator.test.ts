@@ -120,6 +120,18 @@ function expectedItemLines(
   )
 }
 
+/**
+ * 测试侧独立重算的期望 SN 副行（G7 交叉验证——不调 buildSnLines，用
+ * char-grid 原语按 '  SN:' 前缀宽 5 / 截断标记 '*' 独立组合）：
+ * 可用列 = 纸宽 - 5，超长保留前 avail-1 列 + '*'，整行 pad 满宽。
+ */
+function expectedSnLines(paper: PaperWidth, sn: string): string[] {
+  const cols = PAPER_COLUMNS[paper]
+  const avail = cols - stringWidth('  SN:')
+  const cell = stringWidth(sn) > avail ? truncateToGrid(sn, avail - 1) + '*' : sn
+  return [padLine('  SN:' + cell, cols)]
+}
+
 // ─────────────────────────── 样例数据 ───────────────────────────
 
 const SAMPLE_SALE: SaleReceiptData = {
@@ -128,6 +140,27 @@ const SAMPLE_SALE: SaleReceiptData = {
     { name: '蓝月亮洗衣液', quantity: '1', unitPrice: '45.00', subtotal: '45.00' }
   ]
 }
+
+/**
+ * SN 混合单（T3.1）：1 批量计行（无 sn）+ 1 SN 行 + 1 超长 SN 行
+ * （37 列 > 58mm 可用 27 列——R3 截断维度；≤ 80mm 可用 43 列——80mm 原码完整）。
+ */
+const SN_SALE: SaleReceiptData = {
+  items: [
+    { name: '可口可乐330ml', quantity: '2', unitPrice: '3.50', subtotal: '7.00' },
+    { name: '华为路由器 AX3', quantity: '1', unitPrice: '199.00', subtotal: '199.00', sn: 'SN861001AB12345' },
+    {
+      name: '蓝牙耳机',
+      quantity: '1',
+      unitPrice: '49.00',
+      subtotal: '49.00',
+      sn: 'SN-VERY-LONG-IDENTIFIER-000123456789'
+    }
+  ]
+}
+
+/** 58mm 超长 SN（37 列）——R3 截断用例的固定码值 */
+const LONG_SN = 'SN-VERY-LONG-IDENTIFIER-000123456789'
 
 const SAMPLE_VARS: ReceiptPrintVars = {
   shopName: '中文测试收银',
@@ -451,6 +484,83 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
     const b = await gen(DEFAULT_TEMPLATE_80MM)
     expect(Buffer.compare(a, b)).toBe(0)
   })
+
+  // ── SN 副行（T3.1/D-SN12：数据驱动默认行为，无模板配置）──
+
+  it.each(['58mm', '80mm'] as const)(
+    '%s：SN 混合单——sn 行名称行集后渲染 SN 副行（GBK 字节），行序在名称行之后、下一行之前',
+    async (paper) => {
+      const base = paper === '58mm' ? DEFAULT_TEMPLATE_58MM : DEFAULT_TEMPLATE_80MM
+      const bytes = await gen(base, SN_SALE)
+      const decoded = iconv.decode(Buffer.from(bytes), 'EUC-CN')
+
+      // SN 副行进入字节流（测试侧独立重算），行宽恰为 PAPER_COLUMNS
+      const snLine = expectedSnLines(paper, 'SN861001AB12345')[0] as string
+      expect(stringWidth(snLine)).toBe(PAPER_COLUMNS[paper])
+      expect(includes(bytes, iconv.encode(snLine, 'EUC-CN'))).toBe(true)
+      expect(decoded).toContain(snLine)
+
+      // 行序：副行在该商品名称行集之后、下一商品行之前（GBK 解码文本索引序）
+      const routerLines = expectedItemLines(paper, '华为路由器 AX3', '1', '199.00', '199.00')
+      const nextLines = expectedItemLines(paper, '蓝牙耳机', '1', '49.00', '49.00')
+      const routerLast = decoded.indexOf(routerLines[routerLines.length - 1] as string)
+      const snIdx = decoded.indexOf(snLine)
+      const nextFirst = decoded.indexOf(nextLines[0] as string)
+      expect(routerLast).toBeGreaterThanOrEqual(0)
+      expect(snIdx).toBeGreaterThan(routerLast)
+      expect(nextFirst).toBeGreaterThan(snIdx)
+    }
+  )
+
+  it("58mm 超长 SN（37 > 27 可用列）截断：保留前 26 列 + '*'，全码不出现（R3）", async () => {
+    const bytes = await gen(DEFAULT_TEMPLATE_58MM, SN_SALE)
+    const line = expectedSnLines('58mm', LONG_SN)[0] as string
+    expect(stringWidth(line)).toBe(32)
+    expect(line.trimEnd()).toBe('  SN:' + LONG_SN.slice(0, 26) + '*')
+    expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    // 全码（ASCII，latin1 即字节形态）不得原样出现在字节流
+    expect(includes(bytes, Buffer.from(LONG_SN, 'latin1'))).toBe(false)
+  })
+
+  it("80mm 超长 SN（44 > 43 可用列）同样截断：42 列 + '*'（双纸宽截断维度）", async () => {
+    const sn44 = 'S' + 'N'.repeat(43) // 宽 44 > 43
+    const sale: SaleReceiptData = {
+      items: [{ name: '测试品', quantity: '1', unitPrice: '1.00', subtotal: '1.00', sn: sn44 }]
+    }
+    const bytes = await gen(DEFAULT_TEMPLATE_80MM, sale)
+    const line = expectedSnLines('80mm', sn44)[0] as string
+    expect(stringWidth(line)).toBe(48)
+    expect(line.trimEnd()).toBe('  SN:' + sn44.slice(0, 42) + '*')
+    expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+  })
+
+  it('sn=null 与缺省 sn 字段的销售字节完全一致，且无 SN 副行（批量计行零行为变化）', async () => {
+    const withNull = await gen(DEFAULT_TEMPLATE_58MM, {
+      items: [{ name: '可乐', quantity: '1', unitPrice: '2.00', subtotal: '2.00', sn: null }]
+    })
+    const withoutField = await gen(DEFAULT_TEMPLATE_58MM, {
+      items: [{ name: '可乐', quantity: '1', unitPrice: '2.00', subtotal: '2.00' }]
+    })
+    expect(Buffer.compare(withNull, withoutField)).toBe(0)
+    expect(iconv.decode(withNull, 'EUC-CN')).not.toContain('  SN:')
+  })
+
+  it("SN 副行含 GBK 降级链路：SN 带 GBK 外字符（𠀀）→ 副行 '?' 降级后进入字节流", async () => {
+    const sale: SaleReceiptData = {
+      items: [{ name: '测试品', quantity: '1', unitPrice: '1.00', subtotal: '1.00', sn: '𠀀-SN-001' }]
+    }
+    const bytes = await gen(DEFAULT_TEMPLATE_80MM, sale)
+    // 降级 '?'（宽 1）参与宽度数学：'?-SN-001' 宽 9 ≤ 43，原码区完整保留
+    const line = expectedSnLines('80mm', '?-SN-001')[0] as string
+    expect(includes(bytes, iconv.encode(line, 'EUC-CN'))).toBe(true)
+    expect(includes(bytes, Buffer.from('𠀀', 'utf-8'))).toBe(false)
+  })
+
+  it('SN 重打幂等：同 SN 销售两次生成字节完全一致', async () => {
+    const a = await gen(DEFAULT_TEMPLATE_58MM, SN_SALE)
+    const b = await gen(DEFAULT_TEMPLATE_58MM, SN_SALE)
+    expect(Buffer.compare(a, b)).toBe(0)
+  })
 })
 
 // ═════════════════════════════════════════════════════════════════
@@ -508,6 +618,18 @@ describe('golden .bin 字节级 diff', () => {
     const expected = readFileSync(join(goldenDir, 'receipt-80mm-with-logo.bin'))
     expect(Buffer.compare(bytes, expected)).toBe(0)
   })
+
+  it('58mm SN 混合单完整输出与入库基准逐字节一致（SN 副行 + R3 截断锁定）', async () => {
+    const bytes = await gen(DEFAULT_TEMPLATE_58MM, SN_SALE)
+    const expected = readFileSync(join(goldenDir, 'receipt-58mm-sn.bin'))
+    expect(Buffer.compare(bytes, expected)).toBe(0)
+  })
+
+  it('80mm SN 混合单完整输出与入库基准逐字节一致', async () => {
+    const bytes = await gen(DEFAULT_TEMPLATE_80MM, SN_SALE)
+    const expected = readFileSync(join(goldenDir, 'receipt-80mm-sn.bin'))
+    expect(Buffer.compare(bytes, expected)).toBe(0)
+  })
 })
 
 // GOLDEN_UPDATE=1 时运行：重写基准 .bin + 任务证据样例（80mm 默认模板完整字节）
@@ -528,6 +650,9 @@ describe.skipIf(!process.env['GOLDEN_UPDATE'])('GOLDEN_UPDATE 再生模式', () 
     })
     writeFileSync(join(goldenDir, 'receipt-80mm-with-logo.bin'), logo80)
     writeFileSync(join(goldenDir, 'receipt-58mm-default.bin'), await gen(DEFAULT_TEMPLATE_58MM))
+    // SN 混合单基准（T3.1：58mm 含 R3 截断副行、80mm 原码完整副行）
+    writeFileSync(join(goldenDir, 'receipt-58mm-sn.bin'), await gen(DEFAULT_TEMPLATE_58MM, SN_SALE))
+    writeFileSync(join(goldenDir, 'receipt-80mm-sn.bin'), await gen(DEFAULT_TEMPLATE_80MM, SN_SALE))
 
     // 测试文件位于 tests/unit/printing/ → 三级 '..' 回仓库根
     const evidence = fileURLToPath(new URL('../../../.omo/evidence', import.meta.url))

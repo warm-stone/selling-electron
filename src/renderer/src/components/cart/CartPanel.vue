@@ -28,8 +28,9 @@ const empty = computed(() => cart.items.length === 0)
 /** 总件数（Σquantity，与 sales.item_count 口径一致） */
 const pieceCount = computed(() => cart.items.reduce((n, it) => n + it.quantity, 0))
 
-/** 库存不足提示（D2：仅提示不阻断，允许负库存结账） */
+/** 库存不足提示（D2：仅提示不阻断，允许负库存结账）；SN 行无负库存语义（D-SN6） */
 function isOverStock(item: CartItem): boolean {
+  if (item.sn !== null) return false
   const stock = cart.stockByProduct[item.product_id]
   return stock !== undefined && item.quantity > stock
 }
@@ -73,11 +74,14 @@ function onPriceChange(index: number, yuan: number | undefined): void {
       <div v-else class="cart-list">
         <div
           v-for="(item, index) in cart.items"
-          :key="`${item.product_id}-${item.unit_price_cents}`"
+          :key="`${item.product_id}-${item.unit_price_cents}-${item.sn ?? ''}`"
           class="cart-row"
         >
           <div class="cart-row__name">
             <span class="cart-row__name-text" :title="item.name">{{ item.name }}</span>
+            <span v-if="item.sn !== null" class="cart-row__sn" :title="item.sn">
+              SN：{{ item.sn }}
+            </span>
             <span v-if="isOverStock(item)" class="cart-row__warn">
               库存不足(负库存将产生)
             </span>
@@ -89,6 +93,7 @@ function onPriceChange(index: number, yuan: number | undefined): void {
             :min="1"
             :step="1"
             :precision="0"
+            :disabled="item.sn !== null"
             @update:model-value="(v: number | undefined) => onQtyChange(index, v)"
           />
           <el-input-number
@@ -221,6 +226,17 @@ function onPriceChange(index: number, yuan: number | undefined): void {
   font-weight: 500;
   line-height: 1.4;
   color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* SN 副行（D-SN7 一物一码标识：等宽小字，与条码展示同视觉语言） */
+.cart-row__sn {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--el-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

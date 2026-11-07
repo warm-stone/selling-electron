@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import BarcodeInput from '@renderer/components/scanner/BarcodeInput.vue'
 import CartPanel from '@renderer/components/cart/CartPanel.vue'
 import ReceiptPreviewDialog from '@renderer/components/receipt/ReceiptPreviewDialog.vue'
+import SnEntryDialog from '@renderer/components/pos/SnEntryDialog.vue'
 import { useCartStore } from '@renderer/stores/cart.store'
 import { usePrintingStore } from '@renderer/stores/printing.store'
 import { createTypedInvoke } from '../../../shared/types/ipc'
@@ -16,8 +17,10 @@ import type { Product, SaleDetail } from '../../../shared/types'
  * 金额铁律 G1：全程整数分；元单位只存在于 CartPanel 输入/显示边界
  * （shared/utils/money 整数十进制搬移，零浮点运算）。
  *
- * 扫码链路：preload.onBarcode（before-input-event 检测桥，绕过 IME，焦点
- * 在购物车任意输入框都生效）→ products:list 精确条码命中 → addItem。
+ * 扫码链路（D-SN5：SN 台账优先）：preload.onBarcode（before-input-event
+ * 检测桥，绕过 IME，焦点在购物车任意输入框都生效）→ products:findSn 精查
+ * → 命中在库即加 SN 行（qty=1）/ 已售警告终止；未命中走 products:list
+ * 精确条码命中 → addItem（SN 商品转 SN 输入弹窗，批量计直接加购）。
  * 回调即时返回、查询后台进行，不阻塞 UI。
  */
 
@@ -71,8 +74,35 @@ function onSearchInput(): void {
 
 // ── 加购（双击结果行 / 扫码命中共用入口）──
 
-function addToCart(product: ProductRow): void {
-  cart.addItem(product)
+/**
+ * SN 加购弹窗（D-SN5 第二入口）：双击 SN 商品 / 扫商品码命中 SN 商品时，
+ * 先录 SN 再加购（弹窗内走 findSn 校验 + 扫码枪扫入）。
+ */
+const snDialogVisible = ref(false)
+const snDialogProduct = ref<Product | null>(null)
+
+function openSnDialog(product: Product): void {
+  snDialogProduct.value = product
+  snDialogVisible.value = true
+}
+
+/**
+ * 加购唯一汇聚点。SN 商品无 SN 入参（双击/扫商品码命中）→ 转 SN 输入弹窗；
+ * 带 SN 入参（扫 SN 台账命中）→ 直接加 SN 行（同 SN 重复由 store 抛错拒绝）；
+ * 批量计商品 → 原 D16 合并逻辑不变。
+ */
+function addToCart(product: Product, sn?: string | null): void {
+  if (product.tracking === 'sn' && !sn) {
+    openSnDialog(product)
+    return
+  }
+  try {
+    cart.addItem(product, sn)
+  } catch (err) {
+    // 同 SN 已在购物车中（D-SN7；批量计行 addItem 不会抛错）
+    ElMessage.error(err instanceof Error ? err.message : String(err))
+    return
+  }
   ElMessage.success(`已加入购物车：${product.name}`)
 }
 
@@ -91,11 +121,28 @@ function handleBarcode(code: string): void {
   searchText.value = code
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => void loadProducts(), SEARCH_DEBOUNCE_MS)
+  // SN 弹窗打开期间，扫码由弹窗自订阅的 onBarcode 消费（录 SN 自动确认）；
+  // 本视图跳过查询，防同一次扫码双路径重复处理（R2）
+  if (snDialogVisible.value) return
   void lookupBarcode(code)
 }
 
+/**
+ * 扫码路由（D-SN5：SN 台账第一优先级，商品码第二）：
+ * ① findSn 命中在库 → 直接加 SN 行；命中已售 → 警告并终止；
+ * ② 未命中 → 原商品码链路（SN 商品经 addToCart 分流进 SN 弹窗）。
+ */
 async function lookupBarcode(code: string): Promise<void> {
   try {
+    const snHit = await window.api.products.findSn(code)
+    if (snHit) {
+      if (snHit.sn.status === 'in_stock') {
+        addToCart(snHit.product, code)
+      } else {
+        ElMessage.warning(`该 SN 已售出（单号 ${snHit.sn.sale_no ?? '—'}）`)
+      }
+      return
+    }
     const rows = await typedInvoke('products:list', { keyword: code })
     if (rows.length === 1 && rows[0]!.barcode === code) {
       addToCart(rows[0]! as ProductRow)
@@ -129,7 +176,8 @@ async function checkout(): Promise<void> {
     const items = cart.items.map((it) => ({
       product_id: it.product_id,
       quantity: it.quantity,
-      unit_price_cents: it.unit_price_cents
+      unit_price_cents: it.unit_price_cents,
+      sn: it.sn
     }))
     const sale = (await typedInvoke('sales:checkout', { items })) as SaleDetail
     // 销售已落库（G3 基线）：清车/刷新先于预览——预览或打印失败绝不影响已保存销售
@@ -220,6 +268,9 @@ onBeforeUnmount(() => {
 
     <!-- Task 15：结账成功 → 小票预览弹窗（与销售记录重打共用，printing store 全局状态） -->
     <ReceiptPreviewDialog />
+
+    <!-- SN 商品加购弹窗（双击 / 扫商品码命中 → 录 SN——D-SN5，T2.A） -->
+    <SnEntryDialog v-model:visible="snDialogVisible" :product="snDialogProduct" />
   </section>
 </template>
 

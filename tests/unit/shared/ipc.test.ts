@@ -17,6 +17,9 @@ const EXPECTED_CHANNELS = [
   'products:update',
   'products:delete',
   'products:updateStock',
+  'products:findSn',
+  'products:listSns',
+  'products:deleteSn',
   // 销售
   'sales:checkout',
   'sales:void',

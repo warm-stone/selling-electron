@@ -34,6 +34,7 @@ import {
 } from '../../../shared/receipt/char-grid'
 import {
   buildItemLines,
+  buildSnLines,
   ITEM_COLUMN_WIDTHS,
   type ItemColumnWidths,
   type ReceiptItemLine,
@@ -217,6 +218,12 @@ function renderItems(printer: ThermalPrinter, template: ReceiptTemplate, sale: S
       section.columnWidths
     )
     for (const line of lines) printer.println(line)
+    // SN 副行（D-SN12/T3.1）：sn 非空即渲染——数据驱动默认行为，无模板配置；
+    // 恒为常规字号（resetBodyState 基准态，不随倍宽行放大），GBK 链路同
+    // buildItemLines（值先经 degradeToGbk 降级再进网格数学，SN 通常为 ASCII）
+    for (const snLine of buildSnLines(item.sn, template.paperWidth, degradeToGbk)) {
+      printer.println(snLine)
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
   type PaperWidth
 } from '../../../../shared/receipt/char-grid'
 import {
+  buildSnLines,
   resolveColumnWidths,
   type ReceiptItemLine,
   type SaleReceiptData
@@ -113,6 +114,15 @@ function itemRows(item: ReceiptItemLine): ItemCell[][] {
 
 const showItemHeader = computed(() => props.template.items.showHeader ?? true)
 
+/**
+ * SN 副行（D-SN12/T3.1）：数据驱动——item.sn 非空才有行（G7 与打印侧
+ * buildSnLines 同一组合数学，恒等降级——与 items 行同策略，GBK 内 SN
+ * 两侧行集完全一致）；colspan 全宽行，pad 已含缩进空格
+ */
+function snLines(item: ReceiptItemLine): string[] {
+  return buildSnLines(item.sn, props.template.paperWidth)
+}
+
 /** 列头行同样多行化（label 超长也换行）——复用明细行的同源组合数学 */
 const headerRows = computed<ItemCell[][]>(() => {
   const s = props.template.items
@@ -216,6 +226,14 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
         <template v-for="(item, i) in data.items" :key="`it-${i}`">
           <tr v-for="(cells, j) in itemRows(item)" :key="`it-${i}-${j}`" class="receipt-line">
             <td v-for="c in cells" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
+          </tr>
+          <tr
+            v-for="(line, j) in snLines(item)"
+            :key="`sn-${i}-${j}`"
+            class="receipt-line receipt-line--sn"
+            data-testid="receipt-item-sn"
+          >
+            <td colspan="4" style="text-align: left">{{ line }}</td>
           </tr>
         </template>
       </tbody>

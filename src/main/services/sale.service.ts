@@ -2,10 +2,13 @@
  * 销售结账 + 作废业务核心（全应用最核心的事务——G2）。
  *
  * checkout：单事务 = sale_no 生成（事务内 COUNT LIKE 前缀）→ 整数分合计
- * → INSERT sales → 逐项 INSERT sale_items（实时读 products 快照）→
+ * → 逐项实时读 products 快照（SN 行同事务校验 product_sns 台账——D-SN6
+ * 拒绝态全部先于任何 INSERT）→ INSERT sales + sale_items（SN 行含 sn 快照）
+ * → SN 行台账流转 in_stock→sold + 回写 sale_item_id（D-SN8）→
  * 逐项 stock -= qty（负库存允许 D2）→ INSERT movements(source='sale')。
  * voidSale：单事务 = 校验 → status='voided' + voided_at → 逐行 stock += qty
- * → movements(source='void')。作废不物理删除任何行（D3）。
+ * → SN 行台账回滚 sold→in_stock（D-SN8，按明细行自身 id 定位）→
+ * movements(source='void')。作废不物理删除任何行（D3）。
  *
  * 事务内零 I/O：无 channel/网络/文件/打印调用（G3：打印是落库后异步）。
  * 竞态分析见 learnings：better-sqlite3 同步事务在单条 JS 调用栈内完成，
@@ -20,7 +23,7 @@ import type {
   SaleStatus
 } from '../../shared/types'
 import { createSaleRepo } from '../db/repositories/sale.repo'
-import type { SaleListFilter } from '../db/repositories/sale.repo'
+import type { SaleListFilter, SnLedgerRow } from '../db/repositories/sale.repo'
 
 /** service 错误码（IPC 层透传 message 给 renderer） */
 export type SaleErrorCode =
@@ -29,6 +32,10 @@ export type SaleErrorCode =
   | 'PRODUCT_NOT_FOUND'
   | 'SALE_NOT_FOUND'
   | 'SALE_ALREADY_VOIDED'
+  | 'SALE_SN_REQUIRED'
+  | 'SALE_SN_NOT_FOUND'
+  | 'SALE_SN_SOLD'
+  | 'SALE_SN_PRODUCT_MISMATCH'
 
 /** 带 code 的业务错误（message 为面向用户的中文文案） */
 export class SaleServiceError extends Error {
@@ -75,6 +82,18 @@ function assertValidItems(items: CheckoutItem[]): void {
         `商品单价必须为非负整数分（当前：${item.unit_price_cents}）`
       )
     }
+    // SN 行（D-SN7）：sn 非空白；一物一码 → quantity 恒 1
+    if (item.sn != null) {
+      if (typeof item.sn !== 'string' || item.sn.trim() === '') {
+        throw new SaleServiceError('SALE_SN_REQUIRED', 'SN 不能为空')
+      }
+      if (item.quantity !== 1) {
+        throw new SaleServiceError(
+          'SALE_SN_REQUIRED',
+          `SN 商品数量必须为 1（SN：${item.sn}）`
+        )
+      }
+    }
   }
 }
 
@@ -94,7 +113,8 @@ export function createSaleService(db: Database.Database) {
         const seq = repo.dailyCount(datePrefix) + 1
         const saleNo = `${datePrefix}-${String(seq).padStart(4, '0')}`
 
-        // 事务内实时读快照（product_name/barcode/当前库存）；商品已被硬删 → 抛错回滚
+        // 事务内实时读快照（product_name/barcode/当前库存）；商品已被硬删 → 抛错回滚。
+        // SN 行同事务校验台账（D-SN6 拒绝态）——全部校验先于任何 INSERT
         const lines = items.map((item) => {
           const product = repo.getProductSnapshot(item.product_id)
           if (!product) {
@@ -103,7 +123,37 @@ export function createSaleService(db: Database.Database) {
               `商品不存在（id=${item.product_id}），无法结账`
             )
           }
-          return { item, product }
+          let snRow: SnLedgerRow | undefined
+          if (item.sn != null) {
+            if (product.tracking !== 'sn') {
+              throw new SaleServiceError(
+                'SALE_SN_PRODUCT_MISMATCH',
+                `商品「${product.name}」不是 SN 商品`
+              )
+            }
+            snRow = repo.findSnForSale(item.sn)
+            if (!snRow) {
+              throw new SaleServiceError(
+                'SALE_SN_NOT_FOUND',
+                `SN ${item.sn} 不存在或已删除`
+              )
+            }
+            if (snRow.status === 'sold') {
+              throw new SaleServiceError(
+                'SALE_SN_SOLD',
+                snRow.sale_no
+                  ? `SN ${item.sn} 已售出（单号 ${snRow.sale_no}），不可重复销售`
+                  : `SN ${item.sn} 已售出，不可重复销售`
+              )
+            }
+            if (snRow.product_id !== item.product_id) {
+              throw new SaleServiceError(
+                'SALE_SN_PRODUCT_MISMATCH',
+                `SN ${item.sn} 不属于该商品`
+              )
+            }
+          }
+          return { item, product, snRow }
         })
 
         // 整数分乘加（G1）：subtotal = qty × unit_price_cents
@@ -113,7 +163,7 @@ export function createSaleService(db: Database.Database) {
         )
         const itemCount = lines.reduce((sum, l) => sum + l.item.quantity, 0)
 
-        const saleId = repo.createSaleWithItems(
+        const { saleId, itemIds } = repo.createSaleWithItems(
           { sale_no: saleNo, total_cents: totalCents, item_count: itemCount },
           lines.map((l) => ({
             product_id: l.product.id,
@@ -121,9 +171,23 @@ export function createSaleService(db: Database.Database) {
             barcode: l.product.barcode,
             quantity: l.item.quantity,
             unit_price_cents: l.item.unit_price_cents,
-            subtotal_cents: l.item.quantity * l.item.unit_price_cents
+            subtotal_cents: l.item.quantity * l.item.unit_price_cents,
+            sn: l.item.sn
           }))
         )
+
+        // SN 台账流转 in_stock→sold + 回写销售去向行（D-SN8，与落库同事务；
+        // itemIds 与 lines 逐行对应）
+        lines.forEach((l, i) => {
+          if (!l.snRow) return
+          if (repo.markSnSold(l.snRow.id, itemIds[i]) !== 1) {
+            // 防御：同事务内刚校验过的行不可能消失（同步事务无并发写）
+            throw new SaleServiceError(
+              'SALE_SN_NOT_FOUND',
+              `SN ${l.item.sn} 不存在或已删除`
+            )
+          }
+        })
 
         // 扣库存（负库存允许 D2）+ 流水（source='sale'，before/after 审计链）
         for (const l of lines) {
@@ -170,6 +234,11 @@ export function createSaleService(db: Database.Database) {
         repo.markVoided(saleId)
 
         for (const item of repo.getSaleItems(saleId)) {
+          // SN 台账回滚 sold→in_stock（D-SN8，按明细行自身 id 定位）：商品硬删时
+          // product_sns 已被删除级联软删 → WHERE deleted=0 命中 0 行，静默跳过
+          if (item.sn != null) {
+            repo.restoreSnBySaleItem(item.id)
+          }
           if (item.product_id == null) continue
           const product = repo.getProductSnapshot(item.product_id)
           if (!product) continue // 商品硬删（D15）：快照行保留，库存废弃，不写复原流水

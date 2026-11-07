@@ -118,6 +118,11 @@ test.describe.serial('Task 9：进货入库全链路', () => {
     await expect(page.locator('.el-dialog').filter({ hasText: '新建进货单' })).toBeVisible()
 
     const rows = page.locator('.create-form__table .el-table__row')
+    // D-SN9（SN 商品锁定决策）：新建进货单默认 0 行，原「+ 添加行」拆为
+    // 【+ 批量计商品】【+ SN 商品】双按钮——本 spec 走批量计入口
+    await expect(rows).toHaveCount(0)
+    await expect(page.locator('.el-dialog .el-empty')).toContainText('请添加商品行')
+    await page.getByTestId('add-quantity-row').click()
     await expect(rows).toHaveCount(1)
 
     // el-select 选项定位坑（全量 E2E 实测 strict violation 根因）：
@@ -143,8 +148,8 @@ test.describe.serial('Task 9：进货入库全链路', () => {
     await rows.nth(0).locator('.el-input-number input').first().fill('10')
     await rows.nth(0).locator('.el-input-number input').nth(1).fill('2.00')
 
-    // 行 2：测试雪碧 qty=5 cost=3.00
-    await page.getByRole('button', { name: '+ 添加行' }).click()
+    // 行 2：测试雪碧 qty=5 cost=3.00（D-SN9 双按钮：批量计行入口）
+    await page.getByTestId('add-quantity-row').click()
     await expect(rows).toHaveCount(2)
     await selectProduct(1, '雪碧')
     await expect(rows.nth(1).locator('.el-select')).toContainText('测试雪碧 330ml')

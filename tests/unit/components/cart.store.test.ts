@@ -8,7 +8,9 @@ import { useCartStore } from '../../../src/renderer/src/stores/cart.store'
  * Task 11 — 购物车 store（pinia）单元测试（TDD 先行）。
  *
  * 锁定行为：
- * - 合并规则（D16）：行 key = product_id + unit_price_cents，同 key 重复加购 qty+1 合并
+ * - 合并规则（D16）：批量计行 key = product_id + unit_price_cents，同 key 重复加购 qty+1 合并
+ * - SN 行（D-SN7，T2.A）：sn 非空行 key 含 sn——禁合并、quantity 恒 1、
+ *   同 SN 重复加购抛错拒绝、updateQty 忽略、updatePrice 照常生效
  * - 合计（G1）：整数分乘加，渲染层零浮点金额累计
  * - 数量/单价编辑防御（无效输入忽略，不产生半状态）
  * - 删除行 / 清空（含库存快照重置）
@@ -38,6 +40,14 @@ const BREAD = {
   default_price_cents: null,
   stock: 6
 }
+/** SN 商品样例（tracking='sn'，一物一码；SN 经 addItem 第二参传入——D-SN7） */
+const PHONE = {
+  id: 9,
+  name: '红米 Note 13',
+  barcode: '8601234567890',
+  default_price_cents: 99900,
+  stock: 3
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -54,7 +64,8 @@ describe('cart.store 加购与合并规则（key=product_id+unit_price_cents）'
       name: '可口可乐 330ml',
       barcode: '6901234567890',
       quantity: 1,
-      unit_price_cents: 350
+      unit_price_cents: 350,
+      sn: null
     })
   })
 
@@ -107,6 +118,94 @@ describe('cart.store 加购与合并规则（key=product_id+unit_price_cents）'
     // 再扫一次可乐（库存被外部更新过的行数据）
     cart.addItem({ ...COLA, stock: 97 })
     expect(cart.stockByProduct[1]).toBe(97)
+  })
+})
+
+describe('cart.store SN 行（D-SN7：一物一码，禁合并）', () => {
+  it('SN 加购：建行含 sn、qty 恒 1、默认售价预填', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+
+    expect(cart.items).toHaveLength(1)
+    expect(cart.items[0]).toEqual({
+      product_id: 9,
+      name: '红米 Note 13',
+      barcode: '8601234567890',
+      quantity: 1,
+      unit_price_cents: 99900,
+      sn: 'RN13-0001'
+    })
+  })
+
+  it('SN 入参 trim 后落行（扫码枪尾随空白无害）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, '  RN13-0001  ')
+    expect(cart.items[0]!.sn).toBe('RN13-0001')
+  })
+
+  it('同商品不同 SN：分行不合并（各 qty=1，两行）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+    cart.addItem(PHONE, 'RN13-0002')
+
+    expect(cart.items).toHaveLength(2)
+    expect(cart.items.map((i) => i.sn)).toEqual(['RN13-0001', 'RN13-0002'])
+    expect(cart.items.every((i) => i.quantity === 1)).toBe(true)
+  })
+
+  it('同 SN 重复加购：抛错拒绝（文案「该 SN 已在购物车中」），仍只有一行', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+
+    expect(() => cart.addItem(PHONE, 'RN13-0001')).toThrowError('该 SN 已在购物车中')
+    expect(cart.items).toHaveLength(1)
+  })
+
+  it('同 SN 改价后重复加购仍拒绝（查重先于价格，SN 不受 D16 分行影响）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+    cart.updatePrice(0, 88800)
+
+    expect(() => cart.addItem(PHONE, 'RN13-0001')).toThrowError('该 SN 已在购物车中')
+    expect(cart.items).toHaveLength(1)
+    expect(cart.items[0]!.unit_price_cents).toBe(88800)
+  })
+
+  it('sn 空串/null 等价于批量计行（走 D16 合并，sn 落 null）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, '')
+    cart.addItem(PHONE, null)
+    cart.addItem(PHONE)
+
+    expect(cart.items).toHaveLength(1)
+    expect(cart.items[0]!.quantity).toBe(3)
+    expect(cart.items[0]!.sn).toBeNull()
+  })
+
+  it('updateQty 对 SN 行忽略（quantity 恒 1）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+
+    cart.updateQty(0, 5)
+    cart.updateQty(0, 1)
+    expect(cart.items[0]!.quantity).toBe(1)
+  })
+
+  it('updatePrice 对 SN 行生效（独立价格——D-SN7）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+
+    cart.updatePrice(0, 88800)
+    expect(cart.items[0]!.unit_price_cents).toBe(88800)
+  })
+
+  it('SN 行与批量计行并存：合计按行小计整数分求和（99900 + 2×350）', () => {
+    const cart = useCartStore()
+    cart.addItem(PHONE, 'RN13-0001')
+    cart.addItem(COLA)
+    cart.updateQty(1, 2)
+
+    expect(cart.totalCents).toBe(99900 + 700)
   })
 })
 

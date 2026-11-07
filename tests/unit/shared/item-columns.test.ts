@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { PAPER_COLUMNS, padLine, stringWidth, truncateToGrid, wrapToGrid } from '../../../src/shared/receipt/char-grid'
 import {
   buildItemLines,
+  buildSnLines,
   ITEM_COLUMN_WIDTHS,
   resolveColumnWidths,
+  SN_LINE_PREFIX,
+  SN_TRUNCATION_MARKER,
   type ItemColumnWidths
 } from '../../../src/shared/receipt/item-columns'
 
@@ -244,6 +247,84 @@ describe('buildItemLines（多行网格行组合语义）', () => {
           composeManually(c.name, c.qty, c.price, c.subtotal, ITEM_COLUMN_WIDTHS[paper])
         )
       }
+    }
+  })
+})
+
+/**
+ * SN 副行契约（D-SN12 / T3.1，G7 双渲染器同源）。
+ *
+ * buildSnLines 是 SN 副行（缩进标签 + 超长截断）的唯一组合实现：
+ * sn 非空即渲染（数据驱动默认行为，无模板配置），58mm 可用 27 列 /
+ * 80mm 可用 43 列（纸宽 - 前缀宽 5），超长保留前 avail-1 列 + ASCII '*'
+ * （三侧宽度语义一致——见 item-columns 模块注释），整行 pad 满网格宽。
+ */
+describe('buildSnLines（SN 副行组合语义）', () => {
+  it('SN 前缀常量：两格缩进 + ASCII 标签（宽 5）；截断标记为 ASCII 半角', () => {
+    expect(SN_LINE_PREFIX).toBe('  SN:')
+    expect(stringWidth(SN_LINE_PREFIX)).toBe(5)
+    expect(SN_TRUNCATION_MARKER).toBe('*')
+    expect(stringWidth(SN_TRUNCATION_MARKER)).toBe(1)
+  })
+
+  it('sn 为 null / undefined / 空串 → 空数组（批量计行无副行——数据驱动）', () => {
+    for (const paper of ['58mm', '80mm'] as const) {
+      expect(buildSnLines(null, paper)).toEqual([])
+      expect(buildSnLines(undefined, paper)).toEqual([])
+      expect(buildSnLines('', paper)).toEqual([])
+    }
+  })
+
+  it.each(['58mm', '80mm'] as const)('%s：短 SN 单行返回，前缀 + 原码，整行 pad 满网格宽', (paper) => {
+    const cols = PAPER_COLUMNS[paper]
+    const lines = buildSnLines('SN861001AB12345', paper)
+    expect(lines).toEqual([padLine('  SN:SN861001AB12345', cols)])
+    expect(stringWidth(lines[0] as string)).toBe(cols)
+  })
+
+  it('可用列宽 = 纸宽 - 5：58mm 恰 27 列原码无标记，28 列触发截断（边界）', () => {
+    // 27 列恰放满：原码完整，无标记
+    const fit = buildSnLines('X'.repeat(27), '58mm')
+    expect(fit).toEqual([padLine('  SN:' + 'X'.repeat(27), 32)])
+    // 28 列 > 27：保留前 26 列 + '*'
+    const over = buildSnLines('X'.repeat(28), '58mm')
+    expect(over).toEqual([padLine('  SN:' + 'X'.repeat(26) + '*', 32)])
+    expect(stringWidth(over[0] as string)).toBe(32)
+  })
+
+  it('80mm 边界：43 列原码无标记，44 列截断为 42 列 + *', () => {
+    expect(buildSnLines('Y'.repeat(43), '80mm')).toEqual([padLine('  SN:' + 'Y'.repeat(43), 48)])
+    expect(buildSnLines('Y'.repeat(44), '80mm')).toEqual([padLine('  SN:' + 'Y'.repeat(42) + '*', 48)])
+  })
+
+  it('58mm 超长 SN（37 列）：保留前 26 列 + *，全码不出现，行宽恰 32（R3 纸面截断）', () => {
+    const long = 'SN-VERY-LONG-IDENTIFIER-000123456789'
+    const lines = buildSnLines(long, '58mm')
+    expect(lines).toHaveLength(1)
+    const line = lines[0] as string
+    expect(stringWidth(line)).toBe(32)
+    expect(line.trimEnd()).toBe('  SN:' + truncateToGrid(long, 26) + '*')
+    expect(line.includes(long)).toBe(false)
+  })
+
+  it('降级注入参与宽度数学：GBK 外字符（宽 2）→ ?（宽 1）后按窄宽截断（降级先于截断）', () => {
+    const degrade = (s: string): string => s.replace('𠀀', '?')
+    // '𠀀'（宽 2）降级 '?'（宽 1）后：'𠀀' + 26 个 'X' → 27 列恰满，无标记
+    const lines = buildSnLines('𠀀' + 'X'.repeat(26), '58mm', degrade)
+    expect(lines).toEqual([padLine('  SN:?' + 'X'.repeat(26), 32)])
+  })
+
+  it('默认降级恒等：GBK 外字符原样保留并按宽 2 计列（预览侧语义）', () => {
+    const lines = buildSnLines('𠀀' + 'X'.repeat(26), '58mm')
+    // 宽 2 + 26 = 28 > 27 → 截断到 26 列：'𠀀'(2) + 24 个 'X'(24) = 26，再 + '*'
+    expect(lines).toEqual([padLine('  SN:𠀀' + 'X'.repeat(24) + '*', 32)])
+  })
+
+  it('SN 副行不折行：恒返回 0 或 1 行（与名称列 wrapToGrid 折行语义相区别）', () => {
+    for (const paper of ['58mm', '80mm'] as const) {
+      const lines = buildSnLines('Z'.repeat(200), paper)
+      expect(lines).toHaveLength(1)
+      expect(stringWidth(lines[0] as string)).toBe(PAPER_COLUMNS[paper])
     }
   })
 })

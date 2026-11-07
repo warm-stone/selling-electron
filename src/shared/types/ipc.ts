@@ -16,6 +16,8 @@ import type {
   MonthlyReport,
   PrintTemplate,
   Product,
+  ProductSn,
+  ProductTracking,
   PurchaseInputItem,
   PurchaseOrderWithItems,
   Sale,
@@ -31,13 +33,37 @@ export interface IpcChannels {
   // ── 商品 ──
   'products:list': { req: { keyword?: string }; res: Product[] }
   'products:create': {
-    req: { barcode: string | null; name: string; default_price_cents: number | null; stock: number }
+    req: {
+      barcode: string | null
+      name: string
+      default_price_cents: number | null
+      stock: number
+      /** 计存类型（sn 时 stock 强制 0——service 侧） */
+      tracking: ProductTracking
+      /** SN 前缀（可空；仅进货侧匹配用——D-SN2） */
+      sn_prefix?: string
+    }
     res: Product
   }
-  'products:update': { req: { id: number; name: string; default_price_cents: number | null }; res: Product }
+  'products:update': {
+    req: {
+      id: number
+      name: string
+      default_price_cents: number | null
+      /** SN 前缀可改（影响以后进货匹配）；tracking 不可改（D-SN1） */
+      sn_prefix?: string
+    }
+    res: Product
+  }
   'products:delete': { req: { id: number }; res: { ok: true } }
   /** 手动改库存（绝对目标值；service 内写 stock_movements source='manual'——G5） */
   'products:updateStock': { req: { id: number; stock: number }; res: Product }
+  /** 按 SN 精查（仅 deleted=0；收银扫码第一优先级 D-SN5 + SN 弹窗校验共用） */
+  'products:findSn': { req: { sn: string }; res: { sn: ProductSn; product: Product } | null }
+  /** 商品 SN 列表（默认在库；include_sold 含已售，已售行带关联单号——D-SN16） */
+  'products:listSns': { req: { product_id: number; include_sold: boolean }; res: ProductSn[] }
+  /** 删在库 SN（逻辑删除 + stock-1 + movements source='manual'；已售拒绝——D-SN16） */
+  'products:deleteSn': { req: { sn_id: number }; res: { ok: true } }
 
   // ── 销售 ──
   'sales:checkout': { req: { items: CheckoutItem[] }; res: Sale }
@@ -97,6 +123,9 @@ export const IPC_CHANNEL_NAMES = [
   'products:update',
   'products:delete',
   'products:updateStock',
+  'products:findSn',
+  'products:listSns',
+  'products:deleteSn',
   'sales:checkout',
   'sales:void',
   'sales:list',
