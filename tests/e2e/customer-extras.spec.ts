@@ -2,7 +2,7 @@
 /**
  * 计划任务 14 — 客户与附加信息 E2E（customer-order-extras 收口）。
  *
- * 9 组场景（serial 共享一个 Electron 实例——照 pos.spec / sn-products.spec
+ * 10 组场景（serial 共享一个 Electron 实例——照 pos.spec / sn-products.spec
  * 的组织模式：beforeAll launchApp + seed 直插，afterAll closeApp）：
  *  1 散客快单：加购 → 结账弹窗零填写直接确认 → 落库 + DB 直读断言
  *    sale_extras 0 行、customers 0 行（快单零追加）
@@ -24,6 +24,11 @@
  *  9 日报导出三格式：勾国补结账后日报导出 txt/xlsx/docx → 读回断言新列
  *    （是否国补/订单备注）与国补小计（照 reports.spec 的 E2E_EXPORT_DIR
  *    读回模式：xlsx 汇总!B2/B5 + jszip 解 docx document.xml）
+ * 10 列表列与筛选（需求变更 W1 收口）：销售记录列表五平铺列渲染（国补单
+ *    张三+国补 tag / 散客快单全占位「—」+「否」）+ 姓名模糊筛选（命中 2 /
+ *    不存在名空态 / clearable 清空恢复）+ 电话模糊筛选 + 国补三态
+ *    （是 1 / 否 4 含无附加行 / 全部 5）+ 姓名×国补组合交集 +
+ *    DB 直读交叉断言（后端同款双 LEFT JOIN + LIKE/三态口径）
  *
  * 扫码注入与 pos.spec 同方案：electronApp.evaluate 内循环
  * webContents.sendInputEvent({type:'keyDown'})+Enter（真实事件管线）。
@@ -143,6 +148,12 @@ async function gotoMenu(page: Page, label: string, route: string): Promise<void>
 
 /** 扫码加购一条可乐 → 购物车 1 行 ¥3.50 */
 async function addCola(app: LaunchedApp): Promise<void> {
+  // 竞态加固：waitForRoute 只保证 URL，POS 搜索框 autofocus 完成前 sendInputEvent
+  // 注入会丢前缀字符（实测快照：13 位条码只进尾 7 位「0000001」）——显式
+  // click 聚焦后再注入（幂等，页面稳定后重复调用无害）
+  const scanInput = app.page.getByPlaceholder('扫码枪即扫即加')
+  await expect(scanInput).toBeVisible()
+  await scanInput.click()
   await scanBarcode(app.electronApp, COLA_BARCODE)
   await expect(cartRow(app.page, COLA)).toHaveCount(1)
   await expect(cartRow(app.page, COLA).locator('.cart-row__qty input')).toHaveValue('1')
@@ -183,6 +194,34 @@ async function expectSelectOptionVisible(page: Page, select: Locator, text: stri
   await expect(option).toBeVisible()
 }
 
+/**
+ * el-input clearable 清空钮：hover 出钮（EP hover 态才渲染 clear 图标）→ 点击。
+ * @clear+@input 双发由 300ms 防抖吸收为一次刷新（W1 设计——本 helper 即其 E2E 验证路径）
+ */
+async function clearFilterInput(page: Page, testid: string): Promise<void> {
+  const input = page.getByTestId(testid)
+  const wrapper = page.locator('.el-input__wrapper').filter({ has: input })
+  await wrapper.hover()
+  await wrapper.locator('.el-input__clear').click()
+}
+
+/**
+ * 国补三态 el-select（非 filterable）：点根元素开下拉 → 按 aria-controls 圈定
+ * 本 select 的 popper（teleport 到 body）→ 按选项文本点选（照 typeIntoSelect 手法，
+ * 点选即收起无残留拦截）
+ */
+async function selectSubsidyFilter(page: Page, label: '全部' | '是' | '否'): Promise<void> {
+  const select = page.getByTestId('filter-subsidy')
+  const listboxId = await select.locator('input').getAttribute('aria-controls')
+  expect(listboxId).toBeTruthy()
+  await select.click()
+  const option = page
+    .locator(`#${listboxId} .el-select-dropdown__item`)
+    .filter({ hasText: label })
+  await expect(option).toBeVisible()
+  await option.click()
+}
+
 /** 点开日报导出 dropdown 并点指定格式菜单项（照 reports.spec 模式） */
 async function exportDailyAs(
   page: LaunchedApp['page'],
@@ -214,7 +253,7 @@ function firstTableRowTexts(xml: string): string[] {
   return [...firstRow.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]!)
 }
 
-test.describe.serial('客户与附加信息（T14）：快单/建档/关联/校验/预填/记忆/改附加/客户管理/导出', () => {
+test.describe.serial('客户与附加信息（T14）：快单/建档/关联/校验/预填/记忆/改附加/客户管理/导出/列表列筛选', () => {
   let app: LaunchedApp
   /** 场景 2 建的国补单号（场景 7 改附加、场景 9 明细断言复用） */
   let subsidySaleNo = ''
@@ -801,5 +840,237 @@ test.describe.serial('客户与附加信息（T14）：快单/建档/关联/校�
         '  docx: 「国补销售额：3.50 元」+ 明细表头 7 列'
       ].join('\n')
     )
+  })
+
+  // ═══════════ 场景 10：列表列与筛选（需求变更 W1 收口）═══════════
+
+  test('10a 列表渲染：五平铺列——国补单行全值/散客单行占位 + 国补 tag 计数公式 + DB 交叉', async () => {
+    const { page } = app
+    await gotoMenu(page, '销售记录', '/sales-history')
+
+    const rows = page.locator('.sales-history__table .el-table__row')
+    await expect(rows).toHaveCount(5) // 场景 1-9 共 5 单（默认日期范围=今天）
+
+    // 列头序（照 W1 组件测试手法）：五新列插在「状态」后、「操作」前（操作恒最右）
+    const headerTexts = (await page.locator('.sales-history__table th .cell').allInnerTexts())
+      .map((t) => t.trim())
+      .filter(Boolean)
+    expect(headerTexts).toEqual([
+      '单号',
+      '时间',
+      '商品数',
+      '合计（元）',
+      '状态',
+      '姓名',
+      '电话',
+      '是否国补',
+      '销售人员',
+      '订单备注',
+      '操作'
+    ])
+
+    // 国补单行（场景 9a 的单）：客户两列实值 + 国补 success tag + 备注留档 + 销售人员占位
+    const subsidyRow = rows.filter({ hasText: subsidy9SaleNo })
+    await expect(subsidyRow).toHaveCount(1)
+    await expect(rows.first()).toContainText(subsidy9SaleNo) // ORDER BY id DESC——最新在前
+    await expect(subsidyRow.getByTestId('list-customer-name')).toHaveText(CUST_NAME)
+    await expect(subsidyRow.getByTestId('list-customer-phone')).toHaveText(CUST_PHONE)
+    await expect(subsidyRow.getByTestId('list-subsidy').locator('.el-tag--success')).toHaveText('国补')
+    await expect(subsidyRow.getByTestId('list-salesperson')).toHaveText('—')
+    await expect(subsidyRow.getByTestId('list-order-note')).toHaveText(SUBSIDY_NOTE_9)
+
+    // 散客快单行（场景 1，无 sale_extras 行——LEFT JOIN 全 NULL）
+    let quickSaleNo = ''
+    withDb(app, (db) => {
+      quickSaleNo = (
+        db
+          .prepare(
+            `SELECT s.sale_no FROM sales s
+              WHERE NOT EXISTS (SELECT 1 FROM sale_extras se WHERE se.sale_id = s.id)`
+          )
+          .get() as { sale_no: string }
+      ).sale_no
+      expect(quickSaleNo).toMatch(/^\d{8}-\d{4}$/)
+
+      // DB 交叉一：今日单数与列表行数一致
+      expect(
+        (db.prepare('SELECT COUNT(*) AS n FROM sales WHERE date(created_at) = ?').get(TODAY) as {
+          n: number
+        }).n
+      ).toBe(5)
+
+      // DB 交叉二：国补单行 JOIN 平铺值逐字段（UI「—」↔ DB NULL 的口径对应）
+      const flat = db
+        .prepare(
+          `SELECT c.name AS customer_name, c.phone AS customer_phone,
+                  se.is_national_subsidy, se.salesperson, se.order_note
+             FROM sales s
+             LEFT JOIN sale_extras se ON se.sale_id = s.id
+             LEFT JOIN customers c ON c.id = se.customer_id
+            WHERE s.sale_no = ?`
+        )
+        .get(subsidy9SaleNo) as {
+          customer_name: string | null
+          customer_phone: string | null
+          is_national_subsidy: number | null
+          salesperson: string | null
+          order_note: string | null
+        }
+      expect(flat).toEqual({
+        customer_name: CUST_NAME,
+        customer_phone: CUST_PHONE,
+        is_national_subsidy: 1,
+        salesperson: null,
+        order_note: SUBSIDY_NOTE_9
+      })
+    })
+    const quickRow = rows.filter({ hasText: quickSaleNo })
+    await expect(quickRow).toHaveCount(1)
+    await expect(quickRow.getByTestId('list-customer-name')).toHaveText('—')
+    await expect(quickRow.getByTestId('list-customer-phone')).toHaveText('—')
+    await expect(quickRow.getByTestId('list-subsidy')).toHaveText('否')
+    await expect(quickRow.getByTestId('list-subsidy').locator('.el-tag')).toHaveCount(0)
+    await expect(quickRow.getByTestId('list-salesperson')).toHaveText('—')
+    await expect(quickRow.getByTestId('list-order-note')).toHaveText('—')
+
+    // 行内 .el-tag 计数公式：状态列 5（全 completed→primary）+ 国补 true 1（success）= 6
+    await expect(rows.locator('.el-tag')).toHaveCount(6)
+    await expect(rows.locator('.el-tag--primary')).toHaveCount(5)
+    await expect(rows.locator('.el-tag--success')).toHaveCount(1)
+
+    await page.screenshot({ path: `${EVIDENCE_DIR}/task-14-list-columns.png` })
+  })
+
+  test('10b 文本筛选：姓名「张」命中 2 / 不存在名空态 / 清空恢复 + 电话「138」命中/清空（300ms 防抖）', async () => {
+    const { page } = app
+    const rows = page.locator('.sales-history__table .el-table__row')
+
+    // 姓名模糊「张」：剩张三两单（场景 3 同电话单 + 场景 9a 国补单）——
+    // 300ms 防抖后列表刷新由 expect 轮询等待（无固定 sleep）
+    await page.getByTestId('filter-customer-name').fill('张')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.getByTestId('list-customer-name')).toHaveText([CUST_NAME, CUST_NAME])
+    await expect(rows.first()).toContainText(subsidy9SaleNo) // id 倒序——国补单在前
+
+    // DB 交叉：c.name LIKE '%张%'（后端同款双 LEFT JOIN 口径）
+    withDb(app, (db) => {
+      expect(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM sales s
+                 LEFT JOIN sale_extras se ON se.sale_id = s.id
+                 LEFT JOIN customers c ON c.id = se.customer_id
+                WHERE date(s.created_at) = ? AND c.name LIKE '%张%'`
+            )
+            .get(TODAY) as { n: number }
+        ).n
+      ).toBe(2)
+    })
+
+    // 未命中：零行 + el-empty 空态文案
+    await page.getByTestId('filter-customer-name').fill('不存在的姓名')
+    await expect(rows).toHaveCount(0)
+    await expect(page.locator('.el-empty__description')).toHaveText('所选日期范围内暂无销售记录')
+    await page.screenshot({ path: `${EVIDENCE_DIR}/task-14-list-filter-empty.png` })
+
+    // clearable 清空钮：恢复全量（@clear+@input 双发被防抖吸收为一次刷新）
+    await clearFilterInput(page, 'filter-customer-name')
+    await expect(rows).toHaveCount(5)
+
+    // 电话模糊「138」：张三 13800138000 两单命中（13900139xxx 系不含「138」子串）
+    await page.getByTestId('filter-customer-phone').fill('138')
+    await expect(rows).toHaveCount(2)
+    await expect(rows.getByTestId('list-customer-phone')).toHaveText([CUST_PHONE, CUST_PHONE])
+    withDb(app, (db) => {
+      expect(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM sales s
+                 LEFT JOIN sale_extras se ON se.sale_id = s.id
+                 LEFT JOIN customers c ON c.id = se.customer_id
+                WHERE date(s.created_at) = ? AND c.phone LIKE '%138%'`
+            )
+            .get(TODAY) as { n: number }
+        ).n
+      ).toBe(2)
+    })
+
+    // clearable 清空 → 恢复全量
+    await clearFilterInput(page, 'filter-customer-phone')
+    await expect(rows).toHaveCount(5)
+  })
+
+  test('10c 国补三态 + 组合：是→仅国补 / 否→含无附加行 / 全部→恢复 + 姓名×国补交集', async () => {
+    const { page } = app
+    const rows = page.locator('.sales-history__table .el-table__row')
+
+    // 是：仅场景 9a 国补单（唯一 is_national_subsidy=1——场景 7 已把场景 2 单改回非国补）
+    await selectSubsidyFilter(page, '是')
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText(subsidy9SaleNo)
+
+    // 否：其余 4 单（3 行 extras 非国补 + 场景 1 无附加快单——「无附加行归非国补」口径）
+    await selectSubsidyFilter(page, '否')
+    await expect(rows).toHaveCount(4)
+    await expect(rows.filter({ hasText: subsidy9SaleNo })).toHaveCount(0)
+
+    // 全部：恢复 5
+    await selectSubsidyFilter(page, '全部')
+    await expect(rows).toHaveCount(5)
+
+    // DB 交叉：三态行数与后端 SQL 口径逐态一致
+    withDb(app, (db) => {
+      const base = `
+        FROM sales s
+          LEFT JOIN sale_extras se ON se.sale_id = s.id
+          LEFT JOIN customers c ON c.id = se.customer_id
+         WHERE date(s.created_at) = ?`
+      const yes = (
+        db.prepare(`SELECT COUNT(*) AS n ${base} AND se.is_national_subsidy = 1`).get(TODAY) as {
+          n: number
+        }
+      ).n
+      const no = (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n ${base} AND (se.is_national_subsidy = 0 OR se.sale_id IS NULL)`
+          )
+          .get(TODAY) as { n: number }
+      ).n
+      expect(yes).toBe(1)
+      expect(no).toBe(4)
+      expect(yes + no).toBe(5)
+    })
+
+    // 组合：姓名「张」（防抖稳态 2 行）→ 叠国补=是 → 交集 1（国补单恰属张三）
+    await page.getByTestId('filter-customer-name').fill('张')
+    await expect(rows).toHaveCount(2)
+    await selectSubsidyFilter(page, '是')
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText(subsidy9SaleNo)
+    withDb(app, (db) => {
+      expect(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS n FROM sales s
+                 LEFT JOIN sale_extras se ON se.sale_id = s.id
+                 LEFT JOIN customers c ON c.id = se.customer_id
+                WHERE date(s.created_at) = ? AND c.name LIKE '%张%'
+                  AND se.is_national_subsidy = 1`
+            )
+            .get(TODAY) as { n: number }
+        ).n
+      ).toBe(1)
+    })
+
+    // 收尾：清姓名（国补='是' 仍挂 → 仍 1 行——两筛选独立生效的可分辨中间态）
+    // → 切全部 → 恢复全量 5
+    await clearFilterInput(page, 'filter-customer-name')
+    await expect(rows).toHaveCount(1)
+    await selectSubsidyFilter(page, '全部')
+    await expect(rows).toHaveCount(5)
   })
 })
