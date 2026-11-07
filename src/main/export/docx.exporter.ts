@@ -55,6 +55,12 @@ export async function exportDocx(input: ReportExportInput): Promise<Buffer> {
     new Paragraph({ text: `总销售额：${formatMoney(input.report.total_cents)} 元` }),
     new Paragraph({ text: `订单数：${input.report.order_count}` })
   ]
+  // 汇总段尾部追加国补行（仅日报——月报无国补小计口径）
+  if (input.kind === 'daily') {
+    children.push(
+      new Paragraph({ text: `国补销售额：${formatMoney(input.report.subsidy_total_cents)} 元` })
+    )
+  }
 
   if (input.kind === 'daily') {
     children.push(new Paragraph({ text: '明细', heading: HeadingLevel.HEADING_2 }))
@@ -64,13 +70,16 @@ export async function exportDocx(input: ReportExportInput): Promise<Buffer> {
     } else {
       children.push(
         makeTable(
-          ['单号', '时间', '商品数', '合计（元）', '状态'],
+          // 尾部追加两列（定案——与 txt/xlsx 明细列序一致）
+          ['单号', '时间', '商品数', '合计（元）', '状态', '是否国补', '订单备注'],
           sales.map((s) => [
             s.sale_no,
             s.created_at,
             String(s.item_count),
             formatMoney(s.total_cents),
-            saleStatusText(s.status)
+            saleStatusText(s.status),
+            s.is_national_subsidy ? '是' : '否',
+            s.order_note ?? ''
           ])
         )
       )

@@ -1,6 +1,6 @@
 import { Workbook, type Worksheet } from 'exceljs'
 import { stringWidth } from '../../shared/receipt/char-grid'
-import type { Sale } from '../../shared/types/domain'
+import type { SaleWithExtras } from '../../shared/types/domain'
 import { formatMoney } from './money'
 import { saleStatusText, type MonthlyBucket, type ReportExportInput } from './export.types'
 
@@ -8,12 +8,15 @@ import { saleStatusText, type MonthlyBucket, type ReportExportInput } from './ex
  * 报表 → .xlsx 导出器（exceljs；纯函数，零 dialog/文件 I/O——交互在 export.service 层）。
  *
  * Sheet 结构：
- * - 『汇总』：总销售额（元）/ 订单数 / 日期范围 —— 三格式一致的汇总块
- * - 『明细』（日报）：单号/时间/商品数/合计（元）/状态
+ * - 『汇总』：总销售额（元）/ 订单数 / 日期范围 / 国补销售额（元，仅日报）—— 三格式一致的汇总块
+ * - 『明细』（日报）：单号/时间/商品数/合计（元）/状态/是否国补/订单备注
  * - 『按日分桶』（月报，buckets 存在时）：日期/销售额（元）/订单数
  *
  * 金额写入规则（G1 边界格式化）：分 → 元数值（/ 100）+ numFmt '0.00'，
  * 单元格保持数值类型（Excel 可再计算），显示层由 numFmt 呈现两位小数。
+ *
+ * 尾部追加原则（定案）：明细/汇总新增列与行只从尾部追加——合计列恒为 D 列
+ * （addRow 后 getCell('D') 的金额格式引用零改动）、汇总 B2 恒为总销售额。
  */
 
 const MONEY_FMT = '0.00'
@@ -27,16 +30,27 @@ function autoWidth(header: string, samples: readonly string[]): number {
 
 export async function exportXlsx(input: ReportExportInput): Promise<Buffer> {
   const wb = new Workbook()
+  const isDaily = input.kind === 'daily'
 
   const summary = wb.addWorksheet('汇总')
   summary.columns = [
-    { header: '项目', width: autoWidth('项目', ['总销售额（元）', '订单数', '日期范围']) },
+    {
+      header: '项目',
+      width: autoWidth('项目', [
+        '总销售额（元）',
+        '订单数',
+        '日期范围',
+        // 国补行（仅日报）参与列宽自适应——标签长于『总销售额（元）』
+        ...(isDaily ? ['国补销售额（元）'] : [])
+      ])
+    },
     {
       header: '数值',
       width: autoWidth('数值', [
         formatMoney(input.report.total_cents),
         String(input.report.order_count),
-        input.period
+        input.period,
+        ...(isDaily ? [formatMoney(input.report.subsidy_total_cents)] : [])
       ])
     }
   ]
@@ -44,6 +58,11 @@ export async function exportXlsx(input: ReportExportInput): Promise<Buffer> {
   summary.getCell('B2').numFmt = MONEY_FMT
   summary.addRow(['订单数', input.report.order_count])
   summary.addRow(['日期范围', input.period])
+  if (isDaily) {
+    // 汇总尾部追加国补行（B5）——B2 总销售额坐标不变
+    summary.addRow(['国补销售额（元）', input.report.subsidy_total_cents / 100])
+    summary.getCell('B5').numFmt = MONEY_FMT
+  }
 
   if (input.kind === 'daily') {
     appendDetailSheet(wb, input.report.sales)
@@ -57,17 +76,28 @@ export async function exportXlsx(input: ReportExportInput): Promise<Buffer> {
 
 type SummarySheet = Worksheet
 
-function appendDetailSheet(wb: Workbook, sales: readonly Sale[]): SummarySheet {
+function appendDetailSheet(wb: Workbook, sales: readonly SaleWithExtras[]): SummarySheet {
   const sheet = wb.addWorksheet('明细')
   sheet.columns = [
     { header: '单号', width: autoWidth('单号', sales.map((s) => s.sale_no)) },
     { header: '时间', width: autoWidth('时间', sales.map((s) => s.created_at)) },
     { header: '商品数', width: autoWidth('商品数', sales.map((s) => String(s.item_count))) },
     { header: '合计（元）', width: autoWidth('合计（元）', sales.map((s) => formatMoney(s.total_cents))) },
-    { header: '状态', width: autoWidth('状态', sales.map((s) => saleStatusText(s.status))) }
+    { header: '状态', width: autoWidth('状态', sales.map((s) => saleStatusText(s.status))) },
+    // 尾部追加：合计恒为 D 列——下方 getCell('D') 金额格式引用零改动
+    { header: '是否国补', width: autoWidth('是否国补', sales.map((s) => (s.is_national_subsidy ? '是' : '否'))) },
+    { header: '订单备注', width: autoWidth('订单备注', sales.map((s) => s.order_note ?? '')) }
   ]
   sales.forEach((s) => {
-    sheet.addRow([s.sale_no, s.created_at, s.item_count, s.total_cents / 100, saleStatusText(s.status)])
+    sheet.addRow([
+      s.sale_no,
+      s.created_at,
+      s.item_count,
+      s.total_cents / 100,
+      saleStatusText(s.status),
+      s.is_national_subsidy ? '是' : '否',
+      s.order_note ?? ''
+    ])
     const moneyCell = sheet.getCell(`D${sheet.rowCount}`)
     moneyCell.numFmt = MONEY_FMT
   })

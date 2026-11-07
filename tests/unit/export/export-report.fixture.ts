@@ -11,12 +11,17 @@ type MonthlyExportInput = Extract<ReportExportInput, { kind: 'monthly' }>
  * 金额约定（G1）：样例一律整数分；括注为导出层应显示的元字符串。
  */
 
-/** 3 单完成销售：5250 + 4100 + 2995 = 12345（123.45 元）；无国补单（T2 契约字段全零值/负形态） */
+/**
+ * 3 单完成销售：5250 + 4100 + 2995 = 12345（123.45 元）。
+ * 国补场景（真实数据，T9）：单 2 为国补单（4100 = 41.00 元）→ subsidy_total_cents 4100；
+ * 单 1 非国补但带备注；单 3 无附加信息旧单兜底形态（false / null）。
+ * 金额约定（G1）：样例一律整数分；括注为导出层应显示的元字符串。
+ */
 export const SAMPLE_DAILY_REPORT: DailyReport = {
   date: '2026-11-01',
   total_cents: 12345,
   order_count: 3,
-  subsidy_total_cents: 0,
+  subsidy_total_cents: 4100,
   sales: [
     {
       id: 1,
@@ -27,7 +32,7 @@ export const SAMPLE_DAILY_REPORT: DailyReport = {
       voided_at: null,
       created_at: '2026-11-01 08:30:12',
       is_national_subsidy: false,
-      order_note: null
+      order_note: '老顾客回购'
     },
     {
       id: 2,
@@ -37,8 +42,8 @@ export const SAMPLE_DAILY_REPORT: DailyReport = {
       status: 'completed',
       voided_at: null,
       created_at: '2026-11-01 12:45:33',
-      is_national_subsidy: false,
-      order_note: null
+      is_national_subsidy: true,
+      order_note: '国补资格已核验'
     },
     {
       id: 3,

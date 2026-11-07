@@ -22,7 +22,7 @@ async function reload(buffer: Buffer): Promise<Workbook> {
 }
 
 describe('xlsx.exporter：日报', () => {
-  it('Sheet『汇总』：总销售额（元值 123.45 + numFmt 0.00）/ 订单数 / 日期范围', async () => {
+  it('Sheet『汇总』：总销售额（元值 123.45 + numFmt 0.00）/ 订单数 / 日期范围 / 国补销售额', async () => {
     const wb = await reload(await exportXlsx(SAMPLE_DAILY_INPUT))
     const summary = wb.getWorksheet('汇总')
     expect(summary).toBeDefined()
@@ -35,6 +35,10 @@ describe('xlsx.exporter：日报', () => {
     expect(summary.getCell('B3').value).toBe(3)
     expect(summary.getCell('A4').value).toBe('日期范围')
     expect(summary.getCell('B4').value).toBe('2026-11-01')
+    // 尾部追加国补行（B5）——B2 总销售额坐标不变
+    expect(summary.getCell('A5').value).toBe('国补销售额（元）')
+    expect(summary.getCell('B5').value).toBeCloseTo(41.0, 2)
+    expect(summary.getCell('B5').numFmt).toBe('0.00')
   })
 
   it('Sheet『明细』：行数 == 明细数 + 1（表头），单号/商品数/合计元值/状态列逐格断言', async () => {
@@ -61,6 +65,33 @@ describe('xlsx.exporter：日报', () => {
     expect(detail.getCell('A4').value).toBe('20261101-0003')
     expect(detail.getCell('D4').value).toBeCloseTo(29.95, 2)
     expect(detail.getCell('E4').value).toBe('已完成')
+  })
+
+  it('Sheet『明细』：表头 7 列，第 6/7 为 是否国补/订单备注（尾部追加——D 列仍为合计）', async () => {
+    const wb = await reload(await exportXlsx(SAMPLE_DAILY_INPUT))
+    const detail = wb.getWorksheet('明细')
+    if (!detail) throw new Error('缺少明细 sheet')
+
+    const headers = Array.from({ length: 7 }, (_, i) => detail.getCell(1, i + 1).value)
+    expect(headers).toEqual(['单号', '时间', '商品数', '合计（元）', '状态', '是否国补', '订单备注'])
+    // D 列坐标锁定（E2E getCell('D') 金额引用的兼容基础）
+    expect(detail.getCell('D1').value).toBe('合计（元）')
+  })
+
+  it('Sheet『明细』：国补列 是/否 + 备注列逐格断言（null 备注为空单元格）', async () => {
+    const wb = await reload(await exportXlsx(SAMPLE_DAILY_INPUT))
+    const detail = wb.getWorksheet('明细')
+    if (!detail) throw new Error('缺少明细 sheet')
+
+    // 行 2：非国补带备注
+    expect(detail.getCell('F2').value).toBe('否')
+    expect(detail.getCell('G2').value).toBe('老顾客回购')
+    // 行 3：国补单
+    expect(detail.getCell('F3').value).toBe('是')
+    expect(detail.getCell('G3').value).toBe('国补资格已核验')
+    // 行 4：无附加信息旧单兜底
+    expect(detail.getCell('F4').value).toBe('否')
+    expect(detail.getCell('G4').value).toBe('')
   })
 
   it('列宽自适应：单号列宽 ≥ 内容宽 + 边距', async () => {
@@ -120,6 +151,15 @@ describe('xlsx.exporter：月报', () => {
   it('缺 buckets 的月报输入（契约外运行时形态）：无按日分桶 sheet', async () => {
     const wb = await reload(await exportXlsx(BUCKETLESS_MONTHLY_INPUT))
     expect(wb.getWorksheet('按日分桶')).toBeUndefined()
+  })
+
+  it('月报零国补内容（国补小计仅日报口径——汇总止步 B4 日期范围）', async () => {
+    const wb = await reload(await exportXlsx(SAMPLE_MONTHLY_INPUT))
+    const summary = wb.getWorksheet('汇总')
+    if (!summary) throw new Error('缺少汇总 sheet')
+    expect(summary.getCell('A5').value).toBeNull()
+    expect(summary.getCell('B5').value).toBeNull()
+    expect(wb.getWorksheet('明细')).toBeUndefined()
   })
 })
 

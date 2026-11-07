@@ -13,7 +13,7 @@ import { saleStatusText, type ReportExportInput } from './export.types'
 interface TxtColumn {
   header: string
   width: number
-  align: 'left' | 'right'
+  align: 'left' | 'center' | 'right'
 }
 
 const DETAIL_COLUMNS: readonly TxtColumn[] = [
@@ -21,7 +21,13 @@ const DETAIL_COLUMNS: readonly TxtColumn[] = [
   { header: '时间', width: 22, align: 'left' },
   { header: '商品数', width: 8, align: 'right' },
   { header: '合计(元)', width: 12, align: 'right' },
-  { header: '状态', width: 8, align: 'left' }
+  { header: '状态', width: 8, align: 'left' },
+  // 尾部追加（定案两列，不改既有列顺序/宽度——尾部原则是 xlsx 'D' 引用
+  // 与 E2E nth 坐标断言的兼容基础）
+  { header: '是否国补', width: 8, align: 'center' },
+  // 备注超 20 显示列时被 truncateToGrid 截断（尾部丢弃，不折行）——
+  // 纯文本报表定宽网格下的可读性取舍，定案接受
+  { header: '订单备注', width: 20, align: 'left' }
 ]
 
 const BUCKET_COLUMNS: readonly TxtColumn[] = [
@@ -55,6 +61,10 @@ export function exportTxt(input: ReportExportInput): Buffer {
   lines.push(heavyRule)
   lines.push(`总销售额: ${formatMoney(input.report.total_cents)} 元`)
   lines.push(`订单数: ${input.report.order_count}`)
+  // 汇总块尾部追加国补行（仅日报——月报无国补小计口径）
+  if (input.kind === 'daily') {
+    lines.push(`国补销售额: ${formatMoney(input.report.subsidy_total_cents)} 元`)
+  }
   lines.push(lightRule)
 
   if (input.kind === 'daily') {
@@ -67,7 +77,15 @@ export function exportTxt(input: ReportExportInput): Buffer {
     for (const s of sales) {
       lines.push(
         rowLine(
-          [s.sale_no, s.created_at, String(s.item_count), formatMoney(s.total_cents), saleStatusText(s.status)],
+          [
+            s.sale_no,
+            s.created_at,
+            String(s.item_count),
+            formatMoney(s.total_cents),
+            saleStatusText(s.status),
+            s.is_national_subsidy ? '是' : '否',
+            s.order_note ?? ''
+          ],
           DETAIL_COLUMNS
         )
       )

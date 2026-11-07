@@ -214,6 +214,13 @@ function errorMessage(err: unknown): string {
               <span class="stat-card__label">订单数</span>
               <strong class="stat-card__value">{{ dailyReport?.order_count ?? 0 }}</strong>
             </div>
+            <!-- 尾部追加国补卡（既有 nth 序号零破坏——E2E stats.nth(0)/nth(1) 不受影响） -->
+            <div class="stat-card">
+              <span class="stat-card__label">国补销售额（元）</span>
+              <strong class="stat-card__value stat-card__value--money">{{
+                formatMoney(dailyReport?.subsidy_total_cents ?? 0)
+              }}</strong>
+            </div>
           </div>
 
           <el-table
@@ -241,6 +248,17 @@ function errorMessage(err: unknown): string {
                 </el-tag>
               </template>
             </el-table-column>
+            <!-- 尾部追加两列（定案）：td nth 序号零破坏——E2E rowA.nth(2)/nth(3) 不受影响；
+                 false 渲染纯文本「否」而非 el-tag——E2E rows.locator('.el-tag') 计数只数状态列 -->
+            <el-table-column label="是否国补" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.is_national_subsidy" type="success" disable-transitions>
+                  国补
+                </el-tag>
+                <span v-else>否</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="order_note" label="订单备注" min-width="160" />
             <template #empty>
               <el-empty description="当日无销售" :image-size="100" />
             </template>

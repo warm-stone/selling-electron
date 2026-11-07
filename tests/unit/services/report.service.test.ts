@@ -47,6 +47,18 @@ function insertSale(db: Database.Database, s: SaleSeed): void {
   ).run(s.sale_no, s.total_cents, s.item_count, s.status, s.status === 'voided' ? s.created_at : null, s.created_at)
 }
 
+interface ExtraSeed {
+  is_national_subsidy: boolean
+  order_note: string | null
+}
+
+/** sale_extras 直插（sale_id 取 sales 表自增 id——FK 实约束，须先有 sale） */
+function insertExtra(db: Database.Database, saleId: number, e: ExtraSeed): void {
+  db.prepare(
+    `INSERT INTO sale_extras (sale_id, is_national_subsidy, order_note) VALUES (?, ?, ?)`
+  ).run(saleId, e.is_national_subsidy ? 1 : 0, e.order_note)
+}
+
 /** 跨午夜 seed（Task 14 QA Scenario 原文）：23:59:59 ×2 单 + 00:00:01 ×1 单（voided） */
 const MIDNIGHT_SALES: SaleSeed[] = [
   { sale_no: '20261031-0001', total_cents: 5250, item_count: 2, status: 'completed', created_at: '2026-10-31 23:59:59' },
@@ -204,6 +216,59 @@ describe('report.service：月报按日分桶（strftime %Y-%m 过滤 + date() �
       const report = createReportService(db).monthly('2030-01')
 
       expect(report).toEqual({ month: '2030-01', total_cents: 0, order_count: 0, buckets: [] })
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('report.service：国补小计（sale_extras LEFT JOIN）', () => {
+  it('3 单（2 国补 10.00+20.00 元 + 1 非国补 5.00 元）→ subsidy=3000 / 总 3500；作废国补单不计入', () => {
+    const db = createDb()
+    try {
+      insertSale(db, { sale_no: '20261015-0001', total_cents: 1000, item_count: 1, status: 'completed', created_at: '2026-10-15 09:00:00' })
+      insertSale(db, { sale_no: '20261015-0002', total_cents: 2000, item_count: 2, status: 'completed', created_at: '2026-10-15 10:00:00' })
+      insertSale(db, { sale_no: '20261015-0003', total_cents: 500, item_count: 1, status: 'completed', created_at: '2026-10-15 11:00:00' })
+      insertSale(db, { sale_no: '20261015-0004', total_cents: 9999, item_count: 1, status: 'voided', created_at: '2026-10-15 12:00:00' })
+      insertExtra(db, 1, { is_national_subsidy: true, order_note: '国补资格已核验' })
+      insertExtra(db, 2, { is_national_subsidy: true, order_note: null })
+      insertExtra(db, 3, { is_national_subsidy: false, order_note: '非国补带备注' })
+      insertExtra(db, 4, { is_national_subsidy: true, order_note: '作废的国补单' })
+
+      const report = createReportService(db).daily('2026-10-15')
+
+      expect(report.total_cents).toBe(3500)
+      expect(report.subsidy_total_cents).toBe(3000)
+      expect(report.order_count).toBe(3)
+      // 作废国补单不进明细（同 WHERE——聚合与明细自洽）
+      expect(report.sales.map((s) => s.sale_no)).toEqual(['20261015-0001', '20261015-0002', '20261015-0003'])
+      const byNo = new Map(report.sales.map((s) => [s.sale_no, s]))
+      expect(byNo.get('20261015-0001')?.is_national_subsidy).toBe(true)
+      expect(byNo.get('20261015-0001')?.order_note).toBe('国补资格已核验')
+      expect(byNo.get('20261015-0002')?.is_national_subsidy).toBe(true)
+      expect(byNo.get('20261015-0002')?.order_note).toBe(null)
+      expect(byNo.get('20261015-0003')?.is_national_subsidy).toBe(false)
+      expect(byNo.get('20261015-0003')?.order_note).toBe('非国补带备注')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('无 extras 行旧单 → is_national_subsidy === false && order_note === null（与有 extras 行混排）', () => {
+    const db = createDb()
+    try {
+      insertSale(db, { sale_no: '20261015-0001', total_cents: 1000, item_count: 1, status: 'completed', created_at: '2026-10-15 09:00:00' })
+      insertSale(db, { sale_no: '20261015-0002', total_cents: 2000, item_count: 1, status: 'completed', created_at: '2026-10-15 10:00:00' })
+      insertExtra(db, 1, { is_national_subsidy: true, order_note: '带 extras 的国补单' })
+
+      const report = createReportService(db).daily('2026-10-15')
+
+      const oldSale = report.sales.find((s) => s.sale_no === '20261015-0002')
+      expect(oldSale?.is_national_subsidy).toBe(false)
+      expect(oldSale?.order_note).toBe(null)
+      // 国补小计只含单 1（单 2 无 extras 行 → 非国补）
+      expect(report.subsidy_total_cents).toBe(1000)
+      expect(report.total_cents).toBe(3000)
     } finally {
       db.close()
     }

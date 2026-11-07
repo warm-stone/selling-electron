@@ -42,6 +42,37 @@ describe('txt.exporter：日报', () => {
     expect(text).toContain('已完成')
   })
 
+  it('汇总块尾部含国补行：国补销售额 41.00 元（单 2 国补 4100 分）', () => {
+    const text = decode(exportTxt(SAMPLE_DAILY_INPUT))
+    expect(text).toContain('国补销售额: 41.00 元')
+  })
+
+  it('明细表头：是否国补 在 状态 之后（尾部追加，既有列序不变）', () => {
+    const text = decode(exportTxt(SAMPLE_DAILY_INPUT))
+    const headerLine = text.split('\r\n').find((l) => l.includes('单号') && l.includes('是否国补'))
+    expect(headerLine).toBeDefined()
+    const header = headerLine as string
+    expect(header.indexOf('状态')).toBeLessThan(header.indexOf('是否国补'))
+    expect(header.indexOf('是否国补')).toBeLessThan(header.indexOf('订单备注'))
+  })
+
+  it('明细数据行：国补单渲染「是」、非国补单「否」、备注列文本直出（null 留空）', () => {
+    const text = decode(exportTxt(SAMPLE_DAILY_INPUT))
+    const lines = text.split('\r\n')
+    const row1 = lines.find((l) => l.startsWith('20261101-0001')) as string
+    const row2 = lines.find((l) => l.startsWith('20261101-0002')) as string
+    const row3 = lines.find((l) => l.startsWith('20261101-0003')) as string
+    // 非国补带备注
+    expect(row1).toContain('否')
+    expect(row1).toContain('老顾客回购')
+    // 国补单
+    expect(row2).toContain('是')
+    expect(row2).toContain('国补资格已核验')
+    // 无附加信息旧单兜底：否 + 备注 null 渲染为空
+    expect(row3).toContain('否')
+    expect(row3).not.toContain('老顾客回购')
+  })
+
   it('CRLF 行尾（Windows 记事本兼容）', () => {
     const buf = exportTxt(SAMPLE_DAILY_INPUT)
     expect(buf.subarray(3).includes(Buffer.from('\r\n'))).toBe(true)
@@ -84,5 +115,12 @@ describe('txt.exporter：月报', () => {
     const text = decode(exportTxt(BUCKETLESS_MONTHLY_INPUT))
     expect(text).toContain('2026-11 销售报表')
     expect(text).toContain('总销售额: 321.05 元')
+  })
+
+  it('月报零国补内容（国补小计仅日报口径）', () => {
+    const text = decode(exportTxt(SAMPLE_MONTHLY_INPUT))
+    expect(text).not.toContain('国补销售额')
+    expect(text).not.toContain('是否国补')
+    expect(text).not.toContain('订单备注')
   })
 })

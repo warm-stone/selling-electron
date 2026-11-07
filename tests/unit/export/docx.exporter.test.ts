@@ -20,6 +20,13 @@ async function readDocumentXml(buffer: Buffer): Promise<string> {
   return entry.async('string')
 }
 
+/** 提取首个表格首行（表头行）的单元格文本序列（docx XML：tbl → tr → tc → w:t） */
+function firstTableRowTexts(xml: string): string[] {
+  const table = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/)?.[0] ?? ''
+  const firstRow = table.match(/<w:tr[^>]*>[\s\S]*?<\/w:tr>/)?.[0] ?? ''
+  return [...firstRow.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1])
+}
+
 describe('docx.exporter：日报', () => {
   it('产物是合法 zip 且包含 word/document.xml', async () => {
     const buf = await exportDocx(SAMPLE_DAILY_INPUT)
@@ -36,6 +43,32 @@ describe('docx.exporter：日报', () => {
     expect(xml).toContain('123.45')
     expect(xml).toContain('订单数')
     expect(xml).toContain('3')
+  })
+
+  it('汇总段尾部含国补行：国补销售额 41.00 元', async () => {
+    const xml = await readDocumentXml(await exportDocx(SAMPLE_DAILY_INPUT))
+    expect(xml).toContain('国补销售额：41.00 元')
+  })
+
+  it('明细表头 7 列：是否国补/订单备注 尾部追加（表头数组长度 7）', async () => {
+    const xml = await readDocumentXml(await exportDocx(SAMPLE_DAILY_INPUT))
+    const headers = firstTableRowTexts(xml)
+    expect(headers).toHaveLength(7)
+    expect(headers).toEqual([
+      '单号',
+      '时间',
+      '商品数',
+      '合计（元）',
+      '状态',
+      '是否国补',
+      '订单备注'
+    ])
+  })
+
+  it('明细数据行：国补 是/否 + 备注文本直出（null 渲染空单元格）', async () => {
+    const xml = await readDocumentXml(await exportDocx(SAMPLE_DAILY_INPUT))
+    expect(xml).toContain('老顾客回购')
+    expect(xml).toContain('国补资格已核验')
   })
 
   it('document.xml 含明细表格：表头/单号/合计元值/状态', async () => {
@@ -72,5 +105,12 @@ describe('docx.exporter：月报', () => {
     expect(xml).toContain('123.45')
     expect(xml).toContain('2026-11-02')
     expect(xml).toContain('197.60')
+  })
+
+  it('月报零国补内容（国补小计仅日报口径）', async () => {
+    const xml = await readDocumentXml(await exportDocx(SAMPLE_MONTHLY_INPUT))
+    expect(xml).not.toContain('国补销售额')
+    expect(xml).not.toContain('是否国补')
+    expect(xml).not.toContain('订单备注')
   })
 })
