@@ -1,6 +1,8 @@
 import type {
   AppSettings,
+  CheckoutExtrasInput,
   CheckoutItem,
+  Customer,
   IpcChannels,
   LogoInfo,
   PrintTemplate,
@@ -18,14 +20,21 @@ import type { ReceiptTemplate, ReceiptVars } from '../shared/receipt/template-sc
 
 /** preload 暴露给 renderer 的类型化 API surface（通道名与 IpcChannels 契约一致）。 */
 export interface SalesApi {
-  checkout: (items: CheckoutItem[]) => Promise<SaleDetail>
+  /** 结账（extras 可选——客户/国补标记/订单备注/销售人员；不传不落 sale_extras 行） */
+  checkout: (items: CheckoutItem[], extras?: CheckoutExtrasInput) => Promise<SaleDetail>
   void: (saleId: number) => Promise<Sale>
   list: (filters?: {
     date_from?: string
     date_to?: string
     status?: SaleStatus
   }) => Promise<Sale[]>
+  /** 单据明细（头 + items + extras） */
   detail: (saleId: number) => Promise<SaleDetail>
+  /** 修改销售附加信息（sale_extras 1:1 upsert；返回更新后明细 头+items+extras） */
+  updateExtra: (
+    saleId: number,
+    patch: Omit<IpcChannels['sales:updateExtra']['req'], 'sale_id'>
+  ) => Promise<SaleDetail>
 }
 
 export interface PurchasesApi {
@@ -72,6 +81,18 @@ export interface ProductsApi {
   deleteSn: (snId: number) => Promise<{ ok: true }>
 }
 
+/** 客户（Task 2 契约层）：通道 customers:list/create/update。 */
+export interface CustomersApi {
+  /** 分页搜索（keyword 匹配名称/电话；返回行 + 总数） */
+  list: (
+    opts?: IpcChannels['customers:list']['req']
+  ) => Promise<IpcChannels['customers:list']['res']>
+  /** 新建客户（phone NOT NULL UNIQUE；重号主进程报错） */
+  create: (req: IpcChannels['customers:create']['req']) => Promise<Customer>
+  /** 局部更新（patch 至少一键；返回更新后全行） */
+  update: (id: number, patch: Omit<IpcChannels['customers:update']['req'], 'id'>) => Promise<Customer>
+}
+
 export interface SettingsApi {
   get: () => Promise<AppSettings>
   set: (patch: Partial<AppSettings>) => Promise<AppSettings>
@@ -81,6 +102,8 @@ export interface SettingsApi {
   uploadLogo: () => Promise<LogoInfo[]>
   /** 删除 Logo（DB 行 + 文件；模板引用残留由渲染端跳过）；返回完整最新列表 */
   deleteLogo: (id: number) => Promise<LogoInfo[]>
+  /** 最近销售人员（recent_salespersons JSON 队列，新→旧；脏值主进程回落 []） */
+  getRecentSalespersons: () => Promise<string[]>
 }
 
 /** 测试打印请求：AppSettings 的打印子集（设置页「打印设置」卡片当前表单值） */
@@ -144,6 +167,7 @@ export interface PosApi {
   sales: SalesApi
   purchases: PurchasesApi
   products: ProductsApi
+  customers: CustomersApi
   settings: SettingsApi
   printing: PrintingApi
   reports: ReportsApi

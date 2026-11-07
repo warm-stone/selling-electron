@@ -66,6 +66,7 @@ describe('report.service：跨午夜边界（SQL date() 本地语义分桶）', 
         date: '2026-10-31',
         total_cents: 5250 + 4100,
         order_count: 2,
+        subsidy_total_cents: 0,
         sales: [
           {
             id: 1,
@@ -74,7 +75,9 @@ describe('report.service：跨午夜边界（SQL date() 本地语义分桶）', 
             item_count: 2,
             status: 'completed',
             voided_at: null,
-            created_at: '2026-10-31 23:59:59'
+            created_at: '2026-10-31 23:59:59',
+            is_national_subsidy: false,
+            order_note: null
           },
           {
             id: 2,
@@ -83,7 +86,9 @@ describe('report.service：跨午夜边界（SQL date() 本地语义分桶）', 
             item_count: 1,
             status: 'completed',
             voided_at: null,
-            created_at: '2026-10-31 23:59:59'
+            created_at: '2026-10-31 23:59:59',
+            is_national_subsidy: false,
+            order_note: null
           }
         ]
       })
@@ -99,7 +104,7 @@ describe('report.service：跨午夜边界（SQL date() 本地语义分桶）', 
 
       const report = createReportService(db).daily('2026-11-01')
 
-      expect(report).toEqual({ date: '2026-11-01', total_cents: 0, order_count: 0, sales: [] })
+      expect(report).toEqual({ date: '2026-11-01', total_cents: 0, order_count: 0, subsidy_total_cents: 0, sales: [] })
     } finally {
       db.close()
     }
@@ -211,7 +216,7 @@ describe('report.service：空数据日与参数校验', () => {
     try {
       const report = createReportService(db).daily('2030-01-01')
 
-      expect(report).toEqual({ date: '2030-01-01', total_cents: 0, order_count: 0, sales: [] })
+      expect(report).toEqual({ date: '2030-01-01', total_cents: 0, order_count: 0, subsidy_total_cents: 0, sales: [] })
     } finally {
       db.close()
     }
@@ -224,7 +229,7 @@ describe('report.service：空数据日与参数校验', () => {
 
       const report = createReportService(db).daily('2026-10-30')
 
-      expect(report).toEqual({ date: '2026-10-30', total_cents: 0, order_count: 0, sales: [] })
+      expect(report).toEqual({ date: '2026-10-30', total_cents: 0, order_count: 0, subsidy_total_cents: 0, sales: [] })
     } finally {
       db.close()
     }

@@ -11,11 +11,12 @@ type MonthlyExportInput = Extract<ReportExportInput, { kind: 'monthly' }>
  * 金额约定（G1）：样例一律整数分；括注为导出层应显示的元字符串。
  */
 
-/** 3 单完成销售：5250 + 4100 + 2995 = 12345（123.45 元） */
+/** 3 单完成销售：5250 + 4100 + 2995 = 12345（123.45 元）；无国补单（T2 契约字段全零值/负形态） */
 export const SAMPLE_DAILY_REPORT: DailyReport = {
   date: '2026-11-01',
   total_cents: 12345,
   order_count: 3,
+  subsidy_total_cents: 0,
   sales: [
     {
       id: 1,
@@ -24,7 +25,9 @@ export const SAMPLE_DAILY_REPORT: DailyReport = {
       item_count: 2,
       status: 'completed',
       voided_at: null,
-      created_at: '2026-11-01 08:30:12'
+      created_at: '2026-11-01 08:30:12',
+      is_national_subsidy: false,
+      order_note: null
     },
     {
       id: 2,
@@ -33,7 +36,9 @@ export const SAMPLE_DAILY_REPORT: DailyReport = {
       item_count: 1,
       status: 'completed',
       voided_at: null,
-      created_at: '2026-11-01 12:45:33'
+      created_at: '2026-11-01 12:45:33',
+      is_national_subsidy: false,
+      order_note: null
     },
     {
       id: 3,
@@ -42,7 +47,9 @@ export const SAMPLE_DAILY_REPORT: DailyReport = {
       item_count: 4,
       status: 'completed',
       voided_at: null,
-      created_at: '2026-11-01 18:02:59'
+      created_at: '2026-11-01 18:02:59',
+      is_national_subsidy: false,
+      order_note: null
     }
   ]
 }
@@ -75,7 +82,7 @@ export const EMPTY_DAILY_INPUT: DailyExportInput = {
   kind: 'daily',
   period: '2026-11-03',
   title: '2026-11-03 销售报表',
-  report: { date: '2026-11-03', total_cents: 0, order_count: 0, sales: [] }
+  report: { date: '2026-11-03', total_cents: 0, order_count: 0, subsidy_total_cents: 0, sales: [] }
 }
 
 /**

@@ -128,7 +128,9 @@ export function createSaleRepo(db: Database.Database) {
       .prepare('SELECT * FROM sales WHERE id = ?')
       .get(saleId) as Sale | undefined
     if (!sale) return undefined
-    return { ...sale, items: getSaleItems(sale.id) }
+    // T2 契约接线占位：extras 平铺由 sale_extras LEFT JOIN 装配任务（后续 Wave）替换；
+    // 当前无 sale_extras 行写入 → null 即旧单准确语义
+    return { ...sale, items: getSaleItems(sale.id), extras: null }
   }
 
   return {

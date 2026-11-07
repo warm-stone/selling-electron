@@ -11,7 +11,10 @@ import type { PaperWidth } from '../receipt/char-grid'
 import type { ReceiptTemplate } from '../receipt/template-schema'
 import type {
   AppSettings,
+  CheckoutCustomerInput,
+  CheckoutExtrasInput,
   CheckoutItem,
+  Customer,
   DailyReport,
   MonthlyReport,
   PrintTemplate,
@@ -65,12 +68,44 @@ export interface IpcChannels {
   /** 删在库 SN（逻辑删除 + stock-1 + movements source='manual'；已售拒绝——D-SN16） */
   'products:deleteSn': { req: { sn_id: number }; res: { ok: true } }
 
+  // ── 客户 ──
+  /** 分页搜索（keyword 匹配名称/电话；total 供分页条） */
+  'customers:list': {
+    req: { keyword?: string; limit?: number; offset?: number }
+    res: { items: Customer[]; total: number }
+  }
+  /** 新建客户（phone NOT NULL UNIQUE，重号主进程报错） */
+  'customers:create': {
+    req: { name: string; phone: string; address: string; note: string }
+    res: Customer
+  }
+  /** 局部更新（patch 至少一键；返回更新后全行） */
+  'customers:update': {
+    req: {
+      id: number
+      patch: { name?: string; phone?: string; address?: string; note?: string }
+    }
+    res: Customer
+  }
+
   // ── 销售 ──
-  'sales:checkout': { req: { items: CheckoutItem[] }; res: Sale }
+  /** 结账（extras 可选——客户/国补标记/订单备注/销售人员；不传则不落 sale_extras 行） */
+  'sales:checkout': { req: { items: CheckoutItem[]; extras?: CheckoutExtrasInput }; res: Sale }
   /** 整单作废（事务回滚库存 + status='voided'——D3） */
   'sales:void': { req: { sale_id: number }; res: Sale }
   'sales:list': { req: { date_from?: string; date_to?: string; status?: SaleStatus }; res: Sale[] }
   'sales:detail': { req: { sale_id: number }; res: SaleDetail }
+  /** 修改销售附加信息（sale_extras 1:1 upsert；返回更新后明细 头+items+extras） */
+  'sales:updateExtra': {
+    req: {
+      sale_id: number
+      is_national_subsidy?: boolean
+      order_note?: string
+      salesperson?: string
+      customer?: CheckoutCustomerInput | null
+    }
+    res: SaleDetail
+  }
 
   // ── 进货 ──
   'purchases:create': { req: { note: string | null; items: PurchaseInputItem[] }; res: PurchaseOrderWithItems }
@@ -111,6 +146,8 @@ export interface IpcChannels {
   // ── 设置 ──
   'settings:get': { req: void; res: AppSettings }
   'settings:set': { req: Partial<AppSettings>; res: AppSettings }
+  /** 最近销售人员（settings key recent_salespersons 的 JSON 队列，新→旧；脏值回落 []） */
+  'settings:getRecentSalespersons': { req: {}; res: string[] }
 }
 
 /**
@@ -126,10 +163,14 @@ export const IPC_CHANNEL_NAMES = [
   'products:findSn',
   'products:listSns',
   'products:deleteSn',
+  'customers:list',
+  'customers:create',
+  'customers:update',
   'sales:checkout',
   'sales:void',
   'sales:list',
   'sales:detail',
+  'sales:updateExtra',
   'purchases:create',
   'purchases:list',
   'reports:daily',
@@ -144,7 +185,8 @@ export const IPC_CHANNEL_NAMES = [
   'templates:delete',
   'templates:setDefault',
   'settings:get',
-  'settings:set'
+  'settings:set',
+  'settings:getRecentSalespersons'
 ] as const satisfies readonly (keyof IpcChannels)[]
 
 /**

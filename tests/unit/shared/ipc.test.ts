@@ -20,11 +20,16 @@ const EXPECTED_CHANNELS = [
   'products:findSn',
   'products:listSns',
   'products:deleteSn',
+  // 客户（Task 2 契约：结账客户信息）
+  'customers:list',
+  'customers:create',
+  'customers:update',
   // 销售
   'sales:checkout',
   'sales:void',
   'sales:list',
   'sales:detail',
+  'sales:updateExtra',
   // 进货
   'purchases:create',
   'purchases:list',
@@ -44,7 +49,8 @@ const EXPECTED_CHANNELS = [
   'templates:setDefault',
   // 设置
   'settings:get',
-  'settings:set'
+  'settings:set',
+  'settings:getRecentSalespersons'
 ] as const
 
 describe('IPC 通道契约', () => {

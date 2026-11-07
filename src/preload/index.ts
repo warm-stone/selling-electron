@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
+  CheckoutExtrasInput,
   CheckoutItem,
+  Customer,
   IpcChannels,
   LogoInfo,
   PrintTemplate,
@@ -62,11 +64,14 @@ const api = {
     return () => ipcRenderer.removeListener('scanner:barcode', listener)
   },
 
-  // ── 销售（Task 10：结账 + 作废 + 查询）──
+  // ── 销售（Task 10：结账 + 作废 + 查询；Task 2 契约：附加信息）──
   sales: {
-    /** 结账（单事务：sales/sale_items/扣库存/movements；返回头+明细，金额整数分） */
-    checkout: (items: CheckoutItem[]): Promise<SaleDetail> =>
-      ipcRenderer.invoke('sales:checkout', { items }),
+    /**
+     * 结账（单事务：sales/sale_items/扣库存/movements；返回头+明细，金额整数分）。
+     * extras 可选附加信息（客户/国补标记/订单备注/销售人员）——不传则不落 sale_extras 行。
+     */
+    checkout: (items: CheckoutItem[], extras?: CheckoutExtrasInput): Promise<SaleDetail> =>
+      ipcRenderer.invoke('sales:checkout', { items, extras }),
     /** 整单作废（事务回滚库存 + status='voided'） */
     void: (saleId: number): Promise<Sale> =>
       ipcRenderer.invoke('sales:void', { sale_id: saleId }),
@@ -76,9 +81,18 @@ const api = {
       date_to?: string
       status?: SaleStatus
     }): Promise<Sale[]> => ipcRenderer.invoke('sales:list', filters ?? {}),
-    /** 单据明细（头 + items） */
+    /** 单据明细（头 + items + extras） */
     detail: (saleId: number): Promise<SaleDetail> =>
-      ipcRenderer.invoke('sales:detail', { sale_id: saleId })
+      ipcRenderer.invoke('sales:detail', { sale_id: saleId }),
+    /**
+     * 修改销售附加信息（sale_extras 1:1 upsert；customer 传裸值由主进程
+     * 建新/匹配）。返回更新后明细（头 + items + extras）。
+     */
+    updateExtra: (
+      saleId: number,
+      patch: Omit<IpcChannels['sales:updateExtra']['req'], 'sale_id'>
+    ): Promise<SaleDetail> =>
+      ipcRenderer.invoke('sales:updateExtra', { sale_id: saleId, ...patch })
   },
 
   // ── 进货（Task 9：入库单 + 库存联动 + 流水）──
@@ -135,6 +149,23 @@ const api = {
       ipcRenderer.invoke('products:deleteSn', { sn_id: snId })
   },
 
+  // ── 客户（Task 2 契约层：结账客户信息——handler 由后续任务装配）──
+  customers: {
+    /** 分页搜索（keyword 匹配名称/电话；返回行 + 总数） */
+    list: (
+      opts?: IpcChannels['customers:list']['req']
+    ): Promise<IpcChannels['customers:list']['res']> =>
+      ipcRenderer.invoke('customers:list', opts ?? {}),
+    /** 新建客户（phone NOT NULL UNIQUE；重号主进程报错） */
+    create: (req: IpcChannels['customers:create']['req']): Promise<Customer> =>
+      ipcRenderer.invoke('customers:create', req),
+    /** 局部更新（patch 至少一键；返回更新后全行） */
+    update: (
+      id: number,
+      patch: Omit<IpcChannels['customers:update']['req'], 'id'>
+    ): Promise<Customer> => ipcRenderer.invoke('customers:update', { id, patch })
+  },
+
   // ── 设置（Task 19：店铺信息 / 打印配置；多 Logo 架构）──
   settings: {
     /** 全量设置（缺 key 走默认值：通道 spooler、auto_cut true 等） */
@@ -154,7 +185,10 @@ const api = {
      * 返回完整最新列表。
      */
     deleteLogo: (id: number): Promise<LogoInfo[]> =>
-      ipcRenderer.invoke('settings:deleteLogo', { id })
+      ipcRenderer.invoke('settings:deleteLogo', { id }),
+    /** 最近销售人员（recent_salespersons JSON 队列，新→旧；脏值主进程回落 []） */
+    getRecentSalespersons: (): Promise<string[]> =>
+      ipcRenderer.invoke('settings:getRecentSalespersons', {})
   },
 
   // ── 打印设置（Task 19：打印机枚举 + 测试打印）──

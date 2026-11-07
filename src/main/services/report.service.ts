@@ -8,7 +8,7 @@
  */
 
 import type Database from 'better-sqlite3'
-import type { DailyReport, MonthlyReport } from '../../shared/types'
+import type { DailyReport, MonthlyReport, SaleWithExtras } from '../../shared/types'
 import { createReportRepo } from '../db/repositories/report.repo'
 
 /** service 错误码（IPC 层透传 message 给 renderer） */
@@ -38,7 +38,20 @@ export function createReportService(db: Database.Database) {
         )
       }
       const { total_cents, order_count, sales } = repo.daily(dateStr)
-      return { date: dateStr, total_cents, order_count, sales }
+      // T2 契约接线占位：subsidy 平铺列与合计由 sale_extras 聚合任务（后续 Wave）替换；
+      // 当前无 sale_extras 行 → false/null/0 即旧单准确语义
+      const salesWithExtras: SaleWithExtras[] = sales.map((sale) => ({
+        ...sale,
+        is_national_subsidy: false,
+        order_note: null
+      }))
+      return {
+        date: dateStr,
+        total_cents,
+        order_count,
+        subsidy_total_cents: 0,
+        sales: salesWithExtras
+      }
     },
 
     /** 月报（剔除 voided；含按日分桶 buckets；空月零值不抛错） */

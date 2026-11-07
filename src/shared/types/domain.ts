@@ -82,9 +82,14 @@ export interface SaleItem {
   sn: string | null
 }
 
-/** 销售单明细（头 + 行，sales:detail / printing:preview 消费） */
+/** 销售单明细（头 + 行 + 附加信息，sales:detail / sales:updateExtra / printing:preview 消费） */
 export interface SaleDetail extends Sale {
   items: SaleItem[]
+  /**
+   * 附加信息（sale_extras 旁挂行 + 平铺 customer，见下方 SaleExtraInfo）。
+   * 旧单（迁移前/无附加行）整体为 null——禁止空对象冒充。
+   */
+  extras: SaleExtraInfo | null
 }
 
 /** 结账请求行（购物车行 → service 内查快照落库） */
@@ -95,6 +100,71 @@ export interface CheckoutItem {
   unit_price_cents: number
   /** SN 行必填非空（service 校验）；批量计行 null */
   sn: string | null
+}
+
+// ══════════════ 客户与订单附加信息 ══════════════
+
+/**
+ * 客户（customers 表——005 迁移，7 列一一对应）。
+ * phone NOT NULL UNIQUE：散客空串占位只可插一行（二插 UNIQUE 报错，repo 侧防）。
+ */
+export interface Customer {
+  id: number
+  name: string
+  phone: string
+  address: string
+  note: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 结账客户信息输入（sales:checkout extras.customer / sales:updateExtra
+ * customer 的裸值形状；建新/匹配已有客户由 service 决定）。
+ */
+export interface CheckoutCustomerInput {
+  name: string
+  phone: string
+  address: string
+  note: string
+}
+
+/**
+ * 结账附加信息（sales:checkout req.extras；整体可选——不传则不落 sale_extras 行）。
+ * 字段与 sale_extras 列对应；salesperson 另写 settings 的
+ * recent_salespersons 最近输入队列（定案：不进 AppSettings 白名单）。
+ */
+export interface CheckoutExtrasInput {
+  customer?: CheckoutCustomerInput | null
+  /** 国补标记（sale_extras.is_national_subsidy，SQLite INTEGER 0/1 → 布尔） */
+  is_national_subsidy?: boolean
+  /** 订单备注（sale_extras.order_note） */
+  order_note?: string
+  /** 销售人员（sale_extras.salesperson） */
+  salesperson?: string
+}
+
+/**
+ * 销售附加信息（sale_extras 行 + LEFT JOIN customers 平铺 customer）。
+ * sale_extras.sale_id 兼 PRIMARY KEY（1:1 旁挂，同单天然至多一行）。
+ */
+export interface SaleExtraInfo {
+  sale_id: number
+  customer_id: number | null
+  is_national_subsidy: boolean
+  order_note: string | null
+  salesperson: string | null
+  /** customer_id 非空时关联行；无关联客户为 null */
+  customer: Customer | null
+}
+
+/**
+ * 日报明细行销售头（reports:daily 专用）：Sale + sale_extras 平铺列。
+ * 不并入 Sale 本体——sales:list / printing 等消费方零波及（Sale 接口铁律不动）。
+ */
+export interface SaleWithExtras extends Sale {
+  is_national_subsidy: boolean
+  order_note: string | null
 }
 
 // ══════════════ 进货 ══════════════
@@ -175,8 +245,10 @@ export interface DailyReport {
   date: string
   total_cents: number
   order_count: number
-  /** 当日销售详细记录 */
-  sales: Sale[]
+  /** 当日国补单合计（is_national_subsidy=1 单的 total_cents 之和；无国补单为 0） */
+  subsidy_total_cents: number
+  /** 当日销售详细记录（含国补标记/订单备注平铺列——日报明细行展示用） */
+  sales: SaleWithExtras[]
 }
 
 /** 月报按日分桶行（date=yyyy-MM-dd；T14 上提 shared，结构与导出层历史 MonthlyBucket 逐字段一致） */

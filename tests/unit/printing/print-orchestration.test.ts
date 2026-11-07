@@ -56,7 +56,9 @@ const SALE: SaleDetail = {
       subtotal_cents: 350,
       sn: null
     }
-  ]
+  ],
+  /** T2 契约：旧单无 sale_extras 行 → extras 整体 null */
+  extras: null
 }
 
 const VOIDED_SALE: SaleDetail = { ...SALE, status: 'voided', voided_at: '2026-11-01 13:00:00' }
