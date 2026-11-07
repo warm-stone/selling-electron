@@ -92,7 +92,7 @@ export function createSaleRepo(db: Database.Database) {
      VALUES (?, ?, ?, ?, ?, ?)`
   )
   const getProductStmt = db.prepare(
-    'SELECT id, name, barcode, stock, tracking FROM products WHERE id = ?'
+    'SELECT id, name, barcode, stock, tracking FROM products WHERE id = ? AND deleted = 0'
   )
   const adjustStockStmt = db.prepare(
     `UPDATE products
@@ -234,7 +234,7 @@ export function createSaleRepo(db: Database.Database) {
       return row.n
     },
 
-    /** 事务内实时读商品快照 + 当前库存（checkout/void 复原共用） */
+    /** 事务内实时读商品快照 + 当前库存（checkout/void 复原共用；仅未软删商品——软删行 undefined） */
     getProductSnapshot(productId: number): ProductSnapshot | undefined {
       return getProductStmt.get(productId) as ProductSnapshot | undefined
     },
@@ -254,7 +254,7 @@ export function createSaleRepo(db: Database.Database) {
 
     /**
      * SN 台账回滚 sold→in_stock + 清空销售去向（D-SN8 作废链路，按明细行
-     * 自身 id 定位）。商品硬删时 product_sns 已被删除级联软删 →
+     * 自身 id 定位）。商品已软删时 product_sns 已被级联软删 →
      * WHERE deleted=0 命中 0 行，静默跳过（与库存复原的 skip 语义一致）。
      */
     restoreSnBySaleItem(saleItemId: number): void {

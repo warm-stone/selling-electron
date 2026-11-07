@@ -8,10 +8,10 @@ import type { Product, ProductSn, ProductTracking } from '../../../shared/types'
 /**
  * 商品管理页（Task 8 + SN Wave 3C）：搜索（防抖 300ms）+ 新增/编辑（元↔分边界
  * 转换；双类型表单：批量计 / SN——D-SN1 建后不可转，SN 商品多【SN 前缀】D-SN2、
- * 禁初始库存与手动调库 D-SN11）+ 删除（willOrphan 引用提示 + 在库 SN 守卫
- * D-SN15）+ 负库存标红（D2）+ 展开行 SN 台账浏览（D-SN16：默认在库、可切含
- * 已售；在库 SN 可删=逻辑删除+manual 流水；不提供手动添加，一律进货录入）+
- * 前端分页 20/页。
+ * 禁初始库存与手动调库 D-SN11）+ 删除（软删——004 迁移：willOrphan 引用提示 +
+ * 在库 SN 守卫 D-SN15，历史单据/审计链完整保留）+ 负库存标红（D2）+
+ * 展开行 SN 台账浏览（D-SN16：默认在库、可切含已售；在库 SN 可删=逻辑删除+
+ * manual 流水；不提供手动添加，一律进货录入）+ 前端分页 20/页。
  *
  * 金额铁律 G1：DB/IPC 一律整数分；元单位浮点只存在于本页输入/显示边界
  * （输入 Math.round(yuan * 100) 入分，显示 (cents / 100).toFixed(2)）。
@@ -210,7 +210,7 @@ async function save(): Promise<void> {
   }
 }
 
-// ── 删除（D15 硬删 + 快照存活；弹窗明示引用数与库存废弃）──
+// ── 删除（软删：行保留、历史单据/审计链完整；弹窗明示引用数与不可恢复）──
 
 function deleteMessage(row: ProductRow): ReturnType<typeof h> {
   return h('div', { class: 'delete-confirm' }, [
@@ -219,10 +219,10 @@ function deleteMessage(row: ProductRow): ReturnType<typeof h> {
       ? h(
           'p',
           { class: 'delete-confirm__warn' },
-          `该商品关联 ${row.willOrphan} 条历史单据：删除后单据保留商品快照，商品引用将解除。`
+          `该商品关联 ${row.willOrphan} 条历史单据：删除后单据完整保留，可继续追溯。商品将从列表中移除。`
         )
       : null,
-    h('p', { class: 'delete-confirm__warn' }, '库存及库存流水将废弃，此操作不可恢复。')
+    h('p', { class: 'delete-confirm__warn' }, '商品将从列表中移除，历史单据与库存流水将完整保留，此操作不可恢复。')
   ])
 }
 

@@ -113,8 +113,8 @@ export function createSaleService(db: Database.Database) {
         const seq = repo.dailyCount(datePrefix) + 1
         const saleNo = `${datePrefix}-${String(seq).padStart(4, '0')}`
 
-        // 事务内实时读快照（product_name/barcode/当前库存）；商品已被硬删 → 抛错回滚。
-        // SN 行同事务校验台账（D-SN6 拒绝态）——全部校验先于任何 INSERT
+        // 事务内实时读快照（product_name/barcode/当前库存）；商品不存在或已软删 →
+        // 抛错回滚。SN 行同事务校验台账（D-SN6 拒绝态）——全部校验先于任何 INSERT
         const lines = items.map((item) => {
           const product = repo.getProductSnapshot(item.product_id)
           if (!product) {
@@ -215,8 +215,9 @@ export function createSaleService(db: Database.Database) {
     /**
      * 整单作废（D3）：单事务 = 校验 → status='voided' + voided_at →
      * 逐行 stock += qty → movements(source='void')。不物理删除任何行。
-     * 商品已硬删（product_id 为 NULL 或 products 行不存在——D15 快照设计）
-     * 的明细行跳过库存复原（库存随硬删废弃）。
+     * 商品不可达的明细行跳过库存复原（两条路径并存）：
+     * product_id 为 NULL（历史断链行）或商品已软删（deleted=1——004 迁移后
+     * 快照行保留但 getProductSnapshot 不可见）。
      */
     voidSale(saleId: number): Sale {
       const run = db.transaction((): Sale => {
@@ -234,14 +235,14 @@ export function createSaleService(db: Database.Database) {
         repo.markVoided(saleId)
 
         for (const item of repo.getSaleItems(saleId)) {
-          // SN 台账回滚 sold→in_stock（D-SN8，按明细行自身 id 定位）：商品硬删时
-          // product_sns 已被删除级联软删 → WHERE deleted=0 命中 0 行，静默跳过
+          // SN 台账回滚 sold→in_stock（D-SN8，按明细行自身 id 定位）：商品已软删时
+          // product_sns 已被级联软删 → WHERE deleted=0 命中 0 行，静默跳过
           if (item.sn != null) {
             repo.restoreSnBySaleItem(item.id)
           }
           if (item.product_id == null) continue
           const product = repo.getProductSnapshot(item.product_id)
-          if (!product) continue // 商品硬删（D15）：快照行保留，库存废弃，不写复原流水
+          if (!product) continue // 商品已软删（或历史断链行）：快照行保留，不写复原流水
           repo.adjustStock(product.id, item.quantity)
           repo.insertMovement({
             product_id: product.id,

@@ -6,7 +6,9 @@
  *   参数校验（name 非空、stock 整数、price 整数分 ≥0、barcode 空串归一为 null）
  * - updateStock：before/after 快照流水（验收原文 5→3 → {change_qty:-2, before:5, after:3, source:'manual'}）
  * - update / delete：存在性校验、willOrphan（sale_items + purchase_items 关联计数）
- * - delete：快照行保留（product_id 置 NULL）、库存流水随商品清除（DDL NOT NULL FK 约束决策）
+ * - delete（软删——004 迁移）：行保留 deleted=1 + barcode 置 NULL（UNIQUE 占位释放）、
+ *   单据行 product_id 不断链（FK 持续有效）、stock_movements 审计链保留、
+ *   product_sns 级联软删、删除后商品对全部读路径不可见、条码/SN 前缀可复用
  * - list：名称 LIKE 子串 / 条码前缀 / LIKE 通配符转义
  *
  * SN 商品（Wave 2——计划 §2 D-SN1..17）：
@@ -444,16 +446,21 @@ describe('productService.updateStock', () => {
 
 // ══════════════ delete ══════════════
 
-describe('productService.delete', () => {
-  it('无引用商品删除：willOrphan=0，行消失', () => {
-    const created = service.create({ barcode: null, name: 'X', default_price_cents: null, stock: 5, tracking: 'quantity' })
+describe('productService.delete（软删——004 迁移）', () => {
+  it('无引用商品删除：willOrphan=0，行保留且 deleted=1、barcode 置 NULL', () => {
+    const created = service.create({ barcode: '6901234567890', name: 'X', default_price_cents: null, stock: 5, tracking: 'quantity' })
     const result = service.delete({ id: created.id })
 
     expect(result).toEqual({ ok: true, willOrphan: 0 })
-    expect(rawProduct(created.id)).toBeUndefined()
+    // 软删：行保留（不物理删除），deleted=1；barcode 置 NULL 释放 UNIQUE 占位
+    const row = rawProduct(created.id)
+    expect(row).toBeDefined()
+    expect(row!['deleted']).toBe(1)
+    expect(row!['barcode']).toBeNull()
+    expect(row!['name']).toBe('X')
   })
 
-  it('带 sale/purchase 引用删除：willOrphan=计数，快照行保留且 product_id 置 NULL', () => {
+  it('带 sale/purchase 引用删除：willOrphan=计数，单据行 product_id 不断链（FK 有效）、stock_movements 审计链保留', () => {
     const created = service.create({ barcode: '6901234567890', name: '可乐', default_price_cents: 350, stock: 10, tracking: 'quantity' })
     insertSaleItemRef(created.id, '可乐')
     insertSaleItemRef(created.id, '可乐')
@@ -462,28 +469,67 @@ describe('productService.delete', () => {
     const result = service.delete({ id: created.id })
 
     expect(result).toEqual({ ok: true, willOrphan: 3 })
-    // 商品硬删
-    expect(rawProduct(created.id)).toBeUndefined()
-    // 快照行保留：名称原值，product_id 断链置 NULL（外键 SET NULL 语义，DDL 未带 ON DELETE 由应用层补齐）
+    // 商品软删：行保留 deleted=1 + barcode NULL
+    const row = rawProduct(created.id)
+    expect(row!['deleted']).toBe(1)
+    expect(row!['barcode']).toBeNull()
+    // 单据行保留且 product_id 保持指向（软删行保留 → FK 引用持续有效，可完整追溯）
     const saleItems = db
       .prepare('SELECT product_name, product_id FROM sale_items')
       .all() as Array<{ product_name: string; product_id: number | null }>
     expect(saleItems).toHaveLength(2)
     for (const item of saleItems) {
       expect(item.product_name).toBe('可乐')
-      expect(item.product_id).toBeNull()
+      expect(item.product_id).toBe(created.id)
     }
     const purchaseItems = db
       .prepare('SELECT product_name, product_id FROM purchase_items')
       .all() as Array<{ product_name: string; product_id: number | null }>
     expect(purchaseItems).toHaveLength(1)
-    expect(purchaseItems[0]!.product_id).toBeNull()
-    // stock_movements.product_id NOT NULL FK：随商品清除（决策记录 learnings）
-    expect(movementsOf(created.id)).toHaveLength(0)
+    expect(purchaseItems[0]!.product_id).toBe(created.id)
+    // stock_movements 审计链完整保留（创建初始库存 1 条，不随删除清除）
+    expect(movementsOf(created.id)).toHaveLength(1)
+    expect(movementsOf(created.id)[0]).toMatchObject({ change_qty: 10, before_stock: 0, after_stock: 10, source: 'manual' })
   })
 
   it('不存在的 id 抛 PRODUCT_NOT_FOUND', () => {
     expectServiceError(() => service.delete({ id: 999 }), 'PRODUCT_NOT_FOUND')
+  })
+
+  it('删除后商品不可见：list/搜索/条码查/id 查均无结果；update/updateStock 抛 PRODUCT_NOT_FOUND', () => {
+    const created = service.create({ barcode: '6901234567890', name: '可口可乐 330ml', default_price_cents: 350, stock: 10, tracking: 'quantity' })
+    service.delete({ id: created.id })
+
+    expect(service.list()).toHaveLength(0)
+    expect(service.list('可口可乐')).toHaveLength(0)
+    expect(service.list('6901234567890')).toHaveLength(0)
+    // requireProduct 守卫路径（getById 过滤 deleted=0）
+    expectServiceError(() => service.update({ id: created.id, name: '改名', default_price_cents: null }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.updateStock({ id: created.id, stock: 3 }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.listSns(created.id, false), 'PRODUCT_NOT_FOUND')
+    // 重复删除同样 PRODUCT_NOT_FOUND（软删行对读不可见）
+    expectServiceError(() => service.delete({ id: created.id }), 'PRODUCT_NOT_FOUND')
+  })
+
+  it('条码占位释放：软删后同条码可再建新商品', () => {
+    const first = service.create({ barcode: '6901234567890', name: '老可乐', default_price_cents: 350, stock: 0, tracking: 'quantity' })
+    service.delete({ id: first.id })
+
+    // 同条码再建成功（软删行 barcode 已置 NULL，不占用 UNIQUE 槽位）
+    const second = service.create({ barcode: '6901234567890', name: '新可乐', default_price_cents: 400, stock: 1, tracking: 'quantity' })
+    expect(second.barcode).toBe('6901234567890')
+    expect(second.id).not.toBe(first.id)
+    expect(service.list()).toHaveLength(1)
+    expect(service.list()[0]!.name).toBe('新可乐')
+  })
+
+  it('SN 前缀占位释放：软删商品的前缀不再冲突，同前缀新商品可建', () => {
+    const first = service.create({ barcode: null, name: '老手机', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'SNP' })
+    service.delete({ id: first.id })
+
+    // 软删商品前缀已释放（listSnPrefixes 过滤 deleted=0）
+    const second = service.create({ barcode: null, name: '新手机', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'SNP' })
+    expect(second.sn_prefix).toBe('SNP')
   })
 })
 
@@ -769,31 +815,31 @@ describe('productService.delete（SN 守卫——D-SN15）', () => {
     expect(rawProduct(created.id)).toBeDefined()
   })
 
-  it('仅已售 SN：商品可删；product_sns 行随商品清除（NOT NULL FK 约束——同 stock_movements 决策）；sale_items.sn 快照保留', () => {
+  it('仅已售 SN：商品可删（软删）；product_sns 行级联软删（deleted=1 行保留）；sale_items.sn 快照保留且 product_id 不断链', () => {
     const created = service.create({
       barcode: null, name: '手机', default_price_cents: null, stock: 0, tracking: 'sn'
     })
-    const { saleNo } = insertSoldSn(created.id, '手机', 'SN-SOLD')
+    const { snId, saleNo } = insertSoldSn(created.id, '手机', 'SN-SOLD')
 
     const result = service.delete({ id: created.id })
 
     expect(result).toEqual({ ok: true, willOrphan: 1 })
-    // 商品硬删
-    expect(rawProduct(created.id)).toBeUndefined()
-    // product_sns 行随商品清除（product_id NOT NULL FK 无法断链存续；
-    // 已售历史由下方 sale_items 快照承担——D-SN12）
-    const snRows = db
-      .prepare('SELECT * FROM product_sns WHERE product_id = ?')
-      .all(created.id)
-    expect(snRows).toHaveLength(0)
-    // 快照行保留：product_id 断链 + sn 列原值
+    // 商品软删：行保留 deleted=1
+    expect(rawProduct(created.id)!['deleted']).toBe(1)
+    // product_sns 行级联软删（D-SN15 原始意图就地实现：行存续、deleted=1，
+    // status/sale_item_id 原样冻结——对 findSn/listSns 不可见）
+    const snRow = rawSnRow(snId)
+    expect(snRow).toMatchObject({ deleted: 1, status: 'sold', sn: 'SN-SOLD' })
+    // 快照行保留：product_id 保持指向软删商品（FK 有效）+ sn 列原值
     const item = db
       .prepare('SELECT product_id, product_name, sn FROM sale_items')
       .get() as { product_id: number | null; product_name: string; sn: string | null }
-    expect(item.product_id).toBeNull()
+    expect(item.product_id).toBe(created.id)
     expect(item.product_name).toBe('手机')
     expect(item.sn).toBe('SN-SOLD')
     expect(saleNo).toMatch(/^20260101-SN\d{4}$/)
+    // 软删商品的 SN 不可见：findSn 返回 null
+    expect(service.findSn('SN-SOLD')).toBeNull()
   })
 
   it('无 SN 的 SN 商品（台账为空）可直接删除', () => {
@@ -801,7 +847,7 @@ describe('productService.delete（SN 守卫——D-SN15）', () => {
       barcode: null, name: '空台账', default_price_cents: null, stock: 0, tracking: 'sn'
     })
     expect(service.delete({ id: created.id }).ok).toBe(true)
-    expect(rawProduct(created.id)).toBeUndefined()
+    expect(rawProduct(created.id)!['deleted']).toBe(1)
   })
 })
 

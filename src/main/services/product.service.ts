@@ -222,9 +222,11 @@ export function createProductService(db: Database.Database) {
     },
 
     /**
-     * 硬删商品；返回 willOrphan（关联历史单据行数，UI 弹窗文案用）。
-     * SN 商品存在在库 SN 时拒绝（D-SN15——提示先处理 SN；已售 SN 行随
-     * repo.delete 事务清除，已售历史靠 sale_items.sn 快照保留——D-SN12）。
+     * 逻辑删除（软删）商品；返回 willOrphan（关联历史单据行数，UI 弹窗文案用）。
+     * 软删行保留：历史单据 product_id FK 持续有效、审计链完整（004 迁移语义）；
+     * barcode 随删置 NULL 释放 UNIQUE 占位；SN 台账级联软删（D-SN15 原始意图）。
+     * SN 商品存在在库 SN 时拒绝（D-SN15——提示先处理 SN；已售 SN 不阻删，
+     * 行随软删保留、deleted=1，对 findSn/listSns 不可见）。
      */
     delete(input: { id: number }): { ok: true; willOrphan: number } {
       const product = requireProduct(input.id)

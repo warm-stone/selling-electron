@@ -205,19 +205,24 @@ test.describe.serial('F3 QA · B：边界案例', () => {
     // 商品列表不再出现
     await expect(row).toHaveCount(0)
 
-    // DB：商品硬删 + sale_items 快照保留（product_id NULL）
+    // DB：商品软删（deleted=1、barcode 置 NULL）+ sale_items 快照保留（product_id 不断链）
     const d = new Database(app.dbPath, { readonly: true })
     try {
       const p = d
-        .prepare('SELECT COUNT(*) AS n FROM products WHERE barcode = ?')
-        .get(REF_BARCODE) as { n: number }
-      expect(p.n).toBe(0)
+        .prepare('SELECT deleted, barcode FROM products WHERE barcode = ?')
+        .get(REF_BARCODE) as { deleted: number; barcode: string | null } | undefined
+      // 软删后 barcode 置 NULL → 按条码不可再命中；按明细行回查商品行断言软删态
+      expect(p).toBeUndefined()
       const item = d
         .prepare(
           'SELECT product_id, product_name, barcode FROM sale_items WHERE product_name = ?'
         )
         .get(REF_NAME) as { product_id: number | null; product_name: string; barcode: string }
-      expect(item.product_id).toBeNull()
+      expect(item.product_id).not.toBeNull()
+      const softDeleted = d
+        .prepare('SELECT deleted FROM products WHERE id = ?')
+        .get(item.product_id) as { deleted: number }
+      expect(softDeleted.deleted).toBe(1)
       expect(item.product_name).toBe(REF_NAME)
       expect(item.barcode).toBe(REF_BARCODE)
     } finally {
@@ -237,7 +242,7 @@ test.describe.serial('F3 QA · B：边界案例', () => {
     await page.screenshot({ path: `${EVIDENCE}/b9-snapshot-readable.png` })
     await page.keyboard.press('Escape')
     await expect(detail).toBeHidden()
-    evidenceLog('B9 PASS: 引用数弹窗 + 硬删 + product_id NULL + 快照明细可读')
+    evidenceLog('B9 PASS: 引用数弹窗 + 软删(deleted=1) + product_id 不断链 + 快照明细可读')
   })
 
   test('B10 空数据日：el-empty + 汇总 0.00/0 + 空表导出', async () => {

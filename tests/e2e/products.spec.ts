@@ -211,21 +211,36 @@ test.describe.serial('商品管理全链路', () => {
     await page.screenshot({ path: '.omo/evidence/task-8-error-cases.png' })
   })
 
-  test('删除（无引用）：确认弹窗明示库存废弃 → 行消失', async () => {
+  test('删除（无引用）：确认弹窗明示不可恢复 → 行消失（软删：DB 行保留 deleted=1）', async () => {
     const { page } = app
+    // 软删后 barcode 置 NULL → 删除前先按条码捕获 productId
+    const productId = productIdByBarcode(app.dbPath, BARCODE)
     await rowByName(page, NAME).getByRole('button', { name: '删除' }).click()
 
     const box = page.locator('.el-message-box')
     await expect(box).toBeVisible()
     await expect(box).toContainText(`确定删除商品「${NAME}」吗？`)
-    await expect(box).toContainText('库存及库存流水将废弃')
+    await expect(box).toContainText('此操作不可恢复')
     await box.getByRole('button', { name: '删除' }).click()
 
     await expect(rowByName(page, NAME)).toHaveCount(0)
     await expect(page.locator('.page-title__count')).toContainText('共 0 款商品')
+
+    // 软删：行保留 deleted=1、barcode 置 NULL（不物理删除）
+    const verify = new Database(app.dbPath, { readonly: true })
+    try {
+      const row = verify.prepare('SELECT deleted, barcode FROM products WHERE id = ?').get(productId) as {
+        deleted: number
+        barcode: string | null
+      }
+      expect(row.deleted).toBe(1)
+      expect(row.barcode).toBeNull()
+    } finally {
+      verify.close()
+    }
   })
 
-  test('删除（带历史引用）：弹窗含引用数文案，快照行保留且 product_id 置 NULL', async () => {
+  test('删除（带历史引用）：弹窗含引用数文案，单据完整保留且 product_id 不断链（软删）', async () => {
     const { page } = app
 
     // 新建商品 B
@@ -255,12 +270,12 @@ test.describe.serial('商品管理全链路', () => {
     await rowByName(page, '农夫山泉 550ml').getByRole('button', { name: '删除' }).click()
     const box = page.locator('.el-message-box')
     await expect(box).toContainText('该商品关联 1 条历史单据')
-    await expect(box).toContainText('保留商品快照')
+    await expect(box).toContainText('单据完整保留')
     await box.getByRole('button', { name: '删除' }).click()
 
     await expect(rowByName(page, '农夫山泉 550ml')).toHaveCount(0)
 
-    // DB 断言：快照行保留、product_id 断链置 NULL、商品行硬删
+    // DB 断言：快照行保留、product_id 保持指向（软删不断链）、商品行软删 deleted=1
     const verify = new Database(app.dbPath, { readonly: true })
     try {
       const item = verify.prepare('SELECT product_id, product_name FROM sale_items').get() as {
@@ -268,10 +283,11 @@ test.describe.serial('商品管理全链路', () => {
         product_name: string
       }
       expect(item.product_name).toBe('农夫山泉 550ml')
-      expect(item.product_id).toBeNull()
-      expect(
-        verify.prepare('SELECT COUNT(*) AS n FROM products WHERE id = ?').get(productId)
-      ).toEqual({ n: 0 })
+      expect(item.product_id).toBe(productId)
+      const product = verify.prepare('SELECT deleted FROM products WHERE id = ?').get(productId) as {
+        deleted: number
+      }
+      expect(product.deleted).toBe(1)
     } finally {
       verify.close()
     }

@@ -9,6 +9,7 @@ import {
   createSaleService
 } from '../../../src/main/services/sale.service'
 import type { SaleErrorCode } from '../../../src/main/services/sale.service'
+import { createProductService } from '../../../src/main/services/product.service'
 import { rmTempDirSync } from '../../helpers/cleanup'
 import type { Sale, StockMovement } from '../../../src/shared/types'
 
@@ -975,6 +976,49 @@ describe('voidSale：SN 回滚（D-SN8）', () => {
 
     // 断链行不写复原流水（既有 skip 语义）
     expect(movements("WHERE source = 'void'")).toHaveLength(0)
+  })
+
+  it('作废时商品已软删（004 迁移链路，经 product.service 删除）：不崩溃、单据正常作废、SN 不复活（级联软删行 WHERE deleted=0 命中 0 行）、库存不复原', () => {
+    const phone = addSnProduct('红米手机')
+    const snId = addSn(phone, 'SN001')
+    const service = svc()
+    const receipt = service.checkout([
+      { product_id: phone, quantity: 1, unit_price_cents: 100, sn: 'SN001' }
+    ])
+    const snItem = saleItemBySn(receipt.id, 'SN001')
+    expect(stockOf(phone)).toBe(0)
+
+    // 已售 SN 不阻删（D-SN15 只拦在库）→ 经 product.service 软删商品
+    const productService = createProductService(db)
+    expect(productService.delete({ id: phone })).toEqual({ ok: true, willOrphan: 1 })
+
+    expect(() => service.voidSale(receipt.id)).not.toThrow()
+
+    // 单据正常作废
+    expect(
+      (
+        db.prepare('SELECT status FROM sales WHERE id = ?').get(receipt.id) as {
+          status: string
+        }
+      ).status
+    ).toBe('voided')
+
+    // SN 行保持级联软删态（deleted=1、status/sale_item_id 冻结——restore
+    // WHERE deleted=0 命中 0 行，不复活）
+    expect(snRowById(snId)).toMatchObject({
+      deleted: 1,
+      status: 'sold',
+      sale_item_id: snItem.id
+    })
+    expect(inStockSnCount(phone)).toBe(0)
+
+    // 软删商品对 getProductSnapshot 不可见 → 库存不复原、不写复原流水
+    // （与 product_id=NULL 断链行同款 skip 语义——两条路径并存）
+    expect(stockOf(phone)).toBe(0)
+    expect(movements("WHERE source = 'void'")).toHaveLength(0)
+
+    // 快照行保留且 product_id 保持指向软删商品（FK 有效——软删链路的意义所在）
+    expect(snItem.product_id).toBe(phone)
   })
 
   it('D-SN13 一致性：结账/作废穿插后 stock 恒等于在库 SN 数（同事务绑定）', () => {

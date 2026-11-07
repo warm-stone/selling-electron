@@ -8,6 +8,7 @@ import { closeDatabase, initDatabase, getDatabase } from '../../../src/main/db/d
 import { rmTempDirSync } from '../../helpers/cleanup'
 import initSql from '../../../src/main/db/migrations/001_init.sql?raw'
 import logosSql from '../../../src/main/db/migrations/002_logos.sql?raw'
+import snProductsSql from '../../../src/main/db/migrations/003_sn_products.sql?raw'
 
 const USER_TABLES = [
   'products',
@@ -65,11 +66,11 @@ afterEach(() => {
 })
 
 describe('migrator：迁移执行器', () => {
-  it('全新 DB 迁移后 user_version=3 且 10 张用户表按具名断言齐全（含 002 logos / 003 product_sns）', () => {
+  it('全新 DB 迁移后 user_version=4 且 10 张用户表按具名断言齐全（含 002 logos / 003 product_sns）', () => {
     const db = newDb()
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(3)
+    expect(db.pragma('user_version', { simple: true })).toBe(4)
 
     const names = tableNames(db)
     for (const t of USER_TABLES) {
@@ -78,7 +79,7 @@ describe('migrator：迁移执行器', () => {
     expect(namedUserTables(db)).toHaveLength(10)
   })
 
-  it('幂等：同一文件二次迁移不重复建表、user_version 保持 3', () => {
+  it('幂等：同一文件二次迁移不重复建表、user_version 保持 4', () => {
     const dbPath = join(dir, 'pos.db')
 
     const first = new Database(dbPath)
@@ -88,7 +89,7 @@ describe('migrator：迁移执行器', () => {
     const second = newDb()
     migrate(second)
 
-    expect(second.pragma('user_version', { simple: true })).toBe(3)
+    expect(second.pragma('user_version', { simple: true })).toBe(4)
     for (const t of USER_TABLES) {
       expect(countTable(second, t), `${t} 应只存在一份`).toBe(1)
     }
@@ -135,7 +136,7 @@ describe('migrator：003_sn_products（存量升级）', () => {
 
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(3)
+    expect(db.pragma('user_version', { simple: true })).toBe(4)
 
     const productCols = (
       db.pragma('table_info(products)') as Array<{ name: string }>
@@ -209,13 +210,67 @@ describe('migrator：003_sn_products（存量升级）', () => {
   })
 })
 
+// ══════════════ 004_product_soft_delete（商品软删：存量行无感升级）══════════════
+
+/** 建一个停在 version=3 的存量库（001~003 已应用、004 未应用） */
+function legacyDbV3(): Database.Database {
+  const db = newDb()
+  db.exec(initSql)
+  db.exec(logosSql)
+  db.exec(snProductsSql)
+  db.pragma('user_version = 3')
+  return db
+}
+
+describe('migrator：004_product_soft_delete（存量升级）', () => {
+  it('products.deleted 列存在（NOT NULL DEFAULT 0）且存量行全部 deleted=0', () => {
+    const db = legacyDbV3()
+    const insertProduct = db.prepare(
+      `INSERT INTO products (barcode, name, default_price_cents, stock, tracking, sn_prefix)
+       VALUES (?, ?, ?, ?, 'quantity', '')`
+    )
+    insertProduct.run('6901234567890', '可口可乐 330ml', 350, 24)
+    insertProduct.run(null, '无码面包', null, -3)
+
+    migrate(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(4)
+
+    const productCols = (
+      db.pragma('table_info(products)') as Array<{ name: string; notnull: number; dflt_value: string | null }>
+    ).find((c) => c.name === 'deleted')
+    expect(productCols, 'products 应有 deleted 列').toBeDefined()
+    expect(productCols!.notnull).toBe(1)
+    expect(productCols!.dflt_value).toBe('0')
+
+    const rows = db
+      .prepare('SELECT deleted FROM products ORDER BY id')
+      .all() as Array<{ deleted: number }>
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(row.deleted).toBe(0)
+    }
+  })
+
+  it('全新 DB 迁移后 deleted 列同样就位（DEFAULT 0 兜底，新行免显式赋值）', () => {
+    const db = newDb()
+    migrate(db)
+
+    db.prepare('INSERT INTO products (name) VALUES (?)').run('新行免赋值')
+    const row = db
+      .prepare('SELECT deleted FROM products WHERE name = ?')
+      .get('新行免赋值') as { deleted: number }
+    expect(row.deleted).toBe(0)
+  })
+})
+
 describe('database：连接初始化', () => {
   it('initDatabase 在参数化目录建库：WAL + foreign_keys=ON + 迁移完成', () => {
     const db = initDatabase(dir)
 
     expect(db.pragma('journal_mode', { simple: true })).toBe('wal')
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
-    expect(db.pragma('user_version', { simple: true })).toBe(3)
+    expect(db.pragma('user_version', { simple: true })).toBe(4)
     expect(namedUserTables(db)).toHaveLength(10)
   })
 

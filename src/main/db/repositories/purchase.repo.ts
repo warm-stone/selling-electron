@@ -58,7 +58,7 @@ const SELECT_ITEM_COLS =
 export function createPurchaseRepo(db: Database.Database) {
   // ── 预编译语句 ──
   const stmtGetProduct = db.prepare(
-    'SELECT id, name, barcode, stock, tracking FROM products WHERE id = ?'
+    'SELECT id, name, barcode, stock, tracking FROM products WHERE id = ? AND deleted = 0'
   )
   // order_no 序列：SQLite 本地时间（与 created_at 的 datetime('now','localtime') 同源），
   // 且在事务内执行（WAL 单写者串行化，无竞态——D18）

@@ -6,15 +6,14 @@
  *   自成原子；被 service 层大事务包裹时 better-sqlite3 自动降级为 SAVEPOINT。
  * - `updateStock`：UPDATE products + INSERT stock_movements（before/after 快照，
  *   source 由调用方指定——G5 审计链）。
- * - `delete`：商品硬删（D15）。快照设计（G4）下 sale_items/purchase_items 的
- *   product_id 断链置 NULL（DDL 未带 ON DELETE SET NULL，由本层等价补齐）；
- *   stock_movements.product_id 为 NOT NULL FK，无法断链，随商品清除
- *   （计划 DDL 约束下的必然选择，决策记录 learnings）。
- *   SN 台账同理：product_sns.product_id 亦为 NOT NULL FK，行无法断链存续，
- *   随商品清除（在库 SN 由 service 层守卫拦截——D-SN15；已售历史靠
- *   sale_items.sn / purchase_items.sn 快照列保留——D-SN12）。
- * - SN 台账读方法（findSnActive/listSns）：仅 deleted=0（D-SN3/4 逻辑删除语义），
- *   已售行经 sale_item_id LEFT JOIN sales 补 sale_id/sale_no（提示原单号用——D-SN17）。
+ * - `delete`：商品逻辑删除（软删——004 迁移）。软删行保留 → sale_items /
+ *   purchase_items 的 product_id FK 全部持续有效（历史单据可完整追溯），
+ *   stock_movements 审计链原样保留；product_sns 级联软删（D-SN15 原始意图
+ *   就地实现——行存续、deleted=1）；barcode 置 NULL 释放表级 UNIQUE 占位
+ *   （软删行不占用码空间，历史单据自带条码快照——G4）。
+ * - 全部读方法仅见 deleted=0 行（软删商品对应用不可见）；SN 台账读方法
+ *   （findSnActive/listSns）亦仅 deleted=0（D-SN3/4 逻辑删除语义），已售行经
+ *   sale_item_id LEFT JOIN sales 补 sale_id/sale_no（提示原单号用——D-SN17）。
  */
 
 import type Database from 'better-sqlite3'
@@ -83,19 +82,25 @@ function escapeLike(s: string): string {
 }
 
 export function createProductRepo(db: Database.Database) {
-  const getByIdStmt = db.prepare(`SELECT ${PRODUCT_COLUMNS} FROM products WHERE id = ?`)
+  const getByIdStmt = db.prepare(
+    `SELECT ${PRODUCT_COLUMNS} FROM products WHERE id = ? AND deleted = 0`
+  )
   const getByBarcodeStmt = db.prepare(
-    `SELECT ${PRODUCT_COLUMNS} FROM products WHERE barcode = ?`
+    `SELECT ${PRODUCT_COLUMNS} FROM products WHERE barcode = ? AND deleted = 0`
   )
   const listAllStmt = db.prepare(
-    `SELECT p.*, ${WILL_ORPHAN_EXPR} FROM products p ORDER BY p.id DESC`
+    `SELECT p.*, ${WILL_ORPHAN_EXPR}
+     FROM products p
+     WHERE p.deleted = 0
+     ORDER BY p.id DESC`
   )
   // 名称子串 LIKE %kw%；条码前缀 LIKE kw%（走 idx_products_barcode）
   const searchStmt = db.prepare(
     `SELECT p.*, ${WILL_ORPHAN_EXPR}
      FROM products p
-     WHERE p.name LIKE ? ESCAPE '\\'
-        OR p.barcode LIKE ? ESCAPE '\\'
+     WHERE p.deleted = 0
+       AND (p.name LIKE ? ESCAPE '\\'
+         OR p.barcode LIKE ? ESCAPE '\\')
      ORDER BY p.id DESC`
   )
   const insertProductStmt = db.prepare(
@@ -123,16 +128,18 @@ export function createProductRepo(db: Database.Database) {
   const countPurchaseItemsStmt = db.prepare(
     'SELECT COUNT(*) AS n FROM purchase_items WHERE product_id = ?'
   )
-  const detachSaleItemsStmt = db.prepare(
-    'UPDATE sale_items SET product_id = NULL WHERE product_id = ?'
+  // 软删：行保留 + barcode 置 NULL 释放 UNIQUE 占位（软删行不占用码空间）
+  const softDeleteProductStmt = db.prepare(
+    `UPDATE products
+     SET deleted = 1, barcode = NULL, updated_at = datetime('now','localtime')
+     WHERE id = ?`
   )
-  const detachPurchaseItemsStmt = db.prepare(
-    'UPDATE purchase_items SET product_id = NULL WHERE product_id = ?'
+  // SN 台账级联软删（D-SN15 原始意图：行存续、deleted=1；只刷 active 行幂等）
+  const softDeleteSnsByProductStmt = db.prepare(
+    `UPDATE product_sns
+     SET deleted = 1, updated_at = datetime('now','localtime')
+     WHERE product_id = ? AND deleted = 0`
   )
-  const deleteMovementsStmt = db.prepare(
-    'DELETE FROM stock_movements WHERE product_id = ?'
-  )
-  const deleteProductStmt = db.prepare('DELETE FROM products WHERE id = ?')
 
   // ── SN 台账（product_sns）──
   // 已售行补关联销售单号（LEFT JOIN sale_items + sales；在库行两列均 NULL）
@@ -173,17 +180,14 @@ export function createProductRepo(db: Database.Database) {
     `SELECT COUNT(*) AS n FROM product_sns
      WHERE product_id = ? AND status = 'in_stock' AND deleted = 0`
   )
-  const deleteSnsByProductStmt = db.prepare(
-    'DELETE FROM product_sns WHERE product_id = ?'
-  )
   const listSnPrefixesStmt = db.prepare(
     `SELECT id, name, sn_prefix FROM products
-     WHERE tracking = 'sn' AND sn_prefix != ''
+     WHERE tracking = 'sn' AND sn_prefix != '' AND deleted = 0
      ORDER BY id`
   )
   const listSnPrefixesExcludingStmt = db.prepare(
     `SELECT id, name, sn_prefix FROM products
-     WHERE tracking = 'sn' AND sn_prefix != '' AND id != ?
+     WHERE tracking = 'sn' AND sn_prefix != '' AND deleted = 0 AND id != ?
      ORDER BY id`
   )
 
@@ -270,23 +274,20 @@ export function createProductRepo(db: Database.Database) {
     },
 
     /**
-     * 硬删商品（D15）。事务：断链历史引用（快照行保留）→ 清库存流水 →
-     * 清 SN 台账 → 删商品。
-     * product_sns 行无法断链存续（product_id NOT NULL FK + foreign_keys=ON，
-     * 与 stock_movements 同类约束），随商品清除；在库 SN 由 service 层守卫
-     * 拦截（D-SN15），已售历史靠 sale_items.sn / purchase_items.sn 快照保留（D-SN12）。
-     * @returns willOrphan 断链前的 sale_items + purchase_items 关联行数
+     * 逻辑删除商品（软删——004 迁移）。事务：软删商品行（barcode 置 NULL 释放
+     * UNIQUE 占位）→ 级联软删 SN 台账（active 行全部 deleted=1，行存续）。
+     * 历史单据（sale_items/purchase_items）的 product_id FK 保持有效——
+     * 快照行可完整追溯；stock_movements 审计链原样保留（不删任何行）。
+     * 在库 SN 由 service 层守卫拦截（D-SN15）。
+     * @returns willOrphan 软删时的 sale_items + purchase_items 关联行数
      */
     delete(id: number): number {
       const run = db.transaction((): number => {
         const saleCount = (countSaleItemsStmt.get(id) as { n: number }).n
         const purchaseCount = (countPurchaseItemsStmt.get(id) as { n: number }).n
         const willOrphan = saleCount + purchaseCount
-        detachSaleItemsStmt.run(id)
-        detachPurchaseItemsStmt.run(id)
-        deleteMovementsStmt.run(id)
-        deleteSnsByProductStmt.run(id)
-        deleteProductStmt.run(id)
+        softDeleteProductStmt.run(id)
+        softDeleteSnsByProductStmt.run(id)
         return willOrphan
       })
       return run()
@@ -295,8 +296,8 @@ export function createProductRepo(db: Database.Database) {
     // ── SN 台账（D-SN3/4/16）──
 
     /**
-     * 按 SN 精查未删除行（JOIN products 语义由 FK 保证——product 必在，
-     * 两步读等价且复用 getByIdStmt 避免列名冲突映射）。
+     * 按 SN 精查未删除行（两步读等价且复用 getByIdStmt 避免列名冲突映射；
+     * getByIdStmt 仅见 deleted=0 商品 → 软删商品的 SN 不可见，返回 null）。
      * 收银扫码第一优先级（D-SN5）+ 进货查重（D-SN17）共用。
      */
     findSnActive(sn: string): { sn_row: ProductSnRow; product: Product } | null {
@@ -327,7 +328,7 @@ export function createProductRepo(db: Database.Database) {
       return (countInStockSnsStmt.get(productId) as { n: number }).n
     },
 
-    /** 全部非空 SN 前缀（tracking='sn'；excludeProductId 供编辑自身排除——D-SN14） */
+    /** 全部非空 SN 前缀（tracking='sn' 且未软删——软删商品前缀随之释放；excludeProductId 供编辑自身排除——D-SN14） */
     listSnPrefixes(excludeProductId?: number): ProductPrefixRow[] {
       return (
         excludeProductId === undefined

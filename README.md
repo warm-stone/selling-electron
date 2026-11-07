@@ -36,7 +36,7 @@ main (Electron 主进程)
   同一模板 + 共享字符网格数学 → [ESC/POS 字节流] 与 [HTML 预览] 双渲染同源
 ```
 
-数据模型（8 表）：`products`、`purchase_orders` + `purchase_items`、`sales` + `sale_items`、`stock_movements`（审计链）、`print_templates`、`settings`。销售/进行明细行均含**商品快照字段**（`product_id` 可空），商品硬删后历史单据完整可读。
+数据模型（8 表）：`products`、`purchase_orders` + `purchase_items`、`sales` + `sale_items`、`stock_movements`（审计链）、`print_templates`、`settings`。销售/进货明细行均含**商品快照字段**；商品删除为逻辑删除（软删行保留，`product_id` 引用持续有效），历史单据与审计链完整可读。
 
 ## 技术栈
 

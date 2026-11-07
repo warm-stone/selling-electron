@@ -9,6 +9,7 @@ import {
   type PurchaseService
 } from '../../../src/main/services/purchase.service'
 import { createPurchaseRepo } from '../../../src/main/db/repositories/purchase.repo'
+import { createProductService } from '../../../src/main/services/product.service'
 import { insertProduct } from '../../fixtures/seed'
 import { rmTempDirSync } from '../../helpers/cleanup'
 import type { PurchaseInputItem, StockMovement } from '../../../src/shared/types'
@@ -140,6 +141,22 @@ describe('purchase.service：入库事务原子性', () => {
     ).toThrow(/商品不存在/)
     expect(countRows('purchase_orders')).toBe(0)
     expect(getStock(colaId)).toBe(100)
+  })
+
+  it('软删商品进货 → 同样商品不存在拒绝且整单回滚（004 迁移：读过滤 deleted=0）', () => {
+    createProductService(db).delete({ id: spriteId })
+
+    expect(() =>
+      service.createPurchase([
+        { kind: 'quantity', product_id: colaId, quantity: 1, cost_price_cents: 100 },
+        { kind: 'quantity', product_id: spriteId, quantity: 2, cost_price_cents: 120 }
+      ])
+    ).toThrow(/商品不存在/)
+
+    expect(countRows('purchase_orders')).toBe(0)
+    expect(countRows('purchase_items')).toBe(0)
+    expect(getStock(colaId)).toBe(100)
+    expect(getStock(spriteId)).toBe(50)
   })
 })
 

@@ -118,7 +118,7 @@ const api = {
     /** 手动调整库存为绝对目标值（主进程写流水 source='manual'——G5） */
     updateStock: (req: { id: number; stock: number }): Promise<Product> =>
       ipcRenderer.invoke('products:updateStock', req),
-    /** 硬删商品；返回 willOrphan=删除时关联的历史单据行数 */
+    /** 逻辑删除（软删）商品；返回 willOrphan=删除时关联的历史单据行数 */
     delete: (id: number): Promise<{ ok: true; willOrphan: number }> =>
       ipcRenderer.invoke('products:delete', { id }),
     /** 按 SN 精查（收银扫码第一优先级 D-SN5；未命中/已删除返回 null） */
