@@ -3,13 +3,14 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import BarcodeInput from '@renderer/components/scanner/BarcodeInput.vue'
 import CartPanel from '@renderer/components/cart/CartPanel.vue'
+import CheckoutDialog from '@renderer/components/cart/CheckoutDialog.vue'
 import ReceiptPreviewDialog from '@renderer/components/receipt/ReceiptPreviewDialog.vue'
 import SnEntryDialog from '@renderer/components/pos/SnEntryDialog.vue'
 import { useCartStore } from '@renderer/stores/cart.store'
 import { usePrintingStore } from '@renderer/stores/printing.store'
 import { createTypedInvoke } from '../../../shared/types/ipc'
 import { formatMoney } from '../../../shared/utils/money'
-import type { Product, SaleDetail } from '../../../shared/types'
+import type { CheckoutExtrasInput, Product } from '../../../shared/types'
 
 /**
  * 收银台（Task 11）：扫码枪（主进程桥推送）+ 搜索双击加购 → 购物车 → 结账。
@@ -118,6 +119,9 @@ function rowClassName({ row }: { row: ProductRow }): string {
 // ── 扫码回调（async 查询不阻塞：回调即时返回）──
 
 function handleBarcode(code: string): void {
+  // 结账弹窗打开期间忽略扫码：模态输入客户/订单信息中，扫码不应加购或
+  // 抖动背后搜索框（弹窗自身无扫码目标）；关闭弹窗后恢复原链路
+  if (checkoutDialogVisible.value) return
   searchText.value = code
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => void loadProducts(), SEARCH_DEBOUNCE_MS)
@@ -164,13 +168,26 @@ function flashSearchMiss(): void {
   }, MISS_FLASH_MS)
 }
 
-// ── 结账（Task 15：成功回调 → printing:preview → ReceiptPreviewDialog）──
+// ── 结账（Task 10：弹窗收集客户/订单附加信息；Task 15：成功回调 → printing:preview）──
 
 const checkingOut = ref(false)
 const printing = usePrintingStore()
 
-async function checkout(): Promise<void> {
+/** 结账弹窗开关（Task 10 改造：CartPanel 结账 → 本弹窗；取消零 IPC 零落库） */
+const checkoutDialogVisible = ref(false)
+
+/**
+ * 结账入口：购物车非空 → 打开结账弹窗（客户/国补/订单备注/销售人员）。
+ * sales:checkout 的 IPC 调用移入弹窗确认回调（onCheckoutConfirm），
+ * 成功后链路（清车/预览/刷新）语义与旧直连结账完全一致。
+ */
+function checkout(): void {
   if (cart.items.length === 0) return
+  checkoutDialogVisible.value = true
+}
+
+/** 弹窗确认回调：表单 extras + 购物车 items → sales:checkout；失败弹窗不关可改后重试 */
+async function onCheckoutConfirm(extras: CheckoutExtrasInput | undefined): Promise<void> {
   checkingOut.value = true
   try {
     const items = cart.items.map((it) => ({
@@ -179,12 +196,14 @@ async function checkout(): Promise<void> {
       unit_price_cents: it.unit_price_cents,
       sn: it.sn
     }))
-    const sale = (await typedInvoke('sales:checkout', { items })) as SaleDetail
-    // 销售已落库（G3 基线）：清车/刷新先于预览——预览或打印失败绝不影响已保存销售
+    const sale = await window.api.sales.checkout(items, extras)
+    // 销售已落库（G3 基线）：关弹窗/清车/刷新先于预览——预览或打印失败绝不影响已保存销售
+    checkoutDialogVisible.value = false
     cart.clear()
     void printing.openPreview(sale.id)
     await loadProducts()
   } catch (err) {
+    // SaleServiceError 经 IPC rejected 为中文 message；弹窗不关，可修改后重试
     ElMessage.error(extractIpcErrorMessage(err))
   } finally {
     checkingOut.value = false
@@ -264,13 +283,20 @@ onBeforeUnmount(() => {
       </el-table>
     </div>
 
-    <CartPanel class="pos-right" :checking-out="checkingOut" @checkout="void checkout()" />
+    <CartPanel class="pos-right" :checking-out="checkingOut" @checkout="checkout()" />
 
     <!-- Task 15：结账成功 → 小票预览弹窗（与销售记录重打共用，printing store 全局状态） -->
     <ReceiptPreviewDialog />
 
     <!-- SN 商品加购弹窗（双击 / 扫商品码命中 → 录 SN——D-SN5，T2.A） -->
     <SnEntryDialog v-model:visible="snDialogVisible" :product="snDialogProduct" />
+
+    <!-- Task 10：结账弹窗（客户/订单附加信息；确认回调走 sales:checkout 原成功链路） -->
+    <CheckoutDialog
+      v-model:visible="checkoutDialogVisible"
+      :submitting="checkingOut"
+      @confirm="onCheckoutConfirm"
+    />
   </section>
 </template>
 
