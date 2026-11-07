@@ -148,3 +148,11 @@
 - **行号漂移自检**：同一测试在 HEAD 报 504:7、在 4920f1f 报 495:7——差值恰为工作区未提交的 +19 行（我的插入），证明两处跑的是不同版本测试文件，判别口径自洽
 - **smoke 菜单计数的隐性第二处**：加 NAV_ITEMS 条目必须同步 IMPLEMENTED_ROUTES——smoke 第 3 用例遍历点击 NAV_ITEMS，未实现路由断言占位页（placeholder-page__title/建设中）；新路由已实现却不加白名单 → 对真实页面断言占位必挂。标题/count/数组三处之外容易漏这处
 - **最终收口状态**：基线 88/88 全绿（75+smoke 恢复 3+customer-extras 10）；qa 8 passed/1 failed（A1-进货，实证存量）+11 serial 级联——「属存量 → 其余全绿即可」达成，无本计划新增失败
+
+## L3：F2 审查 3 个 minor nit 清理（零行为变化）
+
+- **`req?.extras ?? undefined` 是恒等式**：optional chaining 的结果类型本身就是 `T | undefined`，`?? undefined` 纯冗余——IPC 薄层里同模式的 `req?.items ?? []` 有语义（缺省空数组），但 extras 的缺省值就是 undefined，两者别混淆
+- **extractIpcErrorMessage 实为 5 份拷贝而非 4 份**：grep 全仓才发现 stores/printing.store.ts 还藏着一份（T8 模式，实现语义相同但 `matched[1]` 无非空断言 `!`）。因不在 L3 授权文件集（与 L1/L2 并行零交集约束）未动，留待后续 nit——下次提取公共 util 前先全仓 grep，别信审查报告的计数
+- **renderer 专属 util 选址**：renderer/src 下原本没有 utils/ 目录（formatMoney 在 shared/utils），本次新建 `renderer/src/utils/ipc-error.ts` 并以 `@renderer/utils/...` 别名 import（与 `@renderer/stores`、`@renderer/components` 既有惯例对齐）——跨 main/renderer 复用的才进 shared，纯 renderer 的放这里
+- **动态 SQL 语句缓存的键设计**：照 customer.repo updateStmtCache 模式，cacheKey = 白名单列名 `join(',')`；列联合类型用 `type UpsertCol = (typeof UPSERT_COLUMNS)[number]['col']` 从 as const 数组派生，避免手写重复且无注入面（列名非用户输入）
+- **并行任务下的验证归因法**：vitest 唯一失败先查 git status/diff 对照改动归属，再看错误栈调用链——本次失败测试直调 `service.checkout` 在 `assertValidExtras` 抛错（L1/L2 自己的校验收紧 vs 测试期望中间态），链路不经过 IPC 层/视图层/repo 层任何我改的文件；两次运行失败数 2→1 也佐证对方活跃推进中。禁止越界代修并行领域的测试
