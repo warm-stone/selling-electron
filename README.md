@@ -6,11 +6,12 @@ Windows 桌面销存系统（POS / 进销存）：Electron + Vue 3 + TypeScript 
 
 - **商品管理**：新增（条码/名称/初始库存）/ 编辑 / 删除 / 搜索（名称或条码）；库存调整留审计流水
 - **进货管理**：采购入库单（多商品行），事务内自动增加库存并写流水
-- **销售结账**：扫码或双击加购、购物车数量/单价可改、自动合计；一键结账（事务扣库存）后弹小票预览；允许负库存（商品列表标红提示）
+- **销售结账**：扫码或双击加购、购物车数量/单价可改、自动合计；结账弹窗可填客户信息（姓名/电话/地址/客户备注，电话自动关联已有客户）与订单信息（是否参与国补/订单备注/销售人员，销售人员缓存最近输入快选）；事务扣库存后弹小票预览；允许负库存（商品列表标红提示）
+- **客户管理**：客户档案（电话唯一去重），列表搜索 / 新增 / 编辑；结账与订单侧按电话自动建档关联，客户信息修改后历史订单实时显示最新
 - **作废销售**：整单作废（事务回滚库存，报表自动剔除）
-- **销售记录**：按日期/单号/商品筛选，双击查看明细，随时重打小票（使用当前模板）
-- **报表**：日报 / 月报（按日分桶），导出 `.txt` / `.xlsx` / `.docx`
-- **小票打印**：模板体系（表单式编辑 + 实时预览，58mm/80mm 双纸宽）、ESC/POS 指令直发（粗体/倍高倍宽/居中/自动切纸/Logo）、三种通道（Windows spooler RAW 主通道 / tcp 辅 / 串口备）、打印串行队列（连续结账不交叠）
+- **销售记录**：按日期/状态/客户姓名/电话/是否国补筛选，列表含国补/销售人员/订单备注/客户列，双击查看明细（可修改国补/订单备注/销售人员/客户关联），随时重打小票（使用当前模板）
+- **报表**：日报 / 月报（按日分桶，日报含国补销售额小计与明细两列），导出 `.txt` / `.xlsx` / `.docx`
+- **小票打印**：模板体系（表单式编辑 + 实时预览 + 可用变量说明区，58mm/80mm 双纸宽）、ESC/POS 指令直发（粗体/倍高倍宽/居中/自动切纸/Logo）、三种通道（Windows spooler RAW 主通道 / tcp 辅 / 串口备）、打印串行队列（连续结账不交叠）
 - **设置**：店铺信息、打印机通道配置、Logo 上传
 
 ## 架构（文字版）
@@ -36,7 +37,7 @@ main (Electron 主进程)
   同一模板 + 共享字符网格数学 → [ESC/POS 字节流] 与 [HTML 预览] 双渲染同源
 ```
 
-数据模型（8 表）：`products`、`purchase_orders` + `purchase_items`、`sales` + `sale_items`、`stock_movements`（审计链）、`print_templates`、`settings`。销售/进货明细行均含**商品快照字段**；商品删除为逻辑删除（软删行保留，`product_id` 引用持续有效），历史单据与审计链完整可读。
+数据模型（10 表）：`products`、`purchase_orders` + `purchase_items`、`sales` + `sale_items`、`customers` + `sale_extras`（1:1 订单附加：客户引用/国补/订单备注/销售人员）、`stock_movements`（审计链）、`print_templates`、`settings`。销售/进货明细行均含**商品快照字段**；客户信息为引用（改档案后历史订单显示最新）；商品删除为逻辑删除（软删行保留，`product_id` 引用持续有效），历史单据与审计链完整可读。
 
 ## 技术栈
 
@@ -47,7 +48,7 @@ main (Electron 主进程)
 | 存储 | better-sqlite3 v13（N-API prebuilds，免 rebuild；WAL 模式；`PRAGMA user_version` 迁移） |
 | 打印 | node-thermal-printer（ESC/POS 指令生成，纯函数零 I/O） |
 | 导出 | exceljs（xlsx）/ docx（.docx）/ 原生 txt（UTF-8 BOM + CRLF） |
-| 测试 | vitest（单元 + golden 字节矩阵，423 用例）+ Playwright `_electron`（E2E，63 场景） |
+| 测试 | vitest（单元 + golden 字节矩阵，705 用例）+ Playwright `_electron`（E2E 基线 91 场景 + qa 终审套件 20 场景） |
 | 打包 | electron-builder 26（NSIS） |
 
 ## 开发
@@ -58,7 +59,7 @@ main (Electron 主进程)
 npm install        # postinstall 自动补齐 Electron 二进制（install-electron）
 npm run dev        # 启动开发（HMR）
 npm run typecheck  # 类型检查（node + web 两侧）
-npm test           # vitest 单元测试（423 用例）
+npm test           # vitest 单元测试（705 用例）
 npm run test:e2e   # Playwright E2E（globalSetup 自动先构建 out/）
 npm run build      # 构建 out/（main/preload/renderer）
 ```
