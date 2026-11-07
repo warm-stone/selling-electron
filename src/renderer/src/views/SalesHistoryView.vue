@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ReceiptPreviewDialog from '@renderer/components/receipt/ReceiptPreviewDialog.vue'
 import { usePrintingStore } from '@renderer/stores/printing.store'
 import { createTypedInvoke } from '../../../shared/types/ipc'
-import type { Sale, SaleDetail, SaleStatus } from '../../../shared/types/domain'
+import type { IpcChannels } from '../../../shared/types/ipc'
+import type { Customer, Sale, SaleDetail, SaleStatus } from '../../../shared/types/domain'
 
 /**
  * 销售记录查询（Task 13）：日期范围 + 状态筛选 + 列表 + 明细（快照列）+ 作废 + 重打入口。
@@ -15,6 +16,16 @@ import type { Sale, SaleDetail, SaleStatus } from '../../../shared/types/domain'
  * - 分页为本地分页（T10 sales:list IPC 未暴露 page 参数，单次最多返回 50 条；
  *   POS 场景按日筛选下足够，真正服务端分页待契约扩展）。
  * - 重打为 T15 打印编排的挂接点：按钮 + saleId 传递；printing:preview 通道 T15 才实装。
+ * - 明细弹窗附加信息区（customer-order-extras 计划任务 12）：
+ *   - 展示区：客户信息（extras.customer 引用最新——改档案后重开立即反映，与商品
+ *     快照列刻意对照）+ 订单附加（国补 tag 渲染照 ReportsView 惯例：true 才有
+ *     el-tag，false 纯文本「否」——保 .el-tag 计数）。
+ *   - 编辑区（仅 completed 单可见；voided 前置隐藏——Q4，后端还会拒）：国补 /
+ *     客户电话（失焦查全等项：命中「将关联」/清空「将解绑」——Q5）/ 销售人员
+ *     （filterable+allow-create，选项来自 recent_salespersons）/ 订单备注。
+ *   - 保存走 sales:updateExtra patch 语义：undefined=不动（未变字段不进 patch）、
+ *     customer:null=显式解绑、customer 裸值=按电话 find-or-create（传命中档案
+ *     原值回传，避免 PUT 覆盖丢数据）。
  */
 const typedInvoke = createTypedInvoke(window.api.invoke)
 
@@ -91,10 +102,177 @@ const detail = ref<SaleDetail | null>(null)
 
 async function openDetail(sale: Sale): Promise<void> {
   try {
-    detail.value = await typedInvoke('sales:detail', { sale_id: sale.id })
+    const d = await typedInvoke('sales:detail', { sale_id: sale.id })
+    detail.value = d
+    initExtraEdit(d)
+    // 编辑区选项仅 completed 单需要（voided 无编辑入口，不多打一次 IPC）
+    if (d.status === 'completed') {
+      void loadSalespersonOptions()
+    }
     detailVisible.value = true
   } catch (err) {
     ElMessage.error(errorMessage(err))
+  }
+}
+
+// ── 附加信息编辑区（customer-order-extras 任务 12；仅 completed 单渲染）──
+
+/** sales:updateExtra patch 形状（与 preload SalesApi.updateExtra 第二参同源派生） */
+type SaleExtraPatch = Omit<IpcChannels['sales:updateExtra']['req'], 'sale_id'>
+
+/** 编辑区四字段（初值=当前值快照，diff 后才进 patch——undefined=不动语义） */
+interface ExtraEditState {
+  isSubsidy: boolean
+  orderNote: string
+  salesperson: string
+  customerPhone: string
+}
+
+const extraForm = reactive<ExtraEditState>({
+  isSubsidy: false,
+  orderNote: '',
+  salesperson: '',
+  customerPhone: ''
+})
+
+/** 打开/保存后重拍的初值快照（非响应式即可——比较只依赖 extraForm 的变化） */
+let extraInitial: ExtraEditState = { isSubsidy: false, orderNote: '', salesperson: '', customerPhone: '' }
+
+const extraSaving = ref(false)
+const salespersonOptions = ref<string[]>([])
+
+// ── 客户电话联想（Q5：失焦查全等项；命中「将关联」/清空「将解绑」/不变不提示）──
+
+type PhoneHintKind = 'match' | 'unbind' | 'new'
+
+const phoneHintKind = ref<PhoneHintKind | null>(null)
+const phoneMatch = ref<Customer | null>(null)
+
+const phoneHintText = computed<string>(() => {
+  switch (phoneHintKind.value) {
+    case 'match':
+      return `将关联：${phoneMatch.value?.name ?? ''}`
+    case 'unbind':
+      return '将解绑客户（保存后生效）'
+    case 'new':
+      return `将以「${extraForm.customerPhone.trim()}」新建客户`
+    default:
+      return ''
+  }
+})
+
+/** 编辑区初值 = 当前附加值（旧单 extras null 全走默认散客态） */
+function initExtraEdit(d: SaleDetail): void {
+  const e = d.extras
+  extraForm.isSubsidy = e?.is_national_subsidy ?? false
+  extraForm.orderNote = e?.order_note ?? ''
+  extraForm.salesperson = e?.salesperson ?? ''
+  extraForm.customerPhone = e?.customer?.phone ?? ''
+  extraInitial = {
+    isSubsidy: extraForm.isSubsidy,
+    orderNote: extraForm.orderNote,
+    salesperson: extraForm.salesperson,
+    customerPhone: extraForm.customerPhone
+  }
+  phoneHintKind.value = null
+  phoneMatch.value = null
+}
+
+/** 最近销售人员下拉（settings:getRecentSalespersons）；失败静默清空——allow-create 手输兜底，不阻断编辑 */
+async function loadSalespersonOptions(): Promise<void> {
+  try {
+    salespersonOptions.value = await window.api.settings.getRecentSalespersons()
+  } catch {
+    salespersonOptions.value = []
+  }
+}
+
+const hasExtraChanges = computed(() => {
+  if (detail.value?.status !== 'completed') return false
+  return (
+    extraForm.isSubsidy !== extraInitial.isSubsidy ||
+    extraForm.orderNote.trim() !== extraInitial.orderNote ||
+    extraForm.salesperson.trim() !== extraInitial.salesperson ||
+    extraForm.customerPhone.trim() !== extraInitial.customerPhone
+  )
+})
+
+/** 按 keyword 查客户列表后取电话全等命中（list 是子串匹配，全等才算关联） */
+async function resolvePhoneMatch(phone: string): Promise<Customer | null> {
+  const res = await window.api.customers.list({ keyword: phone })
+  return res.items.find((c) => c.phone === phone) ?? null
+}
+
+async function onPhoneBlur(): Promise<void> {
+  const phone = extraForm.customerPhone.trim()
+  // 与当前关联一致（含同为空）→ 不动语义：无提示、不进 patch
+  if (phone === extraInitial.customerPhone) {
+    phoneHintKind.value = null
+    phoneMatch.value = null
+    return
+  }
+  if (phone === '') {
+    // 走到这里必是「原有关联被清空」→ 显式解绑（保存时 customer: null）
+    phoneHintKind.value = 'unbind'
+    phoneMatch.value = null
+    return
+  }
+  const hit = await resolvePhoneMatch(phone)
+  // 查询期间输入又变了：过期结果不展示（下次失焦重新判定）
+  if (extraForm.customerPhone.trim() !== phone) return
+  phoneMatch.value = hit
+  phoneHintKind.value = hit ? 'match' : 'new'
+}
+
+async function saveExtra(): Promise<void> {
+  const current = detail.value
+  if (!current || current.status !== 'completed' || extraSaving.value) return
+
+  // patch 只含用户实际改动意图的字段（undefined=不动——后端部分键 upsert 语义）
+  const patch: SaleExtraPatch = {}
+  if (extraForm.isSubsidy !== extraInitial.isSubsidy) {
+    patch.is_national_subsidy = extraForm.isSubsidy
+  }
+  if (extraForm.orderNote.trim() !== extraInitial.orderNote) {
+    patch.order_note = extraForm.orderNote
+  }
+  if (extraForm.salesperson.trim() !== extraInitial.salesperson) {
+    patch.salesperson = extraForm.salesperson
+  }
+  const phone = extraForm.customerPhone.trim()
+  if (phone !== extraInitial.customerPhone) {
+    if (phone === '') {
+      patch.customer = null
+    } else {
+      // 命中档案原值回传（后端 find-or-create 命中则 PUT 覆盖，同值覆写不丢数据）；
+      // 未命中传空串 → 建裸电话客户（name 可后续在客户管理补录）
+      const hit =
+        phoneMatch.value?.phone === phone ? phoneMatch.value : await resolvePhoneMatch(phone)
+      patch.customer = {
+        name: hit?.name ?? '',
+        phone,
+        address: hit?.address ?? '',
+        note: hit?.note ?? ''
+      }
+    }
+  }
+
+  if (Object.keys(patch).length === 0) return
+
+  extraSaving.value = true
+  try {
+    // res 即更新后明细（头+items+extras）——赋值即刷新，展示区/表单立即对齐新值
+    const updated = await window.api.sales.updateExtra(current.id, patch)
+    detail.value = updated
+    initExtraEdit(updated)
+    ElMessage.success('附加信息已保存')
+    // salesperson 改动会让后端记忆 recent 列表 → 重取下拉选项
+    void loadSalespersonOptions()
+  } catch (err) {
+    // SALE_ALREADY_VOIDED / 国补需姓名电话等中文文案原样展示（弹窗保持编辑态可重试）
+    ElMessage.error(errorMessage(err))
+  } finally {
+    extraSaving.value = false
   }
 }
 
@@ -269,6 +447,150 @@ function centsToYuan(cents: number): string {
             <template #default="{ row }">{{ centsToYuan(row.subtotal_cents) }}</template>
           </el-table-column>
         </el-table>
+
+        <!-- ── 附加信息展示区（T12：customer 为引用最新——改档案后重开立即反映）── -->
+        <div class="sales-history__extras" data-testid="detail-extras">
+          <div class="extras-panel">
+            <div class="extras-panel__col">
+              <h4 class="extras-panel__title">客户信息</h4>
+              <template v-if="detail.extras?.customer">
+                <div class="extras-panel__row">
+                  <span class="extras-panel__label">姓名</span>
+                  <span class="extras-panel__value" data-testid="detail-customer-name">{{
+                    detail.extras.customer.name || '—'
+                  }}</span>
+                </div>
+                <div class="extras-panel__row">
+                  <span class="extras-panel__label">电话</span>
+                  <span class="extras-panel__value" data-testid="detail-customer-phone">{{
+                    detail.extras.customer.phone || '—'
+                  }}</span>
+                </div>
+                <div class="extras-panel__row">
+                  <span class="extras-panel__label">地址</span>
+                  <span class="extras-panel__value" data-testid="detail-customer-address">{{
+                    detail.extras.customer.address || '—'
+                  }}</span>
+                </div>
+                <div class="extras-panel__row">
+                  <span class="extras-panel__label">客户备注</span>
+                  <span class="extras-panel__value" data-testid="detail-customer-note">{{
+                    detail.extras.customer.note || '—'
+                  }}</span>
+                </div>
+              </template>
+              <p
+                v-else
+                class="extras-panel__placeholder"
+                data-testid="detail-customer-placeholder"
+              >
+                散客（未填写客户信息）
+              </p>
+            </div>
+            <div class="extras-panel__col">
+              <h4 class="extras-panel__title">订单附加</h4>
+              <div class="extras-panel__row">
+                <span class="extras-panel__label">是否国补</span>
+                <!-- true 才渲染 el-tag（ReportsView 惯例）：false 纯文本「否」——保 .el-tag 计数 -->
+                <span class="extras-panel__value" data-testid="detail-subsidy">
+                  <el-tag
+                    v-if="detail.extras?.is_national_subsidy"
+                    type="success"
+                    disable-transitions
+                  >
+                    国补
+                  </el-tag>
+                  <span v-else>否</span>
+                </span>
+              </div>
+              <div class="extras-panel__row">
+                <span class="extras-panel__label">订单备注</span>
+                <span class="extras-panel__value" data-testid="detail-order-note">{{
+                  detail.extras?.order_note || '—'
+                }}</span>
+              </div>
+              <div class="extras-panel__row">
+                <span class="extras-panel__label">销售人员</span>
+                <span class="extras-panel__value" data-testid="detail-salesperson">{{
+                  detail.extras?.salesperson || '—'
+                }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 附加信息编辑区（仅 completed 单可见；voided 前置隐藏——Q4）── -->
+        <div
+          v-if="detail.status === 'completed'"
+          class="sales-history__extra-edit"
+          data-testid="extra-edit"
+        >
+          <el-divider class="sales-history__edit-divider">修改附加信息</el-divider>
+          <el-form class="sales-history__edit-form" label-width="96px">
+            <el-form-item label="国补">
+              <el-switch v-model="extraForm.isSubsidy" data-testid="extra-is-subsidy" />
+            </el-form-item>
+            <el-form-item label="客户电话">
+              <el-input
+                v-model="extraForm.customerPhone"
+                maxlength="32"
+                placeholder="输入新电话失焦自动匹配客户；清空即解绑"
+                data-testid="extra-customer-phone"
+                @blur="onPhoneBlur"
+              />
+              <div
+                v-if="phoneHintKind"
+                class="sales-history__phone-hint"
+                :class="`sales-history__phone-hint--${phoneHintKind}`"
+                data-testid="extra-phone-hint"
+              >
+                {{ phoneHintText }}
+              </div>
+            </el-form-item>
+            <el-form-item label="销售人员">
+              <el-select
+                v-model="extraForm.salesperson"
+                filterable
+                allow-create
+                default-first-option
+                clearable
+                placeholder="选择或输入销售人员"
+                data-testid="extra-salesperson"
+              >
+                <el-option
+                  v-for="name in salespersonOptions"
+                  :key="name"
+                  :label="name"
+                  :value="name"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="订单备注">
+              <el-input
+                v-model="extraForm.orderNote"
+                type="textarea"
+                :rows="2"
+                maxlength="200"
+                show-word-limit
+                data-testid="extra-order-note"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                type="primary"
+                :loading="extraSaving"
+                :disabled="!hasExtraChanges"
+                data-testid="extra-save"
+                @click="saveExtra"
+              >
+                保存修改
+              </el-button>
+              <span class="sales-history__edit-scope">
+                仅客户/国补/备注/销售人员可修改；金额与商品明细不可改
+              </span>
+            </el-form-item>
+          </el-form>
+        </div>
       </template>
     </el-dialog>
     <!-- Task 15：重打预览弹窗（与收银台结账共用，printing store 全局状态） -->
@@ -334,6 +656,90 @@ function centsToYuan(cents: number): string {
 .sales-history__detail-meta {
   margin: 0 0 12px;
   font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+/* ── 明细弹窗：附加信息展示区（浅底双栏面板，延续 ProductsView 台账面板气质）── */
+.sales-history__extras {
+  margin-top: 12px;
+}
+
+.extras-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 28px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background-color: var(--el-fill-color-lighter);
+}
+
+.extras-panel__title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--el-text-color-primary);
+}
+
+.extras-panel__row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.extras-panel__label {
+  flex-shrink: 0;
+  width: 60px;
+  color: var(--el-text-color-secondary);
+}
+
+.extras-panel__value {
+  min-width: 0;
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+}
+
+.extras-panel__placeholder {
+  margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* ── 明细弹窗：附加信息编辑区（仅 completed 单渲染）── */
+.sales-history__edit-divider {
+  margin: 16px 0 14px;
+}
+
+.sales-history__edit-form :deep(.el-select) {
+  width: 100%;
+}
+
+.sales-history__phone-hint {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sales-history__phone-hint--match {
+  color: var(--el-color-success);
+}
+
+.sales-history__phone-hint--unbind {
+  color: var(--el-color-warning);
+}
+
+.sales-history__phone-hint--new {
+  color: var(--el-color-primary);
+}
+
+.sales-history__edit-scope {
+  margin-left: 12px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--el-text-color-secondary);
 }
 </style>
