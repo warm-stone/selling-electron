@@ -4,6 +4,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue'
 import type { Product, ProductSn, ProductTracking } from '../../../shared/types'
+import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 
 /**
  * 商品管理页（Task 8 + SN Wave 3C）：搜索（防抖 300ms）+ 新增/编辑（元↔分边界
@@ -94,13 +95,6 @@ function yuanToCents(yuan: number | null): number | null {
 
 function centsToYuan(cents: number | null): number | null {
   return cents === null ? null : cents / 100
-}
-
-/** 剥去 Electron invoke 错误包装前缀，取用户可读的中文 message */
-function extractIpcErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const matched = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
-  return matched ? matched[1]! : raw
 }
 
 // ── 数据加载与搜索 ──

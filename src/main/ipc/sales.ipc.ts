@@ -47,7 +47,7 @@ export function registerSalesIpc(db: Database.Database): void {
 
   ipcMain.handle('sales:checkout', (_event, req: CheckoutRequest) =>
     // extras 缺省 undefined = 散客快单路径（service 侧不落 sale_extras 行）
-    service.checkout(req?.items ?? [], req?.extras ?? undefined)
+    service.checkout(req?.items ?? [], req?.extras)
   )
 
   ipcMain.handle('sales:void', (_event, req: VoidRequest) =>

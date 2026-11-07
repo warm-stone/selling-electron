@@ -4,6 +4,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { Edit, Plus, Search } from '@element-plus/icons-vue'
 import type { Customer } from '../../../shared/types'
+import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 
 /**
  * 客户管理页（Task 11）：搜索（防抖 300ms，keyword 匹配姓名/电话）+ 新增/编辑
@@ -66,13 +67,6 @@ const rules: FormRules = {
 const emptyDescription = computed(() =>
   searchText.value.trim().length > 0 ? '未找到匹配客户，换个关键词试试' : '暂无客户'
 )
-
-/** 剥去 Electron invoke 错误包装前缀，取用户可读的中文 message（含现有客户姓名） */
-function extractIpcErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const matched = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
-  return matched ? matched[1]! : raw
-}
 
 // ── 数据加载与搜索（服务端分页：limit 固定 20，翻页靠 offset）──
 

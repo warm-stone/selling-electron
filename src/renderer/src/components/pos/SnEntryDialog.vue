@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useCartStore } from '@renderer/stores/cart.store'
+import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 import type { Product } from '../../../../shared/types'
 
 /**
@@ -65,12 +66,6 @@ watch(
 onBeforeUnmount(teardownBarcode)
 
 // ── 确认：findSn 四态校验 → 加购 SN 行 ──
-
-function extractIpcErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const matched = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
-  return matched ? matched[1]! : raw
-}
 
 async function confirmSn(): Promise<void> {
   const sn = snInput.value.trim()

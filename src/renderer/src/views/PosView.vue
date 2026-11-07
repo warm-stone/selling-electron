@@ -8,6 +8,7 @@ import ReceiptPreviewDialog from '@renderer/components/receipt/ReceiptPreviewDia
 import SnEntryDialog from '@renderer/components/pos/SnEntryDialog.vue'
 import { useCartStore } from '@renderer/stores/cart.store'
 import { usePrintingStore } from '@renderer/stores/printing.store'
+import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 import { createTypedInvoke } from '../../../shared/types/ipc'
 import { formatMoney } from '../../../shared/utils/money'
 import type { CheckoutExtrasInput, Product } from '../../../shared/types'
@@ -47,12 +48,6 @@ const MISS_FLASH_MS = 1200
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 let missTimer: ReturnType<typeof setTimeout> | undefined
-
-function extractIpcErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const matched = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
-  return matched ? matched[1]! : raw
-}
 
 async function loadProducts(): Promise<void> {
   loading.value = true

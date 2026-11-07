@@ -46,6 +46,8 @@ const UPSERT_COLUMNS = [
   { col: 'salesperson', key: 'salesperson', default: null as string | null }
 ] as const
 
+type UpsertCol = (typeof UPSERT_COLUMNS)[number]['col']
+
 /** boolean → INTEGER 0/1（DB 无 bool） */
 function boolToInt(b: boolean): number {
   return b ? 1 : 0
@@ -98,6 +100,20 @@ export function createSaleExtraRepo(db: Database.Database) {
      ON CONFLICT(sale_id) DO NOTHING`
   )
 
+  /** 列组合 → 预编译 UPDATE 语句（customer.repo updateStmtCache 同模式：四列非空子集至多 15 个，逐组合缓存；列名白名单无注入面） */
+  const updateStmtCache = new Map<string, Database.Statement>()
+
+  function updateStmtFor(cols: UpsertCol[]): Database.Statement {
+    const cacheKey = cols.join(',')
+    let stmt = updateStmtCache.get(cacheKey)
+    if (!stmt) {
+      const sets = cols.map((c) => `${c} = ?`).join(', ')
+      stmt = db.prepare(`UPDATE sale_extras SET ${sets} WHERE sale_id = ?`)
+      updateStmtCache.set(cacheKey, stmt)
+    }
+    return stmt
+  }
+
   return {
     /**
      * 全字段插入（结账事务内调用）。
@@ -132,12 +148,12 @@ export function createSaleExtraRepo(db: Database.Database) {
         patch.salesperson !== undefined ? patch.salesperson : null
       )
 
-      // 第二步：动态拼 UPDATE——只改 patch 中出现的键
-      const setClauses: string[] = []
+      // 第二步：动态拼 UPDATE——只改 patch 中出现的键（语句按列组合缓存）
+      const cols: UpsertCol[] = []
       const params: (number | string | null)[] = []
       for (const { col, key } of UPSERT_COLUMNS) {
         if (patch[key] !== undefined) {
-          setClauses.push(`${col} = ?`)
+          cols.push(col)
           if (key === 'is_national_subsidy') {
             params.push(boolToInt(patch[key] as boolean))
           } else {
@@ -145,11 +161,9 @@ export function createSaleExtraRepo(db: Database.Database) {
           }
         }
       }
-      if (setClauses.length === 0) return // patch 无键：建行已足够，无需 UPDATE
+      if (cols.length === 0) return // patch 无键：建行已足够，无需 UPDATE
       params.push(saleId)
-      db.prepare(
-        `UPDATE sale_extras SET ${setClauses.join(', ')} WHERE sale_id = ?`
-      ).run(...params)
+      updateStmtFor(cols).run(...params)
     },
 
     /**
