@@ -18,19 +18,23 @@ export function evidenceLog(line: string): void {
   appendFileSync(join(EVIDENCE, 'qa-run.log'), `${new Date().toISOString()} ${line}\n`)
 }
 
-/** 扫码枪注入（S6 定案）：主进程 keyDown 连发（10ms < 50ms 阈值）+ Enter */
+/**
+ * 扫码枪注入（S6 定案）：主进程 keyDown 连发 + Enter（检测器仅要求相邻间隔
+ * ≤50ms，无下限）。节奏用同步连发：原 10ms/键的 setTimeout 在共享机高负载下
+ * 漂移可超 50ms 阈值 → 检测失败，字符散落进聚焦的搜索框（终审实测 flake）；
+ * 同步连发对负载免疫，且把杂散击键可混入的窗口从 ~130ms 压到 ~1ms。
+ */
 export async function scanBarcode(
   electronApp: ElectronApplication,
   code: string
 ): Promise<void> {
   await electronApp.evaluate(
-    async (electron, { code: barcode }) => {
+    (electron, { code: barcode }) => {
       const win = electron.BrowserWindow.getAllWindows()[0]
       const wc = win?.webContents
       if (!wc) throw new Error('QA: 未找到主窗口')
       for (const ch of barcode) {
         wc.sendInputEvent({ type: 'keyDown', keyCode: ch })
-        await new Promise((r) => setTimeout(r, 10))
       }
       wc.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
     },

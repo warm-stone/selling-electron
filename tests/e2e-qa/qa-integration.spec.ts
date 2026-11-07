@@ -23,6 +23,7 @@ import { Workbook } from 'exceljs'
 import Database from 'better-sqlite3'
 import type net from 'node:net'
 import { test, expect, type Locator } from '@playwright/test'
+import { DEFAULT_TEMPLATES } from '../../src/shared/receipt/default-template'
 import {
   EVIDENCE,
   closeApp,
@@ -192,6 +193,13 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
     ).toBeVisible()
 
     const rows = page.locator('.create-form__table .el-table__row')
+    // SN 波次后表单进化（D-SN9）：新建进货单默认 0 行（空态「请添加商品行」），
+    // 原「+ 添加行」拆为【+ 批量计商品】【+ SN 商品】双按钮——照基线 purchases.spec.ts 走批量计入口
+    await expect(rows).toHaveCount(0)
+    await expect(page.locator('.el-dialog .el-empty')).toContainText('请添加商品行')
+    await page.getByTestId('add-quantity-row').click()
+    await expect(rows).toHaveCount(1)
+
     const selectProduct = async (rowIdx: number, keyword: string): Promise<void> => {
       const row = rows.nth(rowIdx)
       const listboxId = await row.locator('.el-select input').getAttribute('aria-controls')
@@ -207,7 +215,8 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
     await rows.nth(0).locator('.el-input-number input').first().fill('20')
     await rows.nth(0).locator('.el-input-number input').nth(1).fill('2.00')
 
-    await page.getByRole('button', { name: '+ 添加行' }).click()
+    await page.getByTestId('add-quantity-row').click()
+    await expect(rows).toHaveCount(2)
     await selectProduct(1, P3_NAME)
     await rows.nth(1).locator('.el-input-number input').first().fill('15')
     await rows.nth(1).locator('.el-input-number input').nth(1).fill('4.00')
@@ -503,10 +512,29 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
 
   test('A3-模板编辑：头部字号倍高 + footer {shopName} 谢谢惠顾 → 保存 → 设默认', async () => {
     const { page } = app
+
+    // 出厂模板造数兜底（基线 template-editor.spec.ts 直插模式）：lazy seed 由
+    // getDefault 触发（serial 全链已由 A1 结账预览走过），定向跑则不经过结账——
+    // 表空时直插出厂双模板（与 template.repo seedDefaults 同构：58mm 非默认 + 80mm 默认）
+    const d0 = db()
+    try {
+      const n = (d0.prepare('SELECT COUNT(*) AS n FROM print_templates').get() as { n: number })
+        .n
+      if (n === 0) {
+        const insert = d0.prepare(
+          'INSERT INTO print_templates (name, paper_width, config_json, is_default) VALUES (?, ?, ?, ?)'
+        )
+        insert.run('默认小票（58mm）', '58mm', JSON.stringify(DEFAULT_TEMPLATES['58mm']), 0)
+        insert.run('默认小票（80mm）', '80mm', JSON.stringify(DEFAULT_TEMPLATES['80mm']), 1)
+      }
+    } finally {
+      d0.close()
+    }
+
     await page.locator('.el-menu-item').filter({ hasText: '小票模板' }).click()
     await waitForRoute(page, '/template-editor')
 
-    // 出厂 lazy seed 两模板：58mm 在前（非默认）、80mm 默认（A1 结账已触发 seed）
+    // 出厂双模板：58mm 在前（非默认）、80mm 默认（serial 由 A1 结账 lazy seed，定向由造数兜底）
     const items = page.getByTestId('tpl-item')
     await expect(items).toHaveCount(2)
     const defaultItem = items.filter({ hasText: '默认小票（80mm）' })
