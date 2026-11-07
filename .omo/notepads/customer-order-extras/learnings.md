@@ -156,3 +156,43 @@
 - **renderer 专属 util 选址**：renderer/src 下原本没有 utils/ 目录（formatMoney 在 shared/utils），本次新建 `renderer/src/utils/ipc-error.ts` 并以 `@renderer/utils/...` 别名 import（与 `@renderer/stores`、`@renderer/components` 既有惯例对齐）——跨 main/renderer 复用的才进 shared，纯 renderer 的放这里
 - **动态 SQL 语句缓存的键设计**：照 customer.repo updateStmtCache 模式，cacheKey = 白名单列名 `join(',')`；列联合类型用 `type UpsertCol = (typeof UPSERT_COLUMNS)[number]['col']` 从 as const 数组派生，避免手写重复且无注入面（列名非用户输入）
 - **并行任务下的验证归因法**：vitest 唯一失败先查 git status/diff 对照改动归属，再看错误栈调用链——本次失败测试直调 `service.checkout` 在 `assertValidExtras` 抛错（L1/L2 自己的校验收紧 vs 测试期望中间态），链路不经过 IPC 层/视图层/repo 层任何我改的文件；两次运行失败数 2→1 也佐证对方活跃推进中。禁止越界代修并行领域的测试
+
+## 任务 T1：销售记录列表后端链路（sales:list 五平铺列 + 三筛选键）
+
+- **双 LEFT JOIN 后同名列必须表限定**：customers 与 sales 同有 id/created_at——原 `date(created_at)`/`ORDER BY id DESC` 不限定会抛 `ambiguous column name`；条件与排序列全改 `sales.` 前缀（语义不动，SQL 必须动）。sale_extras 无 id/created_at 列，`sales.*` + 显式 se 列 + c 别名列无冲突
+- **is_national_subsidy=false 的口径实现**：`(se.is_national_subsidy = 0 OR se.sale_id IS NULL)`——判「无附加行」用 se.sale_id（JOIN 键）而非 se.is_national_subsidy IS NULL（两者等价但前者意图直白）；与 report.repo dailyTotalsStmt 的 `= 1` 不成立→归非国补同源，列表/报表口径天然一致
+- **preload 双文件 IpcChannels 派生的连带清理**：SalesApi.list 从手写 inline 形状改为 `IpcChannels['sales:list']['req'/'res']` 派生后，index.ts/index.d.ts 的 SaleStatus import 双双变冗余——契约派生让形状单一事实源，但 import 清单要跟着 grep（vue-tsc 对 .d.ts 同样报 unused）
+- **escapeLike 行为的测试锁定法**：`customer_name: '%'` 断言返回空——若转义缺失，`LIKE '%%'` 会命中所有有客户的行（张三单）；一个用例锁死注入面，比只测正向命中强
+- **筛选组合测试的客户复用**：同电话 13800138000 第二单经 find-or-create 命中同一客户行（张三）——天然构造「customer_name 命中两单 × 国补态各一」的正交矩阵，无需第二个客户；作废其中一单再叠 status 筛选，六维组合全覆盖
+- **trim 归一层级**：service.list 里 `trimTo(x) || undefined`（空串归 undefined=不过滤）+ repo 层 truthiness 守卫双保险；IPC 薄层零归一原样透传（与 customers:list 的 service 归一惯例对齐）
+
+## 需求变更 W1：销售记录列表平铺五列 + 三筛选（SalesHistoryView）
+
+- **并行契约的时序陷阱**：动手前 grep 契约还是旧形状（`res: Sale[]`），写视图途中 T1 落盘覆盖（domain/ipc/preload 同批出现 SaleListItem）——prompt 契约与 T1 实际产出逐字段一致时直接 import 共享类型，手写临时类型方案作废。教训：并行任务下「上次读取」随时过期，动笔改 refresh 前重读一次契约文件最稳
+- **el-table-column 不透传 attrs 到单元格**：data-testid 写在 `<el-table-column>` 标签上不落 DOM（组件只注册列不渲染根元素）——testid 必须内嵌在 `#default` 模板的 `<span>` 上（既有列无 testid 是因为 E2E 走 td nth；新列有行级断言需求故内嵌 span，多行同 testid 用 locator 行文本/单号定位圈定）
+- **两类筛选触发模式在 filters 区共存**：一次成型选择（date/status radio/国补三态 select）→ watch 直触；文本输入（姓名/电话）→ `@input + @clear` + 300ms 防抖（clearTimeout/setTimeout 照抄 CustomersView，onBeforeUnmount 清残留 timer）——el-input clearable 的清空钮会连发 input+clear 两个事件，防抖天然吸收双触发
+- **三态 select 用 'all' 哨兵而非 undefined 作 el-option value**：EP option 的 value prop 类型 `[String, Number, Boolean, Object]` 不收 undefined（`:value="undefined"` vue-tsc 直接报错）；'all' → loadSales 整键不传。**「整键不传」与 status 的「传 undefined」刻意区分**：vitest 的 toEqual 视 `{a:undefined}` 与 `{}` 相等——测试断言键缺失必须用 `'is_national_subsidy' in payload`，不能用 toEqual/objectContaining 反证
+- **script setup 顶层 ref 可经 wrapper.vm 写入**：Vue 在 handleSetupResult 里对 setupState 做了 proxyRefs 包装，set 落到 ref.value 陷阱 → `vm.subsidyFilter = true` 即触发 watch——三态 select 测试照 setSalesperson 先例走 setupState 直达（el-select popper 交互 jsdom 不便），实测通过
+- **列头序断言手法**：`wrapper.findAll('.sales-history__table th .cell')` → map(text) → filter(非空) → toEqual 全量列名数组——一条断言同时锁「五新列插在状态后操作前」与「操作列最右」（MUST NOT DO 固化为可执行断言的又一例）
+- **全量验证口径**：vitest 43 文件 702 passed + 1 skipped（skip 为既有平台性跳过）+ typecheck:web 零错误；T1 的 sale.service/repo/ipc 测试同批全绿（并行任务同期落盘，无相互踩踏）
+
+### W2 E2E selector 清单（销售记录页新功能）
+- 列表五新列（每行一个，null → '—' 占位）：`[data-testid="list-customer-name"]` / `list-customer-phone` / `list-subsidy`（true → 内含 `.el-tag--success` 文本「国补」；false → 纯文本「否」零 tag）/ `list-salesperson` / `list-order-note`（长文本 show-overflow-tooltip）
+- 列序（表头文本断言可用）：单号/时间/商品数/合计（元）/状态/**姓名/电话/是否国补/销售人员/订单备注**/操作（操作恒最右）
+- 筛选三控件：`[data-testid="filter-customer-name"]`（placeholder「客户姓名（模糊）」，inner input）/ `filter-customer-phone`（「电话（模糊）」）/ `filter-subsidy`（el-select 根元素；三态选项文本 全部/是/否；popper teleport body——选项用 `.el-select-dropdown__item` 文本定位，参考 T14 el-select 手法）
+- 文本筛选 300ms 防抖：E2E 断言列表刷新依赖 Playwright auto-retry 自然覆盖，无需显式 sleep；国补 select 无防抖即点即查
+- **.el-tag 计数新公式（sales-history 行内）**：状态列 N 行 + 国补 true 行 M 个 = N+M（false 纯文本不加 tag）——行级 `.el-tag` 断言务必圈定单行或用 testid 容器
+- 既有 selector 零变化：`date-range` / `status-filter` / 明细弹窗全套（`detail-*` / `extra-*` / `extra-save`）——需求变更零触碰
+
+## 任务 W3：销售记录列表列与筛选 E2E（customer-extras 场景组 10，三套件全绿）
+
+- **W2 selector 清单实测全对**：五列 testid（`list-customer-name/phone/subsidy/salesperson/order-note`，#default 模板 span）+ 三筛选控件（`filter-customer-name/phone` 落 inner input 可直 fill；`filter-subsidy` 落 el-select 根元素）。`.el-tag` 计数公式实测：5 行全 completed（状态 primary ×5）+ 国补 true ×1 = 6；散客单（无 extras 行）国补列是纯文本「否」**不是 '—'**——LEFT JOIN 未命中 is_national_subsidy 为 NULL → repo 层 `=== 1` 归 false → 走「否」分支；姓名/电话/人员/备注四列无 extras 时才 '—'
+- **【实测坑】裸电话客户（name=''）行姓名列显示空白**：列表用 `row.customer_name ?? '—'`（?? 只捕 null）而明细弹窗用 `detail.extras.customer.name || '—'`（|| 也捕空串）——同名数据两处占位口径不同；E2E 断言散客占位必须用「无 extras 行」的单（快单），别用换绑过的裸电话单
+- **el-select 非 filterable 也有 aria-controls**：`filter-subsidy`（普通三态 select）`select.locator('input').getAttribute('aria-controls')` 实测有效——typeIntoSelect 的 aria-controls 圈定手法对非 filterable select 同样适用，点选项即收起无残留拦截
+- **clearable 清空钮的稳定路径**：`page.locator('.el-input__wrapper').filter({ has: input }).hover()` → `.el-input__clear` click——EP 的 clear 图标 hover 态才渲染，直接定位未 hover 会等不到元素；clear 触发 @clear+@input 双发，300ms 防抖吸收为一次刷新（本场景即该设计的 E2E 验证）
+- **筛选空态断言**：`.el-empty__description` 文本「所选日期范围内暂无销售记录」（el-table #empty 槽 → el-empty）；未命中筛选 = 零行 + 该文案
+- **DB 交叉断言口径**：复刻 repo list 的双 LEFT JOIN + 条件（`c.name LIKE '%kw%'` / 三态 false 用 `(se.is_national_subsidy = 0 OR se.sale_id IS NULL)`）+ `date(s.created_at) = TODAY`——UI 行数与 COUNT 对账；国补单行再加 JOIN 平铺值逐字段 toEqual（UI '—' ↔ DB null 的对应）
+- **组合筛选的断言顺序**：文本防抖（300ms 稳态）先等稳再点 select（watch 即触）——两通道刷新时序解耦；收尾清理断言中间态：清姓名时国补仍挂 → 1 行（筛选独立生效可分辨），再切全部 → 5——直接断言 5 会把筛选独立语义测错（实测踩过）
+- **【关键 flake】scanBarcode 启动初期丢前缀字符**：waitForRoute('/pos') 只保证 URL，POS 搜索框 autofocus 完成前 sendInputEvent 注入丢前几个字符（快照实证：13 位条码只进尾 7 位「0000001」）——高机器负载（同机残留 electron-vite dev 进程）放大竞态窗口；修复：addCola 内 `getByPlaceholder('扫码枪即扫即加')` toBeVisible + click 聚焦后再注入（幂等）。此 flake 属既有 helper 竞态非本次列改动引入，但列插列后首跑即暴露
+- **列插入的存量影响面结论（零适配实证）**：grep 全部 spec 的 td nth——sales-history.spec 只用 `td.first()`（单号列位不变）+ 明细弹窗 items 表（未动）；reports 页新列尾部追加且 nth(2..6) 不变；sales-history 行级 `.el-tag` 断言全部有类型限定（--primary/--danger 与国补 --success 互斥）→ 双套件 91/91 + 20/20 零改动全绿
+- **双套件顺序执行**：基线（globalSetup 构建 out/）跑完再跑 qa（无 globalSetup 复用产物）——同机并行双 playwright 互造负载 flake 已实测教训再现（本机残留 dev 进程即例证）
