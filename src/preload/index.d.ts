@@ -90,7 +90,7 @@ export interface CustomersApi {
   /** 新建客户（phone NOT NULL UNIQUE；重号主进程报错） */
   create: (req: IpcChannels['customers:create']['req']) => Promise<Customer>
   /** 局部更新（patch 至少一键；返回更新后全行） */
-  update: (id: number, patch: Omit<IpcChannels['customers:update']['req'], 'id'>) => Promise<Customer>
+  update: (id: number, patch: IpcChannels['customers:update']['req']['patch']) => Promise<Customer>
 }
 
 export interface SettingsApi {

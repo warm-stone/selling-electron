@@ -8,6 +8,7 @@ import {
   Setting,
   ShoppingCart,
   Tickets,
+  User,
   Van
 } from '@element-plus/icons-vue'
 import { useAppStore } from '@renderer/stores/app'
@@ -15,12 +16,13 @@ import { useAppStore } from '@renderer/stores/app'
 const route = useRoute()
 const appStore = useAppStore()
 
-/** 侧边导航：与 router/index.ts 的 7 条业务路由一一对应 */
+/** 侧边导航：与 router/index.ts 的 8 条业务路由一一对应 */
 const menus = [
   { path: '/pos', label: '收银台', icon: ShoppingCart },
   { path: '/products', label: '商品管理', icon: Goods },
   { path: '/purchases', label: '进货管理', icon: Van },
   { path: '/sales-history', label: '销售记录', icon: Tickets },
+  { path: '/customers', label: '客户管理', icon: User },
   { path: '/reports', label: '报表统计', icon: DataAnalysis },
   { path: '/template-editor', label: '小票模板', icon: Printer },
   { path: '/settings', label: '系统设置', icon: Setting }
