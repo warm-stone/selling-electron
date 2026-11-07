@@ -27,6 +27,7 @@ import type {
   CheckoutItem,
   Sale,
   SaleDetail,
+  SaleListItem,
   SaleStatus
 } from '../../shared/types'
 import { createSaleRepo } from '../db/repositories/sale.repo'
@@ -63,11 +64,14 @@ export class SaleServiceError extends Error {
   }
 }
 
-/** IpcChannels['sales:list'] req 形状（date_from/date_to/status） */
+/** IpcChannels['sales:list'] req 形状（date_from/date_to/status + 三筛选键） */
 export interface SaleListQuery {
   date_from?: string
   date_to?: string
   status?: SaleStatus
+  customer_name?: string
+  customer_phone?: string
+  is_national_subsidy?: boolean
 }
 
 /**
@@ -435,12 +439,19 @@ export function createSaleService(db: Database.Database) {
       return run()
     },
 
-    /** 销售列表（分页 + 过滤；id 倒序=最新在前） */
-    list(query: SaleListQuery, page = 1): Sale[] {
+    /**
+     * 销售列表（分页 + 过滤；id 倒序=最新在前；行含附加/客户平铺五列）。
+     * customer_name/customer_phone 的 trim 归一在此层做一次（IPC 薄层原样
+     * 透传），trim 后空串 = 不过滤。
+     */
+    list(query: SaleListQuery, page = 1): SaleListItem[] {
       const filter: SaleListFilter = {
         from: query.date_from,
         to: query.date_to,
-        status: query.status
+        status: query.status,
+        customer_name: trimTo(query.customer_name) || undefined,
+        customer_phone: trimTo(query.customer_phone) || undefined,
+        is_national_subsidy: query.is_national_subsidy
       }
       return repo.list(page, filter)
     },

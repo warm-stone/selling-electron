@@ -13,8 +13,7 @@ import type {
   PurchaseInputItem,
   PurchaseOrderWithItems,
   Sale,
-  SaleDetail,
-  SaleStatus
+  SaleDetail
 } from '../shared/types'
 import type { SaleReceiptData } from '../shared/receipt/item-columns'
 import type { ReceiptTemplate, ReceiptVars } from '../shared/receipt/template-schema'
@@ -75,12 +74,11 @@ const api = {
     /** 整单作废（事务回滚库存 + status='voided'） */
     void: (saleId: number): Promise<Sale> =>
       ipcRenderer.invoke('sales:void', { sale_id: saleId }),
-    /** 销售列表（按日期/状态过滤，最新在前） */
-    list: (filters?: {
-      date_from?: string
-      date_to?: string
-      status?: SaleStatus
-    }): Promise<Sale[]> => ipcRenderer.invoke('sales:list', filters ?? {}),
+    /** 销售列表（按日期/状态/客户姓名/电话/国补过滤，最新在前；行含附加/客户平铺列） */
+    list: (
+      filters?: IpcChannels['sales:list']['req']
+    ): Promise<IpcChannels['sales:list']['res']> =>
+      ipcRenderer.invoke('sales:list', filters ?? {}),
     /** 单据明细（头 + items + extras） */
     detail: (saleId: number): Promise<SaleDetail> =>
       ipcRenderer.invoke('sales:detail', { sale_id: saleId }),

@@ -16,6 +16,7 @@ import type {
   Sale,
   SaleDetail,
   SaleItem,
+  SaleListItem,
   SaleStatus
 } from '../../../shared/types'
 
@@ -67,11 +68,35 @@ export interface MovementInput {
   source_id: number | null
 }
 
-/** list 过滤条件（date_from/date_to 为本地日期 'yyyy-MM-dd'） */
+/**
+ * list 过滤条件（date_from/date_to 为本地日期 'yyyy-MM-dd'；
+ * customer_name/customer_phone 为 %kw% 子串 LIKE（escapeLike 转义，trim 归一
+ * 在 service 层）；is_national_subsidy=false 含无附加行旧单——与报表口径一致）。
+ */
 export interface SaleListFilter {
   from?: string
   to?: string
   status?: SaleStatus
+  customer_name?: string
+  customer_phone?: string
+  is_national_subsidy?: boolean
+}
+
+/** LIKE 通配符按字面匹配（照 customer.repo / products:list 惯例） */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+}
+
+/**
+ * list JOIN 原始行：is_national_subsidy 为 SQLite INTEGER 0/1，
+ * 双 LEFT JOIN（sale_extras/customers）未命中为 NULL。
+ */
+interface SaleListRow extends Sale {
+  is_national_subsidy: number | null
+  salesperson: string | null
+  order_note: string | null
+  customer_name: string | null
+  customer_phone: string | null
 }
 
 export const SALE_PAGE_SIZE = 50
@@ -194,30 +219,59 @@ export function createSaleRepo(db: Database.Database) {
 
     /**
      * 分页列表（id 倒序=最新在前）+ 过滤（日期按 created_at 本地日期匹配）。
-     * page 从 1 起。
+     * page 从 1 起。双 LEFT JOIN 平铺附加/客户五列（sale_extras.sale_id 兼
+     * PK 1:1 → 无行倍增；customers 引用非快照——客户改名后列表即时反映）；
+     * JOIN 后 created_at/id 与 customers 同名列冲突，条件与排序列必须表限定。
      */
-    list(page: number, filter: SaleListFilter): Sale[] {
+    list(page: number, filter: SaleListFilter): SaleListItem[] {
       const conditions: string[] = []
       const params: unknown[] = []
       if (filter.from) {
-        conditions.push('date(created_at) >= ?')
+        conditions.push('date(sales.created_at) >= ?')
         params.push(filter.from)
       }
       if (filter.to) {
-        conditions.push('date(created_at) <= ?')
+        conditions.push('date(sales.created_at) <= ?')
         params.push(filter.to)
       }
       if (filter.status) {
-        conditions.push('status = ?')
+        conditions.push('sales.status = ?')
         params.push(filter.status)
+      }
+      if (filter.customer_name) {
+        conditions.push("c.name LIKE ? ESCAPE '\\'")
+        params.push(`%${escapeLike(filter.customer_name)}%`)
+      }
+      if (filter.customer_phone) {
+        conditions.push("c.phone LIKE ? ESCAPE '\\'")
+        params.push(`%${escapeLike(filter.customer_phone)}%`)
+      }
+      if (filter.is_national_subsidy !== undefined) {
+        // 无附加行（se.sale_id IS NULL）归非国补——与报表 dailyTotalsStmt 口径一致
+        conditions.push(
+          filter.is_national_subsidy
+            ? 'se.is_national_subsidy = 1'
+            : '(se.is_national_subsidy = 0 OR se.sale_id IS NULL)'
+        )
       }
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
       params.push(SALE_PAGE_SIZE, Math.max(0, page - 1) * SALE_PAGE_SIZE)
-      return db
+      const rows = db
         .prepare(
-          `SELECT * FROM sales ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+          `SELECT sales.*, se.is_national_subsidy, se.salesperson, se.order_note,
+                  c.name AS customer_name, c.phone AS customer_phone
+             FROM sales
+             LEFT JOIN sale_extras se ON se.sale_id = sales.id
+             LEFT JOIN customers c ON c.id = se.customer_id
+             ${where}
+            ORDER BY sales.id DESC LIMIT ? OFFSET ?`
         )
-        .all(...params) as Sale[]
+        .all(...params) as SaleListRow[]
+      return rows.map((row) => ({
+        ...row,
+        // INTEGER 0/1 → boolean；LEFT JOIN 未命中（无附加行旧单）NULL → false
+        is_national_subsidy: row.is_national_subsidy === 1
+      }))
     },
 
     /** 标记整单作废（status + voided_at；不删任何行——D3） */

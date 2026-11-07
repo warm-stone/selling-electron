@@ -654,6 +654,156 @@ describe('list / getDetail 查询', () => {
   })
 })
 
+// ── 8b. list 平铺列 + 三筛选键（双 LEFT JOIN：sale_extras + customers）──
+
+describe('list：附加/客户平铺列 + 筛选（双 LEFT JOIN）', () => {
+  /** 国补单（客户张三 13800138000 + 销售人员王五 + 备注）——①③④⑤⑥ 共用形态 */
+  function checkoutSubsidy(
+    service: ReturnType<typeof createSaleService>,
+    productId: number
+  ): Sale {
+    return service.checkout(
+      [{ product_id: productId, quantity: 1, unit_price_cents: 100, sn: null }],
+      {
+        customer: { name: '张三', phone: '13800138000', address: '', note: '' },
+        is_national_subsidy: true,
+        order_note: '国补订单留档',
+        salesperson: '王五'
+      }
+    )
+  }
+
+  it('JOIN 两态：国补单平铺列正确（张三/王五）；无附加行旧单 is_national_subsidy=false + 四平铺 null', () => {
+    const cola = addProduct('可乐', { barcode: '69EX01', stock: 10 })
+    const service = svc()
+    const sub = checkoutSubsidy(service, cola)
+    // 散客快单：不落 sale_extras 行（迁移前旧单同态）
+    const plain = service.checkout([
+      { product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }
+    ])
+
+    const rows = service.list({})
+    expect(rows).toHaveLength(2)
+    // id 倒序（最新在前）
+    expect(rows.map((r) => r.sale_no)).toEqual([plain.sale_no, sub.sale_no])
+
+    expect(rows.find((r) => r.sale_no === sub.sale_no)).toMatchObject({
+      is_national_subsidy: true,
+      customer_name: '张三',
+      customer_phone: '13800138000',
+      salesperson: '王五',
+      order_note: '国补订单留档',
+      // Sale 核心列原样保留（extends Sale）
+      total_cents: 100,
+      item_count: 1,
+      status: 'completed'
+    })
+    expect(rows.find((r) => r.sale_no === plain.sale_no)).toMatchObject({
+      is_national_subsidy: false,
+      customer_name: null,
+      customer_phone: null,
+      salesperson: null,
+      order_note: null
+    })
+  })
+
+  it('customer_name 筛选：LIKE 张 命中、李 空；trim 归一；% 通配符按字面匹配', () => {
+    const cola = addProduct('可乐', { barcode: '69EX02', stock: 10 })
+    const service = svc()
+    checkoutSubsidy(service, cola)
+    service.checkout([{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }])
+
+    expect(service.list({ customer_name: '张' }).map((r) => r.sale_no)).toHaveLength(1)
+    expect(service.list({ customer_name: '张' })[0]?.customer_name).toBe('张三')
+    expect(service.list({ customer_name: '李' })).toEqual([])
+    // trim 归一（service 层）：带空白命中、纯空白 = 不过滤
+    expect(service.list({ customer_name: '  张 ' })).toHaveLength(1)
+    expect(service.list({ customer_name: '   ' })).toHaveLength(2)
+    // % 是字面量不做通配（escapeLike + ESCAPE '\'）
+    expect(service.list({ customer_name: '%' })).toEqual([])
+  })
+
+  it('customer_phone 筛选：LIKE 138 命中、139 空', () => {
+    const cola = addProduct('可乐', { barcode: '69EX03', stock: 10 })
+    const service = svc()
+    checkoutSubsidy(service, cola)
+    service.checkout([{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }])
+
+    const hit = service.list({ customer_phone: '138' })
+    expect(hit).toHaveLength(1)
+    expect(hit[0]?.customer_phone).toBe('13800138000')
+    expect(service.list({ customer_phone: '139' })).toEqual([])
+  })
+
+  it('is_national_subsidy 筛选：true 只回国补单；false 回非国补 + 无附加行单；缺省不过滤', () => {
+    const cola = addProduct('可乐', { barcode: '69EX04', stock: 10 })
+    const service = svc()
+    const sub = checkoutSubsidy(service, cola)
+    // 有附加行但非国补（仅销售人员——is_national_subsidy=0）
+    const nonSub = service.checkout(
+      [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+      { salesperson: '赵六' }
+    )
+    const plain = service.checkout([
+      { product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }
+    ])
+
+    expect(service.list({ is_national_subsidy: true }).map((r) => r.sale_no)).toEqual([
+      sub.sale_no
+    ])
+    // false 含无附加行旧单（se.sale_id IS NULL 归非国补——与报表口径一致）
+    expect(service.list({ is_national_subsidy: false }).map((r) => r.sale_no)).toEqual([
+      plain.sale_no,
+      nonSub.sale_no
+    ])
+    expect(service.list({})).toHaveLength(3)
+  })
+
+  it('筛选组合：customer_name × is_national_subsidy × date × status', () => {
+    const cola = addProduct('可乐', { barcode: '69EX05', stock: 10 })
+    const service = svc()
+    const sub = checkoutSubsidy(service, cola)
+    // 同电话（13800138000）第二单：find-or-create 命中同一客户张三，非国补
+    const nonSub = service.checkout(
+      [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+      {
+        customer: { name: '张三', phone: '13800138000', address: '', note: '' },
+        is_national_subsidy: false
+      }
+    )
+    service.checkout([{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }])
+
+    expect(
+      service.list({ customer_name: '张', is_national_subsidy: true }).map((r) => r.sale_no)
+    ).toEqual([sub.sale_no])
+    expect(
+      service.list({ customer_name: '张', is_national_subsidy: false }).map((r) => r.sale_no)
+    ).toEqual([nonSub.sale_no])
+
+    const today = new Date()
+    const iso = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0')
+    ].join('-')
+    expect(
+      service.list({ date_from: iso, date_to: iso, customer_name: '张' })
+    ).toHaveLength(2)
+    expect(service.list({ date_from: '2000-01-01', date_to: '2000-01-02', customer_name: '张' })).toEqual([])
+
+    // status 组合：作废非国补张三单 → voided+张 命中它，completed+国补+张 仍只回 sub
+    service.voidSale(nonSub.id)
+    expect(
+      service.list({ status: 'voided', customer_name: '张' }).map((r) => r.sale_no)
+    ).toEqual([nonSub.sale_no])
+    expect(
+      service
+        .list({ status: 'completed', customer_name: '张', is_national_subsidy: true })
+        .map((r) => r.sale_no)
+    ).toEqual([sub.sale_no])
+  })
+})
+
 // ── 9. SN 商品结账（D-SN5/6/7/8：校验 → 落库快照 → 台账流转）──
 
 describe('checkout：SN 商品（D-SN5/6/7/8）', () => {

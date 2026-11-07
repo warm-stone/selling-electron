@@ -167,6 +167,20 @@ export interface SaleWithExtras extends Sale {
   order_note: string | null
 }
 
+/**
+ * 销售记录列表行（sales:list 专用）：Sale + 附加/客户平铺列（双 LEFT JOIN）。
+ * 双 LEFT JOIN（sale_extras + customers）语义与 report.repo 的
+ * SaleWithExtras 同源：无附加行/无客户列全为 null，is_national_subsidy
+ * 无附加行归 false（与报表口径一致）。不并入 Sale 本体（Sale 铁律不动）。
+ */
+export interface SaleListItem extends Sale {
+  is_national_subsidy: boolean
+  salesperson: string | null
+  order_note: string | null
+  customer_name: string | null
+  customer_phone: string | null
+}
+
 // ══════════════ 进货 ══════════════
 
 /** 进货单头（purchase_orders 表） */

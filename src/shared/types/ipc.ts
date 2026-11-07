@@ -25,6 +25,7 @@ import type {
   PurchaseOrderWithItems,
   Sale,
   SaleDetail,
+  SaleListItem,
   SaleStatus
 } from './domain'
 
@@ -93,7 +94,22 @@ export interface IpcChannels {
   'sales:checkout': { req: { items: CheckoutItem[]; extras?: CheckoutExtrasInput }; res: Sale }
   /** 整单作废（事务回滚库存 + status='voided'——D3） */
   'sales:void': { req: { sale_id: number }; res: Sale }
-  'sales:list': { req: { date_from?: string; date_to?: string; status?: SaleStatus }; res: Sale[] }
+  /**
+   * 销售记录列表：行含国补/销售人员/备注/客户姓名/电话平铺列（双 LEFT JOIN）；
+   * 筛选键 trim 后空串 = 不过滤（service 层归一），is_national_subsidy
+   * false 含无附加行旧单（与报表口径一致）。
+   */
+  'sales:list': {
+    req: {
+      date_from?: string
+      date_to?: string
+      status?: SaleStatus
+      customer_name?: string
+      customer_phone?: string
+      is_national_subsidy?: boolean
+    }
+    res: SaleListItem[]
+  }
   'sales:detail': { req: { sale_id: number }; res: SaleDetail }
   /** 修改销售附加信息（sale_extras 1:1 upsert；返回更新后明细 头+items+extras） */
   'sales:updateExtra': {

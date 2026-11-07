@@ -28,6 +28,9 @@ interface ListRequest {
   date_from?: string
   date_to?: string
   status?: SaleStatus
+  customer_name?: string
+  customer_phone?: string
+  is_national_subsidy?: boolean
 }
 
 interface DetailRequest {
@@ -55,10 +58,14 @@ export function registerSalesIpc(db: Database.Database): void {
   )
 
   ipcMain.handle('sales:list', (_event, req: ListRequest) =>
+    // 三筛选键缺省 undefined = 不过滤（trim 归一在 service 层）
     service.list({
       date_from: req?.date_from,
       date_to: req?.date_to,
-      status: req?.status
+      status: req?.status,
+      customer_name: req?.customer_name,
+      customer_phone: req?.customer_phone,
+      is_national_subsidy: req?.is_national_subsidy
     })
   )
 

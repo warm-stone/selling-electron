@@ -12,8 +12,7 @@ import type {
   PurchaseInputItem,
   PurchaseOrderWithItems,
   Sale,
-  SaleDetail,
-  SaleStatus
+  SaleDetail
 } from '../shared/types'
 import type { SaleReceiptData } from '../shared/receipt/item-columns'
 import type { ReceiptTemplate, ReceiptVars } from '../shared/receipt/template-schema'
@@ -23,11 +22,9 @@ export interface SalesApi {
   /** 结账（extras 可选——客户/国补标记/订单备注/销售人员；不传不落 sale_extras 行） */
   checkout: (items: CheckoutItem[], extras?: CheckoutExtrasInput) => Promise<SaleDetail>
   void: (saleId: number) => Promise<Sale>
-  list: (filters?: {
-    date_from?: string
-    date_to?: string
-    status?: SaleStatus
-  }) => Promise<Sale[]>
+  list: (
+    filters?: IpcChannels['sales:list']['req']
+  ) => Promise<IpcChannels['sales:list']['res']>
   /** 单据明细（头 + items + extras） */
   detail: (saleId: number) => Promise<SaleDetail>
   /** 修改销售附加信息（sale_extras 1:1 upsert；返回更新后明细 头+items+extras） */
