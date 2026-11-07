@@ -9,6 +9,7 @@ import { rmTempDirSync } from '../../helpers/cleanup'
 import initSql from '../../../src/main/db/migrations/001_init.sql?raw'
 import logosSql from '../../../src/main/db/migrations/002_logos.sql?raw'
 import snProductsSql from '../../../src/main/db/migrations/003_sn_products.sql?raw'
+import productSoftDeleteSql from '../../../src/main/db/migrations/004_product_soft_delete.sql?raw'
 
 const USER_TABLES = [
   'products',
@@ -20,7 +21,9 @@ const USER_TABLES = [
   'print_templates',
   'settings',
   'logos',
-  'product_sns'
+  'product_sns',
+  'customers',
+  'sale_extras'
 ] as const
 
 function tableNames(db: Database.Database): string[] {
@@ -66,20 +69,20 @@ afterEach(() => {
 })
 
 describe('migrator：迁移执行器', () => {
-  it('全新 DB 迁移后 user_version=4 且 10 张用户表按具名断言齐全（含 002 logos / 003 product_sns）', () => {
+  it('全新 DB 迁移后 user_version=5 且 12 张用户表按具名断言齐全（含 002 logos / 003 product_sns / 005 customers、sale_extras）', () => {
     const db = newDb()
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(4)
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
 
     const names = tableNames(db)
     for (const t of USER_TABLES) {
       expect(names, `缺少用户表 ${t}`).toContain(t)
     }
-    expect(namedUserTables(db)).toHaveLength(10)
+    expect(namedUserTables(db)).toHaveLength(12)
   })
 
-  it('幂等：同一文件二次迁移不重复建表、user_version 保持 4', () => {
+  it('幂等：同一文件二次迁移不重复建表、user_version 保持 5', () => {
     const dbPath = join(dir, 'pos.db')
 
     const first = new Database(dbPath)
@@ -89,7 +92,7 @@ describe('migrator：迁移执行器', () => {
     const second = newDb()
     migrate(second)
 
-    expect(second.pragma('user_version', { simple: true })).toBe(4)
+    expect(second.pragma('user_version', { simple: true })).toBe(5)
     for (const t of USER_TABLES) {
       expect(countTable(second, t), `${t} 应只存在一份`).toBe(1)
     }
@@ -136,7 +139,7 @@ describe('migrator：003_sn_products（存量升级）', () => {
 
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(4)
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
 
     const productCols = (
       db.pragma('table_info(products)') as Array<{ name: string }>
@@ -234,7 +237,7 @@ describe('migrator：004_product_soft_delete（存量升级）', () => {
 
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(4)
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
 
     const productCols = (
       db.pragma('table_info(products)') as Array<{ name: string; notnull: number; dflt_value: string | null }>
@@ -264,21 +267,114 @@ describe('migrator：004_product_soft_delete（存量升级）', () => {
   })
 })
 
+// ══════════════ 005_customer_order_extras（结账客户信息 + 订单附加信息：sales 表零改动）══════════════
+
+/** 建一个停在 version=4 的存量库（001~004 已应用、005 未应用） */
+function legacyDbV4(): Database.Database {
+  const db = newDb()
+  db.exec(initSql)
+  db.exec(logosSql)
+  db.exec(snProductsSql)
+  db.exec(productSoftDeleteSql)
+  db.pragma('user_version = 4')
+  return db
+}
+
+describe('migrator：005_customer_order_extras（客户档案 + 订单附加）', () => {
+  it('空库 v0 直升 5：user_version=5 且 customers / sale_extras 两表存在', () => {
+    const db = newDb()
+    migrate(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(countTable(db, 'customers')).toBe(1)
+    expect(countTable(db, 'sale_extras')).toBe(1)
+  })
+
+  it('v4 存量库升级：001~004 数据原样、升 5 后两表同样就位（FK 实约束可用）', () => {
+    const db = legacyDbV4()
+    db.prepare('INSERT INTO products (barcode, name) VALUES (?, ?)').run('6901', '可乐')
+    db.prepare(
+      "INSERT INTO sales (sale_no, total_cents, item_count) VALUES ('20261101-0001', 700, 2)"
+    ).run()
+
+    migrate(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(countTable(db, 'customers')).toBe(1)
+    expect(countTable(db, 'sale_extras')).toBe(1)
+
+    // sales 表零改动：存量行原样保留
+    const sale = db
+      .prepare('SELECT sale_no, total_cents FROM sales')
+      .get() as { sale_no: string; total_cents: number }
+    expect(sale.sale_no).toBe('20261101-0001')
+    expect(sale.total_cents).toBe(700)
+
+    // FK 实约束：sale_extras 挂到真实 sale_id 可写入
+    db.prepare(
+      'INSERT INTO sale_extras (sale_id, is_national_subsidy, order_note, salesperson) VALUES (1, 0, ?, ?)'
+    ).run('客户要求送货', '张三')
+    const extra = db
+      .prepare('SELECT order_note, salesperson FROM sale_extras WHERE sale_id = 1')
+      .get() as { order_note: string; salesperson: string }
+    expect(extra.order_note).toBe('客户要求送货')
+    expect(extra.salesperson).toBe('张三')
+  })
+
+  it('列保真：customers 7 列 / sale_extras 5 列（DTO↔DB snake_case 一一对应）', () => {
+    const db = newDb()
+    migrate(db)
+
+    const customerCols = (db.pragma('table_info(customers)') as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+    expect(customerCols).toEqual([
+      'id',
+      'name',
+      'phone',
+      'address',
+      'note',
+      'created_at',
+      'updated_at'
+    ])
+
+    const saleExtraCols = (db.pragma('table_info(sale_extras)') as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+    expect(saleExtraCols).toEqual([
+      'sale_id',
+      'customer_id',
+      'is_national_subsidy',
+      'order_note',
+      'salesperson'
+    ])
+  })
+
+  it("phone UNIQUE 兜底：空串可插入一次（name/address/note 走 DEFAULT ''）、同值再插抛约束错误", () => {
+    const db = newDb()
+    migrate(db)
+    const insert = db.prepare('INSERT INTO customers (phone) VALUES (?)')
+
+    insert.run('')
+    expect(() => insert.run('')).toThrowError(/UNIQUE constraint failed/)
+  })
+})
+
 describe('database：连接初始化', () => {
   it('initDatabase 在参数化目录建库：WAL + foreign_keys=ON + 迁移完成', () => {
     const db = initDatabase(dir)
 
     expect(db.pragma('journal_mode', { simple: true })).toBe('wal')
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
-    expect(db.pragma('user_version', { simple: true })).toBe(4)
-    expect(namedUserTables(db)).toHaveLength(10)
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(namedUserTables(db)).toHaveLength(12)
   })
 
   it('initDatabase 同目录重复调用幂等（复用同一连接）', () => {
     const a = initDatabase(dir)
     const b = initDatabase(dir)
     expect(b).toBe(a)
-    expect(namedUserTables(b)).toHaveLength(10)
+    expect(namedUserTables(b)).toHaveLength(12)
   })
 
   it('getDatabase 返回当前连接；未初始化的模块实例抛错', async () => {

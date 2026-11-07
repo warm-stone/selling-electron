@@ -3,6 +3,7 @@ import initSql from './migrations/001_init.sql?raw'
 import logosSql from './migrations/002_logos.sql?raw'
 import snProductsSql from './migrations/003_sn_products.sql?raw'
 import productSoftDeleteSql from './migrations/004_product_soft_delete.sql?raw'
+import customerOrderExtrasSql from './migrations/005_customer_order_extras.sql?raw'
 
 interface Migration {
   version: number
@@ -14,7 +15,8 @@ const migrations: Migration[] = [
   { version: 1, name: '001_init.sql', sql: initSql },
   { version: 2, name: '002_logos.sql', sql: logosSql },
   { version: 3, name: '003_sn_products.sql', sql: snProductsSql },
-  { version: 4, name: '004_product_soft_delete.sql', sql: productSoftDeleteSql }
+  { version: 4, name: '004_product_soft_delete.sql', sql: productSoftDeleteSql },
+  { version: 5, name: '005_customer_order_extras.sql', sql: customerOrderExtrasSql }
 ]
 
 export function migrate(db: Database.Database): void {
