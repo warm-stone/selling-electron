@@ -79,4 +79,4 @@ CREATE TABLE settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );  -- shop_name/shop_phone/receipt_note/logo_path/
-    -- printer_channel('spooler'|'tcp'|'serial')/printer_name/tcp_host/tcp_port/com_port/auto_cut
+    -- printer_channel('spooler'|'tcp'|'serial'|'driver')/printer_name/tcp_host/tcp_port/com_port/auto_cut

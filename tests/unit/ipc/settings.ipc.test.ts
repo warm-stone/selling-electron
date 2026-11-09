@@ -113,6 +113,13 @@ describe('settings.ipc 纯映射：rowsToAppSettings', () => {
   it('auto_cut 非法值回落默认 true', () => {
     expect(rowsToAppSettings({ auto_cut: 'garbage' }).auto_cut).toBe(true)
   })
+
+  it('driver 为合法通道值（打印机驱动渲染兜底——读/写两侧均不回落 spooler）', () => {
+    expect(rowsToAppSettings({ printer_channel: 'driver' }).printer_channel).toBe('driver')
+    expect(appSettingsPatchToKv({ printer_channel: 'driver' })).toEqual({
+      printer_channel: 'driver'
+    })
+  })
 })
 
 describe('settings.ipc 纯映射：appSettingsPatchToKv（settings:set 序列化）', () => {
@@ -394,5 +401,7 @@ describe('printing.ipc 测试打印（真实生成链路）', () => {
     })
 
     expect(toPrintSettings({ printer_channel: 'bluetooth' as never }).printer_channel).toBe('spooler')
+    // driver 通道透传（isPrintChannelKind 白名单内——driver 分支走 HTML 载荷）
+    expect(toPrintSettings({ printer_channel: 'driver' }).printer_channel).toBe('driver')
   })
 })

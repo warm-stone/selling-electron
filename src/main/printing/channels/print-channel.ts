@@ -1,20 +1,25 @@
 /**
  * Task 7 — 打印通道抽象（print-channel.ts）
  *
- * 打印子系统的 I/O 侧统一契约：ESC/POS 字节流（Uint8Array）→ 通道发送。
- * 三个实现：
+ * 打印子系统的 I/O 侧统一契约：字节流（Uint8Array）→ 通道发送。
+ * 四个实现：
  *   - spooler.channel.ts  主通道：Windows spooler RAW（PowerShell RawPrinterHelper）
  *   - tcp.channel.ts      辅通道：tcp://host:9100（net socket）
  *   - serial.channel.ts   备通道：串口设备路径（\\.\COM1，fs 流写入）
+ *   - driver.channel.ts   兜底通道：Windows 打印机驱动 GDI 渲染（字节载荷 =
+ *                          收据 HTML 的 UTF-8 → 隐藏窗口 webContents.print；
+ *                          面向 RAW 通道丢 GBK 中文/光栅的「云」热敏机如
+ *                          得力 DL-5801PW——Word 走的驱动渲染路径 100% 兼容）
  *
- * 职责边界（G6）：escpos-generator 是纯函数零 I/O；本目录只做 I/O。
+ * 职责边界（G6）：escpos-generator / receipt-html 是纯函数零 I/O；本目录只做 I/O。
  */
 
-/** 通道种类（枚举封装）。值与 settings 表 printer_channel 列（'spooler'|'tcp'|'serial'）逐字一致。 */
+/** 通道种类（枚举封装）。值与 settings 表 printer_channel 列（'spooler'|'tcp'|'serial'|'driver'）逐字一致。 */
 export const PRINT_CHANNEL_KIND = {
   spooler: 'spooler',
   tcp: 'tcp',
-  serial: 'serial'
+  serial: 'serial',
+  driver: 'driver'
 } as const
 
 export type PrintChannelKind = (typeof PRINT_CHANNEL_KIND)[keyof typeof PRINT_CHANNEL_KIND]
@@ -36,9 +41,13 @@ export function isPrintChannelKind(value: unknown): value is PrintChannelKind {
  * 所有实现必须：错误上抛（由 PrintQueue 统一重试/报错）；同名字段 name 用于日志与设置页展示。
  */
 export interface PrintChannel {
-  /** 通道种类名（'spooler' | 'tcp' | 'serial'） */
+  /** 通道种类名（'spooler' | 'tcp' | 'serial' | 'driver'） */
   readonly name: PrintChannelKind
-  /** 发送一段完整的 ESC/POS 字节流；失败 reject */
+  /**
+   * 发送一段完整字节流；失败 reject。
+   * 语义随通道而异：spooler/tcp/serial 发 ESC/POS 原始字节；driver 发
+   * 收据 HTML 的 UTF-8 编码（通道内建隐藏窗口渲染后走驱动打印）。
+   */
   send(bytes: Uint8Array): Promise<void>
 }
 

@@ -5,7 +5,7 @@ import type Database from 'better-sqlite3'
  *
  * key 清单与 ER 设计逐字一致（契约事实源见 .omo/plans/pos-electron-app.md ER 章节）：
  *   shop_name / shop_phone / receipt_note / logo_path /
- *   printer_channel('spooler'|'tcp'|'serial') / printer_name /
+ *   printer_channel('spooler'|'tcp'|'serial'|'driver') / printer_name /
  *   tcp_host / tcp_port / com_port / auto_cut
  *
  * 职责边界：纯 SQL 编排，无业务规则——值一律 TEXT 字符串，

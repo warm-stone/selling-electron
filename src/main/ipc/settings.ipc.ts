@@ -46,7 +46,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   auto_cut: true
 }
 
-const VALID_CHANNELS: readonly string[] = ['spooler', 'tcp', 'serial']
+/** 合法通道值（driver = 打印机驱动 GDI 渲染兜底——云热敏机 RAW 丢 GBK/光栅的兼容通道） */
+const VALID_CHANNELS: readonly string[] = ['spooler', 'tcp', 'serial', 'driver']
 
 /** 脏值防御：printer_channel 非法时回落默认 spooler */
 function parseChannel(raw: string | undefined): PrinterChannel {
