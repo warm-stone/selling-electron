@@ -35,7 +35,10 @@ const printForm = reactive({
 const CHANNEL_OPTIONS: Array<{ value: PrinterChannel; title: string; desc: string }> = [
   { value: 'spooler', title: '系统打印机', desc: 'Windows 打印后台 RAW 直发（推荐）' },
   { value: 'tcp', title: '网络打印机', desc: '打印机网口直连 host:9100' },
-  { value: 'serial', title: '串口打印机', desc: 'COM 口直连（备用通道）' }
+  { value: 'serial', title: '串口打印机', desc: 'COM 口直连（备用通道）' },
+  // driver 兜底：得力 DL-5801PW 等「云」热敏机 RAW 模式丢 GBK 中文/光栅图，
+  // 走打印机驱动渲染 HTML（同 Word 打印路径）则全兼容——详见 driver.channel.ts
+  { value: 'driver', title: '驱动渲染', desc: '经打印机驱动渲染 HTML（云打印机/中文图片打不出时用，同 Word 打印路径）' }
 ]
 
 async function loadSettings(): Promise<void> {
@@ -259,8 +262,8 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
           </el-radio-group>
         </el-form-item>
 
-        <!-- spooler 分区 -->
-        <template v-if="printForm.printer_channel === 'spooler'">
+        <!-- spooler / driver 分区：同走系统打印机名（spooler RAW 直发 / driver 驱动渲染 HTML） -->
+        <template v-if="printForm.printer_channel === 'spooler' || printForm.printer_channel === 'driver'">
           <el-form-item label="打印机">
             <div class="printer-picker">
               <el-select
@@ -286,8 +289,14 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
                 @click="loadPrinters"
               />
             </div>
+            <!-- 提示分通道：spooler 空名=系统默认机；driver 需具体机名（空名后端报错，前端不拦，测试打印即反馈） -->
             <div class="field-hint">
-              热敏小票机请选择系统中已安装的小票打印机；列表为空时保持「自动选择」即可。
+              <template v-if="printForm.printer_channel === 'driver'">
+                中文/图片经打印机驱动渲染，适合「云」热敏机；速度略慢于指令直发，需选择具体打印机。
+              </template>
+              <template v-else>
+                热敏小票机请选择系统中已安装的小票打印机；列表为空时保持「自动选择」即可。
+              </template>
             </div>
           </el-form-item>
         </template>
@@ -530,7 +539,7 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
   margin-bottom: 4px;
 }
 
-/* ── 通道单选卡（三选一带描述）── */
+/* ── 通道单选卡（四选一带描述）── */
 .channel-group {
   display: flex;
   gap: 10px;
@@ -575,7 +584,7 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
   color: var(--el-color-warning-dark-2);
 }
 
-/* ── spooler 打印机选择行 ── */
+/* ── spooler/driver 打印机选择行（两通道共用）── */
 .printer-picker {
   display: flex;
   gap: 10px;

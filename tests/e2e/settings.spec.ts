@@ -13,7 +13,9 @@ import { closeApp, launchApp, waitForRoute, type LaunchedApp } from './helpers'
  *  1. 店名保存 → settings 表 DB 断言 + 离开再进入页面回显
  *  2. tcp 通道 + 127.0.0.1:19910 mock server → 测试打印 → 字节含 1b40
  *  3. spooler 优雅降级（Linux 无打印机）：下拉仅「自动选择」不崩溃；测试打印错误 toast 含通道名
- *  4. Logo 管理（E2E patch dialog.showOpenDialog 注入固定 png）→ 多 Logo 网格缩略图
+ *  4. driver 通道选项（云热敏机兜底）：四张通道卡含「驱动渲染」；选中复用 spooler 的
+ *     打印机选择分区 + 分通道提示，不出现 tcp/串口字段
+ *  5. Logo 管理（E2E patch dialog.showOpenDialog 注入固定 png）→ 多 Logo 网格缩略图
  *     dataURL → 删除（确认弹窗）→ 空态提示（logos 表存储归后端领地，此处只断 UI 链路）
  */
 
@@ -151,6 +153,28 @@ test.describe.serial('系统设置页（Task 19）', () => {
     await expect(errorToast).toContainText('spooler')
 
     await page.screenshot({ path: '.omo/evidence/task-19-graceful-degrade.png' })
+  })
+
+  test('打印通道选项（driver 兜底）：四张通道卡含「驱动渲染」，选中复用打印机选择分区', async () => {
+    const { page } = app
+    await gotoSettings()
+
+    // 选项列表断言：spooler/tcp/serial/driver 四张卡（driver 为「云」热敏机驱动渲染兜底）
+    const channelRadios = page.locator('.channel-radio')
+    await expect(channelRadios).toHaveCount(4)
+    const driverRadio = channelRadios.filter({ hasText: '驱动渲染' })
+    await expect(driverRadio).toHaveCount(1)
+
+    // driver 与 spooler 同分区：系统打印机选择可见 + driver 分支提示；tcp/串口字段不出现
+    await driverRadio.click()
+    await expect(page.locator('.printer-select')).toBeVisible()
+    await expect(page.locator('.field-hint').filter({ hasText: '驱动渲染' })).toBeVisible()
+    await expect(
+      page.locator('.field-hint').filter({ hasText: '保持「自动选择」即可' })
+    ).toHaveCount(0)
+    await expect(page.getByTestId('tcp-host-input')).toHaveCount(0)
+    await expect(page.getByTestId('tcp-port-input')).toHaveCount(0)
+    await expect(page.getByTestId('com-port-input')).toHaveCount(0)
   })
 
   test('Logo 管理：上传（patch dialog 注入 png）→ 网格缩略图 dataURL → 删除（确认弹窗）→ 空态提示', async () => {
