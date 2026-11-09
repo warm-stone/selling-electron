@@ -30,6 +30,7 @@
     "jszip": "^3.10.2",
     "node-thermal-printer": "^4.6.1",
     "pinia": "^4.1.0",
+    "pngjs": "^7.0.0",
     "vue": "^3.5.44",
     "vue-router": "^4.6.4"
   },

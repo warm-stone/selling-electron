@@ -355,7 +355,7 @@ describe('printing.ipc 测试打印（真实生成链路）', () => {
         readLogoById: async () => png
       })
     )
-    expect(withLogo.toString('hex')).toContain('1d763030') // GS v 0 光栅（m=0x30 库默认）
+    expect(withLogo.toString('hex')).toContain('1d763000') // GS v 0 光栅（m=0x00 规范值，自研 raster.ts）
 
     const noLogo = Buffer.from(
       await buildTestPrintBytes({

@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as iconv from 'iconv-lite'
 import { describe, expect, it } from 'vitest'
+import { PNG } from 'pngjs'
 
 import {
   DEFAULT_TEMPLATE_58MM,
@@ -36,7 +36,7 @@ import {
  * 矩阵维度：{58mm, 80mm} × {bold on/off} × {doubleHeight/Width/quad/normal}
  *            × {left/center/right} × {Logo 有/无} × {cutPaper on/off}
  * 每项断言十六进制指令序列；另含 GBK 中文断言、GBK 降级（'𠀀'→'?'）、
- * FS & 汉字模式（真机修复指令链）、名称折行多行 items、1d 76 30 30 光栅头、
+ * FS & 汉字模式（真机修复指令链）、名称折行多行 items、1d 76 30 00 光栅头、
  * 重打幂等、char-grid 同源几何、golden .bin 字节级 diff。
  */
 
@@ -69,17 +69,9 @@ function makeTemplate(
   return t
 }
 
-// pngjs（node-thermal-printer 传递依赖，无自带类型——测试侧以 createRequire + 最小接口消费）
-interface PngImage {
-  width: number
-  height: number
-  data: Buffer
-}
-interface PngCtor {
-  new (opts: { width: number; height: number }): PngImage
-  sync: { write(png: PngImage): Buffer }
-}
-const { PNG } = createRequire(import.meta.url)('pngjs') as { PNG: PngCtor }
+// pngjs 已升为显式依赖（与生产侧 raster.ts 同一 import 面）；
+// 类型来自 src/main/printing/escpos/pngjs.d.ts 环境声明（tsconfig.node.json
+// 同程序包含 tests，此处直接命名导入即获类型）
 
 /** 确定性 16×8 棋盘 Logo PNG（像素固定 → 光栅字节跨环境稳定） */
 function makeLogoPng(): Buffer {
@@ -271,26 +263,27 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
     expect(includes(bytes, seq(0x1b, 0x61, 0x00))).toBe(true)
   })
 
-  it('Logo 段落：vars.logoBuffers 命中 logoId → 光栅 1d 76 30 30（m=0x30 库默认）；未命中/未指定 → 跳过不发光栅', async () => {
+  it('Logo 段落：vars.logoBuffers 命中 logoId → 光栅 1d 76 30 00（m=0x00 规范值）；未命中/未指定 → 跳过不发光栅', async () => {
     const t = makeTemplate((x) => {
       x.header.unshift({ type: 'image', logoId: 7 })
     })
     const noLogo = await gen(t) // vars 无 logoBuffers
-    expect(includes(noLogo, seq(0x1d, 0x76, 0x30, 0x30))).toBe(false)
+    expect(includes(noLogo, seq(0x1d, 0x76, 0x30, 0x00))).toBe(false)
 
     const missingId = await gen(t, SAMPLE_SALE, {
       ...SAMPLE_VARS,
       logoBuffers: new Map([[999, makeLogoPng()]])
     })
-    expect(includes(missingId, seq(0x1d, 0x76, 0x30, 0x30))).toBe(false)
+    expect(includes(missingId, seq(0x1d, 0x76, 0x30, 0x00))).toBe(false)
 
     const withLogo = await gen(t, SAMPLE_SALE, {
       ...SAMPLE_VARS,
       logoBuffers: new Map([[7, makeLogoPng()]])
     })
-    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x30))).toBe(true)
-    // 旧 m=0x00 patch 值不得出现（1d 76 30 00 为非 0x30 模式头）
-    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x00))).toBe(false)
+    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x00))).toBe(true)
+    // 旧库默认 m=0x30（Epson ASCII 别名 '0'）不得出现——克隆固件只解析 m=0..3，
+    // 遇 0x30 整条光栅指令被拒收（Deli DL-5801PW 真机结论）
+    expect(includes(withLogo, seq(0x1d, 0x76, 0x30, 0x30))).toBe(false)
   })
 
   it('多 Logo：header/footer 各引用一个 logoId → 两个光栅段均出现', async () => {
@@ -306,7 +299,7 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
       ])
     })
     // 两段相同棋盘图 → 光栅头出现两次
-    const head = seq(0x1d, 0x76, 0x30, 0x30)
+    const head = seq(0x1d, 0x76, 0x30, 0x00)
     const first = Buffer.from(bytes).indexOf(head)
     const second = Buffer.from(bytes).indexOf(head, first + 1)
     expect(first).toBeGreaterThanOrEqual(0)
@@ -324,7 +317,7 @@ describe('ESC/POS 生成器 golden 字节矩阵', () => {
       ...SAMPLE_VARS,
       logoBuffers: new Map([[7, makeLogoPng()]])
     })
-    expect(includes(bytes, seq(0x1d, 0x76, 0x30, 0x30))).toBe(true)
+    expect(includes(bytes, seq(0x1d, 0x76, 0x30, 0x00))).toBe(true)
     expect(includes(bytes, Buffer.from('-'.repeat(32), 'latin1'))).toBe(true)
   })
 

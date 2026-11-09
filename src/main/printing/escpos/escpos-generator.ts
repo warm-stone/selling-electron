@@ -23,6 +23,8 @@
  *
  * 对齐/折行全部走 shared/receipt/char-grid（G7：与 HTML 预览同源数学）。
  * 文本先经 degradeToGbk 降级再进 ThermalPrinter（见 gb2312-encoder）。
+ * Logo 光栅不借库装配——自研 raster.ts（GS v 0 纯函数，m=0x00 规范值 +
+ * 纸宽点数钳制，Deli 58mm 云打印机真机修复，细节见 raster.ts 头注）。
  */
 
 import { BreakLine, CharacterSet, PrinterTypes, ThermalPrinter } from 'node-thermal-printer'
@@ -30,7 +32,8 @@ import { BreakLine, CharacterSet, PrinterTypes, ThermalPrinter } from 'node-ther
 import {
   PAPER_COLUMNS,
   wrapToGrid,
-  type LineAlign
+  type LineAlign,
+  type PaperWidth
 } from '../../../shared/receipt/char-grid'
 import {
   buildItemLines,
@@ -49,6 +52,7 @@ import {
   type TotalLine
 } from '../../../shared/receipt/template-schema'
 import { degradeToGbk } from './gb2312-encoder'
+import { buildLogoRaster } from './raster'
 
 // ═════════════════════ 数据契约（打印侧） ═════════════════════
 
@@ -123,14 +127,14 @@ export async function generateReceiptBytes(
   printer.add(FS_HANZI_MODE)
 
   for (const section of template.header) {
-    await renderSection(printer, section, vars, cols)
+    await renderSection(printer, section, vars, template.paperWidth)
   }
   renderItems(printer, template, sale)
   for (const line of template.totals) {
     renderTotalLine(printer, line, textVars, cols)
   }
   for (const section of template.footer) {
-    await renderSection(printer, section, vars, cols)
+    await renderSection(printer, section, vars, template.paperWidth)
   }
 
   if (template.cutPaper) {
@@ -162,8 +166,10 @@ async function renderSection(
   printer: ThermalPrinter,
   section: Section,
   vars: ReceiptPrintVars,
-  cols: number
+  paperWidth: PaperWidth
 ): Promise<void> {
+  // 文本折行列数由纸宽派生（PAPER_COLUMNS 同源几何；光栅另用 PAPER_DOTS 点数上限）
+  const cols = PAPER_COLUMNS[paperWidth]
   switch (section.type) {
     case 'text': {
       applyTextState(printer, section.size, section.bold ?? false, section.align)
@@ -179,7 +185,7 @@ async function renderSection(
     case 'image': {
       const logo =
         section.logoId !== undefined ? vars.logoBuffers?.get(section.logoId) : undefined
-      if (logo) await appendLogoRaster(printer, logo, cols)
+      if (logo) appendLogoRaster(printer, logo, paperWidth)
       break // 未指定 logoId / logoBuffers 无此 id → 静默跳过
     }
     case 'divider': {
@@ -293,17 +299,17 @@ function applyAlign(printer: ThermalPrinter, align: LineAlign | undefined): void
 // ─────────────────────── Logo 光栅（GS v 0） ───────────────────────
 
 /**
- * 追加 Logo 光栅字节：借一次性 scratch 打印机产出 `GS v 0` 光栅
- * （printImageBuffer 内部 pngjs 解码 PNG → 位图打包），再 add 进主管线。
+ * 追加 Logo 光栅字节：自研 raster.ts 纯函数装配 `GS v 0`（pngjs 解码 →
+ * 纸宽点数钳制 → 8 点对齐 → 最近邻等比重采样 → 位打包），add 进主管线。
  *
- * 光栅头第 4 字节（模式 m）保留库默认 0x30：大量国产打印机固件只认
- * m=0x30（'0'），改发规范值 0x00 反而导致光栅指令解析失败、图片被
- * 跳过（真机联调结论，见 learnings）——字节级 golden 契约锁定
- * `1d 76 30 30`。
+ * 光栅头第 4 字节（模式 m）发规范值 0x00：EPSON 规范接受 0/1 与 ASCII
+ * 别名 48/49，但大量克隆固件（含得力云打印机系列）只解析 m=0..3——
+ * 库默认的 0x30 会被这类固件整条丢弃（Deli DL-5801PW 真机联调结论，
+ * 见 learnings）。宽度钳制到纸宽点数上限并对齐 8 点：58mm 机（384 点
+ * 打码头）对字节宽超过 48 的光栅指令整条拒收——字节级 golden 契约
+ * 锁定 `1d 76 30 00`。
  */
-async function appendLogoRaster(printer: ThermalPrinter, png: Buffer, cols: number): Promise<void> {
-  const scratch = createEpsonPrinter(cols)
-  const raster = await scratch.printImageBuffer(png)
-  printer.add(raster)
+function appendLogoRaster(printer: ThermalPrinter, png: Buffer, paperWidth: PaperWidth): void {
+  printer.add(buildLogoRaster(png, paperWidth))
   printer.newLine()
 }
