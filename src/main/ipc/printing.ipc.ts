@@ -12,8 +12,10 @@ import {
   type PreviewPayload
 } from '../printing/print.service'
 import type { PrintSettings } from '../printing/print.service'
-import { generateReceiptBytes, type ReceiptPrintVars } from '../printing/escpos/escpos-generator'
+import { generateReceiptBytes } from '../printing/escpos/escpos-generator'
+import { generateReceiptHtml } from '../printing/driver/receipt-html'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
+import type { ReceiptTemplate, ReceiptVars } from '../../shared/receipt/template-schema'
 import { createSaleRepo } from '../db/repositories/sale.repo'
 import { createSaleExtraRepo } from '../db/repositories/sale-extra.repo'
 import { createSettingsRepo } from '../db/repositories/settings.repo'
@@ -28,17 +30,19 @@ import { rowsToAppSettings } from './settings.ipc'
  * 通道：
  *  - printing:printers  系统打印机枚举（T7 listSystemPrinters 消费面）
  *  - printing:testPrint 测试打印（真实生成链路：样例数据 + 当前默认模板
- *                       → generateReceiptBytes → 发送——中文/折行/光栅全
- *                       链路覆盖，纯 ASCII 假字节无法暴露真机问题）
+ *                       → 通道对应载荷——spooler/tcp/serial 走
+ *                       generateReceiptBytes 字节、driver 走 generateReceiptHtml
+ *                       的 HTML 字节——后发送；中文/折行/光栅全链路覆盖，
+ *                       纯 ASCII 假字节无法暴露真机问题）
  *  - printing:preview   小票预览（T15：预览与打印同源组装——G7）
  *  - printing:print     小票打印（T15：串行队列 best-effort，失败不影响已保存销售——G3）
  *
  * ★ 只消费上游产物（printer-enumerator / print-channel 守卫 / getChannel /
- *   PrintQueue / generateReceiptBytes / 各 repo），不改动 channels/ 与
- *   escpos-generator 内部任何代码。
+ *   PrintQueue / generateReceiptBytes / generateReceiptHtml / 各 repo），
+ *   不改动 channels/ 与 escpos-generator / receipt-html 内部任何代码。
  * ★ `require('electron')` 懒加载（T2 模式）：TEST_PRINT_SALE / TEST_PRINT_VARS /
- *   buildTestPrintBytes / toPrintSettings / parseSaleId 等纯部分可在
- *   vitest 纯 Node 环境导入。
+ *   buildTestPrintPayload / buildTestPrintBytes / buildTestPrintHtml /
+ *   toPrintSettings / parseSaleId 等纯部分可在 vitest 纯 Node 环境导入。
  */
 
 /** 打印机下拉项（设置页消费；is_default 用于默认标记展示） */
@@ -70,7 +74,7 @@ export const TEST_PRINT_SALE: SaleReceiptData = {
 }
 
 /** 测试打印变量插槽（中文店名/电话/备注——GBK 双字节链路覆盖） */
-export const TEST_PRINT_VARS: ReceiptPrintVars = {
+export const TEST_PRINT_VARS: ReceiptVars = {
   shopName: '测试商店',
   shopPhone: '13800001111',
   receiptNote: '谢谢惠顾',
@@ -88,20 +92,49 @@ export interface TestPrintDeps {
   readLogoById(logoId: number): Promise<Buffer | null>
 }
 
+/** 测试打印载荷（字节/HTML 两种渲染的共同源头，G7）：模板 + 变量 + logoBuffers */
+export interface TestPrintPayload {
+  /** 默认模板（config_json 解析 + 坏配置回落） */
+  template: ReceiptTemplate
+  /** 变量插槽（纯字符串——字节/HTML 两侧同值） */
+  vars: ReceiptVars
+  /** 模板 image 段落引用的 Logo Buffer 集合（无引用/读不到 → 空 Map） */
+  logoBuffers: Map<number, Buffer>
+}
+
 /**
- * 组装测试打印字节（真实生成链路）：当前默认模板（config_json 解析 +
- * 坏配置回落）+ 样例数据 → generateReceiptBytes。模板含 image 段落时按
- * logoBuffers 链路注入（与 buildReceiptPayload 同规则）；没有 logo 时
- * 自然跳过（不因缺 logo 报错）。
+ * 组装测试打印载荷（真实生成链路的共同源头）：当前默认模板 + 样例变量 +
+ * logoBuffers（与 buildReceiptPayload 同规则：image 段落逐 id 读取，读不到
+ * 静默跳过）。字节（generateReceiptBytes）与 driver HTML（generateReceiptHtml）
+ * 两侧消费者共用——两套渲染不得两套组装。
  */
-export async function buildTestPrintBytes(deps: TestPrintDeps): Promise<Uint8Array> {
+export async function buildTestPrintPayload(deps: TestPrintDeps): Promise<TestPrintPayload> {
   const template = parseTemplateRow(deps.getDefaultTemplate())
   const logoBuffers = new Map<number, Buffer>()
   for (const logoId of collectSectionLogoIds(template)) {
     const buf = await deps.readLogoById(logoId)
     if (buf) logoBuffers.set(logoId, buf)
   }
-  return generateReceiptBytes(template, TEST_PRINT_SALE, { ...TEST_PRINT_VARS, logoBuffers })
+  return { template, vars: { ...TEST_PRINT_VARS }, logoBuffers }
+}
+
+/**
+ * 组装测试打印字节（真实生成链路）：默认模板 + 样例数据 → generateReceiptBytes
+ * （spooler/tcp/serial 通道载荷）。模板含 image 段落时按 logoBuffers 链路
+ * 注入；没有 logo 时自然跳过（不因缺 logo 报错）。
+ */
+export async function buildTestPrintBytes(deps: TestPrintDeps): Promise<Uint8Array> {
+  const { template, vars, logoBuffers } = await buildTestPrintPayload(deps)
+  return generateReceiptBytes(template, TEST_PRINT_SALE, { ...vars, logoBuffers })
+}
+
+/**
+ * 组装测试打印 HTML 字节（driver 通道载荷）：默认模板 + 样例数据 →
+ * generateReceiptHtml → UTF-8 编码（HTML 即字节——同 printSale driver 分支）。
+ */
+export async function buildTestPrintHtml(deps: TestPrintDeps): Promise<Uint8Array> {
+  const { template, vars, logoBuffers } = await buildTestPrintPayload(deps)
+  return Buffer.from(generateReceiptHtml(template, TEST_PRINT_SALE, vars, logoBuffers), 'utf8')
 }
 
 /**
@@ -179,8 +212,10 @@ export function registerPrintingIpc(db: Database.Database): void {
   })
 
   /**
-   * 测试打印（真实生成链路）：样例数据 + 当前默认模板 → generateReceiptBytes
-   * → 走 T7 的 getChannel + PrintQueue（不绕过串行队列）。
+   * 测试打印（真实生成链路）：样例数据 + 当前默认模板 → 通道对应载荷
+   * （spooler/tcp/serial → ESC/POS 字节；driver → 收据 HTML 字节——云热敏
+   * 机驱动渲染兜底，同 printSale 分支规则）→ 走 T7 的 getChannel +
+   * PrintQueue（不绕过串行队列）。
    * 失败不抛给 renderer —— 返回 { ok:false, error } 且 error 首段含通道名
    * （设置页直接 ElMessage.error 展示）。
    */
@@ -193,10 +228,14 @@ export function registerPrintingIpc(db: Database.Database): void {
       const settings = toPrintSettings(req)
       try {
         const channel = getChannel(settings)
-        const bytes = await buildTestPrintBytes({
+        const testDeps = {
           getDefaultTemplate: () => templateRepo.getDefault(),
           readLogoById
-        })
+        }
+        const bytes =
+          settings.printer_channel === 'driver'
+            ? await buildTestPrintHtml(testDeps)
+            : await buildTestPrintBytes(testDeps)
         await new PrintQueue(channel).enqueuePrintJob(bytes)
         return { ok: true }
       } catch (err) {
