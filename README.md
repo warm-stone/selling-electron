@@ -11,7 +11,7 @@ Windows 桌面销存系统（POS / 进销存）：Electron + Vue 3 + TypeScript 
 - **作废销售**：整单作废（事务回滚库存，报表自动剔除）
 - **销售记录**：按日期/状态/客户姓名/电话/是否国补筛选，列表含国补/销售人员/订单备注/客户列，双击查看明细（可修改国补/订单备注/销售人员/客户关联），随时重打小票（使用当前模板）
 - **报表**：日报 / 月报（按日分桶，日报含国补销售额小计与明细两列），导出 `.txt` / `.xlsx` / `.docx`
-- **小票打印**：模板体系（表单式编辑 + 实时预览 + 可用变量说明区，58mm/80mm 双纸宽）、ESC/POS 指令直发（粗体/倍高倍宽/居中/自动切纸/Logo）、三种通道（Windows spooler RAW 主通道 / tcp 辅 / 串口备）、打印串行队列（连续结账不交叠）
+- **小票打印**：模板体系（表单式编辑 + 实时预览 + 可用变量说明区，58mm/80mm 双纸宽）、ESC/POS 指令直发（粗体/倍高倍宽/居中/自动切纸/Logo 光栅钳制纸宽）、四种通道（Windows spooler RAW 主通道 / tcp 辅 / 串口备 / driver 驱动渲染兜底——「云」打印机兼容）、打印串行队列（连续结账不交叠）
 - **设置**：店铺信息、打印机通道配置、Logo 上传
 
 ## 架构（文字版）
@@ -27,14 +27,15 @@ main (Electron 主进程)
     ├── repositories/*  DAL（纯 SQL）
     ├── db/            better-sqlite3（WAL + PRAGMA user_version 迁移）
     ├── printing/      ★ 打印子系统
-    │     ├── escpos/  ESC/POS 纯函数生成器（GBK 编码 + 生僻字降级 '?'）
-    │     │            + 字符网格数学（58mm=32 列 / 80mm=48 列，双渲染同源）
-    │     └── channels/ spooler(主) / tcp(辅) / serial(备) + 串行队列
+    │     ├── escpos/  ESC/POS 纯函数生成器（GBK 编码 + 生僻字降级 '?' + Logo 光栅钳制纸宽/8 点对齐）
+    │     │            + 字符网格数学（58mm=32 列 / 80mm=48 列，三渲染同源）
+    │     ├── driver/  收据 HTML 生成器（driver 通道载荷——驱动渲染兜底的第三渲染器）
+    │     └── channels/ spooler(主) / tcp(辅) / serial(备) / driver(驱动渲染兜底) + 串行队列
     ├── export/        txt / xlsx / docx 导出器
     └── scanner/       扫码枪检测器（纯函数状态机 + before-input-event 桥）
 
 模板 JSON（print_templates 表）是唯一事实源：
-  同一模板 + 共享字符网格数学 → [ESC/POS 字节流] 与 [HTML 预览] 双渲染同源
+  同一模板 + 共享字符网格数学 → [ESC/POS 字节流] 与 [HTML 预览] 与 [driver 渲染 HTML] 三渲染同源
 ```
 
 数据模型（10 表）：`products`、`purchase_orders` + `purchase_items`、`sales` + `sale_items`、`customers` + `sale_extras`（1:1 订单附加：客户引用/国补/订单备注/销售人员）、`stock_movements`（审计链）、`print_templates`、`settings`。销售/进货明细行均含**商品快照字段**；客户信息为引用（改档案后历史订单显示最新）；商品删除为逻辑删除（软删行保留，`product_id` 引用持续有效），历史单据与审计链完整可读。
@@ -48,7 +49,7 @@ main (Electron 主进程)
 | 存储 | better-sqlite3 v13（N-API prebuilds，免 rebuild；WAL 模式；`PRAGMA user_version` 迁移） |
 | 打印 | node-thermal-printer（ESC/POS 指令生成，纯函数零 I/O） |
 | 导出 | exceljs（xlsx）/ docx（.docx）/ 原生 txt（UTF-8 BOM + CRLF） |
-| 测试 | vitest（单元 + golden 字节矩阵，705 用例）+ Playwright `_electron`（E2E 基线 91 场景 + qa 终审套件 20 场景） |
+| 测试 | vitest（单元 + golden 字节矩阵，747 用例）+ Playwright `_electron`（E2E 基线 92 场景 + qa 终审套件 20 场景） |
 | 打包 | electron-builder 26（NSIS） |
 
 ## 开发
@@ -59,7 +60,7 @@ main (Electron 主进程)
 npm install        # postinstall 自动补齐 Electron 二进制（install-electron）
 npm run dev        # 启动开发（HMR）
 npm run typecheck  # 类型检查（node + web 两侧）
-npm test           # vitest 单元测试（705 用例）
+npm test           # vitest 单元测试（747 用例）
 npm run test:e2e   # Playwright E2E（globalSetup 自动先构建 out/）
 npm run build      # 构建 out/（main/preload/renderer）
 ```
@@ -77,13 +78,12 @@ npx electron-builder --win nsis   # Linux 上产出未含 uninstaller 的 stub�
 > **注意**：完整的 Windows NSIS 安装包在 **GitHub Actions（windows-latest）** 上产出——NSIS 的
 > uninstaller 提取步骤在非 Windows 平台需要 wine，本项目不作此依赖。推送到 GitHub 后 CI 自动执行：
 
-CI（`.github/workflows/ci.yml`）三个 job：
+CI（`.github/workflows/release.yml`）——**正式发布流程**：推送 `v*` tag（与 package.json 版本一致，如 `v0.3.0`）→ 全质量门 → 自动发布到 GitHub Releases：
 
 1. **test**（windows-latest）：typecheck → vitest → Playwright E2E（驱动真实 Electron 窗口，含 tcp mock 打印场景）
-2. **build**（windows-latest，依赖 test）：`npm run build` → `electron-builder --win nsis` → 上传 artifact `windows-nsis-installer`（`销存系统-<版本>-setup.exe`，中文安装向导、可选安装目录）
-3. **linux-check**（ubuntu-latest）：vitest 双平台交叉验证
+2. **release**（windows-latest，依赖 test）：tag 与版本号防呆校验 → `npm run build` → `electron-builder --win nsis --publish always` → GitHub Releases 上架 `销存系统-<版本>-setup.exe`（中文安装向导、可选安装目录）
 
-> 本仓库尚无远程：push 到 GitHub 后 Actions 自动触发；从 Actions 运行页面下载 `windows-nsis-installer` artifact 获取安装包。
+> 日常 push 验证的旧 ci.yml 已停用（`ci.yml.bak` 留档）；GitCode 镜像的同步发布为手动（GitHub Releases 下载 exe → GitCode Release 页上传）。
 
 ## 数据位置与手动备份
 

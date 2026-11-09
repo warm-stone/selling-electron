@@ -1,6 +1,6 @@
 {
   "name": "selling-electron",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Windows 桌面销存系统（POS）— Electron + Vue 3 + TypeScript",
   "author": "selling-electron",
   "repository": {
