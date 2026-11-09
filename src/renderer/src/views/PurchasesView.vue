@@ -487,8 +487,8 @@ onMounted(() => {
         </template>
       </el-table>
       <div class="create-form__actions">
-        <el-button data-testid="add-quantity-row" @click="addQuantityRow">+ 批量计商品</el-button>
         <el-button data-testid="add-sn-row" @click="addSnRow">+ SN 商品</el-button>
+        <el-button data-testid="add-quantity-row" @click="addQuantityRow">+ 批量计商品</el-button>
       </div>
       <el-form label-width="64px" class="create-form__note" @submit.prevent>
         <el-form-item label="备注">

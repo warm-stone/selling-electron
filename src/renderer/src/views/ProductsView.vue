@@ -529,8 +529,8 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
       <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
         <el-form-item v-if="dialogMode === 'create'" label="类型">
           <el-radio-group v-model="form.tracking" data-testid="product-tracking">
-            <el-radio-button value="quantity">批量计商品</el-radio-button>
             <el-radio-button value="sn">SN 商品</el-radio-button>
+            <el-radio-button value="quantity">批量计商品</el-radio-button>
           </el-radio-group>
           <div class="form-hint">商品类型创建后不可修改</div>
         </el-form-item>
