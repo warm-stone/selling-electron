@@ -625,3 +625,19 @@
 ### Windows CI runner 自带虚拟打印机（settings 测试环境假设）
 - windows-latest 预装 Microsoft Print to PDF / XPS 等虚拟打印机 → `getPrintersAsync()` 返回非空 → "无打印机环境"假设仅在 Linux 成立
 - **通用规则**：断言打印机数量/列表的测试必须环境自适应（不变量 = 「自动选择」恒在 + 不崩溃，数量 ≥1）
+
+## 得力 DL-5801PW 云打印机真机修复：中文/Logo 全缺、英文正常（2026-11-09）
+
+### ★ 症状与根因（云「外卖」打印机的指令方言陷阱）
+- **症状**：spooler RAW 通道英文可打、GBK 中文与 GS v 0 Logo 全部不出；**同一台机器 Word 打印中文图片完美**（驱动渲染路径已验证 OK）。型号 DL-5801PW 实为 **58mm 机型（384 点/32 列）**，非 80mm——纸宽直接影响光栅参数
+- **根因一（图片，确定性）**：旧链路把 Logo PNG **原生像素宽**直发光栅（借库 printImageBuffer），58mm 打印头 384 点上限——字节宽（xL）>48 的 GS v 0 指令**整条拒收**（非截断）。与 m 参数无关的硬约束
+- **根因二（图片，方言）**：库发 `1D 76 30 30`（m=0x30=48，EPSON ASCII 别名）；EPSON 规范 0/1 与 48/49 等价，但克隆固件普遍只解析 **m=0..3**。旧 learnings「只认 0x30」结论疑为当时宽度超限的干扰变量误判——现在自研 raster.ts 发规范值 **m=0x00** + 宽度钳制 PAPER_DOTS{58mm:384, 80mm:576} + 8 点对齐 + 最近邻等比重采样（只缩不放，宽<8 极小图放大到最小光栅宽）
+- **根因三（中文，机型固有）**：云打印机 RAW 通道把载荷当 **UTF-8 文本**渲染（易联云体系；商为 KA806 等行业文档佐证）——GBK 双字节是非法 UTF-8 被静默丢弃，ASCII 恰好通过。**ESC/POS 指令层无解**，故走 driver 通道（Word 同路径）兜底；常规 ESC/POS 机的中文链路（ESC R 15 + FS & + EUC-CN）维持不动（上次真机已验证）
+- **调研方法论**：得力官方无公开 ESC/POS 编程手册——**同家族机型实测代码**（benioZhang/miniprogram-bluetoothprinter：得力 DL-581PW 裸 GB2312 无需 FS &/ESC t）+ **行业固件文档交叉** + 库源码考古三路定案；node-thermal-printer `CODE_PAGE_CHINA` 实发 `ESC R 0x0F`（国际字符集指令，非中文开关）+ EUC-CN 编码是库 quirk
+
+### driver 驱动渲染通道（架构决策：「HTML 即字节」过 PrintChannel）
+- **为什么**：云打印机 raw 通道吃字节，驱动渲染路径 100% 兼容（用户 Word 已验证）——第三渲染器 `generateReceiptHtml`（纯函数，复用 shared 网格数学，样式镜像 ReceiptPreview：NSimSun 12px 字格/221·307px 纸宽/scaleY·scaleX 放大/dataURL Logo）+ 隐藏 BrowserWindow `webContents.print(silent+deviceName+printBackground+margins none+pageSize 按内容量高)`
+- **接口复用术**：PrintChannel.send(bytes) 形态不变——driver 模式下 bytes = **收据 HTML 的 UTF-8 编码**；PrintQueue 串行/重试/G3 全免费复用，printSale/printing.ipc 测试打印仅在生成处分叉（driver → HTML 字节，else → generateReceiptBytes）
+- **量高换算**：executeJavaScript 读 `document.documentElement.scrollHeight` + `body[data-paper-width]`；px→μm ×25400/96 + **2000μm 安全垫**（倍高 transform 不占布局高度，防末行裁切）；页宽 58mm→58000μm / 80mm→80000μm
+- **pngjs.d.ts 位置教训**：环境声明放 src/main/** 只进 node tsconfig；web 程序经 tests/unit/components/ReceiptPreview.test.ts → escpos-generator → raster.ts 的**既有同源验证 import 链**同样触达 pngjs（TS7016）——跨 tsconfig 共享的声明必须放 **src/shared/**（两侧 include 公共区）
+- **验收矩阵**：typecheck node+web 双绿；vitest 745 通过（tcp 192.0.2.1 超时用例为预存环境 flaky，干净 main 复现确认无关）；e2e print-flow+settings 9/9（含新 driver 通道选项场景）
