@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PrintQueue, getChannel } from '../../../src/main/printing/print.service'
 import type { PrintChannel, PrintChannelKind } from '../../../src/main/printing/channels/print-channel'
+import { DriverChannel } from '../../../src/main/printing/channels/driver.channel'
 import { SerialChannel } from '../../../src/main/printing/channels/serial.channel'
 import { SpoolerChannel } from '../../../src/main/printing/channels/spooler.channel'
 import { TcpChannel } from '../../../src/main/printing/channels/tcp.channel'
@@ -67,6 +68,13 @@ describe('getChannel（按 settings.printer_channel 分发）', () => {
     expect(ch).toBeInstanceOf(SpoolerChannel)
     if (!(ch instanceof SpoolerChannel)) throw new Error('expected SpoolerChannel')
     expect(ch.printerName).toBe('POS-80')
+  })
+
+  it('printer_channel=driver → DriverChannel（printer_name 注入——云热敏机驱动渲染兜底）', () => {
+    const ch = getChannel({ printer_channel: 'driver', printer_name: '前台驱动打印机' })
+    expect(ch).toBeInstanceOf(DriverChannel)
+    if (!(ch instanceof DriverChannel)) throw new Error('expected DriverChannel')
+    expect(ch.printerName).toBe('前台驱动打印机')
   })
 
   it('printer_channel 缺省 → 默认 spooler（D5 主通道）', () => {

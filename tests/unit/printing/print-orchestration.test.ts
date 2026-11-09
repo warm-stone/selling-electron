@@ -453,3 +453,74 @@ describe('printSale（生成字节 → enqueuePrintJob）', () => {
     expect(events).toEqual(['start:0', 'end:0', 'start:1', 'end:1'])
   })
 })
+
+describe('printSale driver 通道（HTML 即字节——云热敏机驱动渲染兜底）', () => {
+  /** 1×1 透明 PNG（logo img 断言用——同 settings.ipc.test 夹具） */
+  const PNG_1PX_BASE64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
+  it('设置通道为 driver → 入队字节为收据 HTML（doctype + data-paper-width + UTF-8 店名 + logo img），非 ESC/POS 前缀', async () => {
+    const png = Buffer.from(PNG_1PX_BASE64, 'base64')
+    const templateWithLogo: ReceiptTemplate = {
+      ...DEFAULT_TEMPLATES['80mm'],
+      header: [{ type: 'image', logoId: 5 }, ...DEFAULT_TEMPLATES['80mm'].header]
+    }
+    const driverSettings: AppSettings = {
+      ...SETTINGS,
+      printer_channel: 'driver',
+      printer_name: '前台驱动打印机'
+    }
+    const { channel, sent } = captureChannel()
+    const createChannel = vi.fn(() => channel)
+    const { deps } = makeDeps({
+      getSettings: vi.fn(() => driverSettings),
+      getDefaultTemplate: vi.fn(() => ({
+        ...TEMPLATE_ROW,
+        config_json: JSON.stringify(templateWithLogo)
+      })),
+      readLogoById: vi.fn(async () => png),
+      createChannel
+    })
+
+    await createPrintOrchestrator(deps).printSale(7)
+
+    // 通道按 driver + printer_name 归一解析
+    expect(createChannel).toHaveBeenCalledWith({
+      printer_channel: 'driver',
+      printer_name: '前台驱动打印机',
+      tcp_host: '127.0.0.1',
+      tcp_port: 19910,
+      com_port: undefined
+    })
+
+    // 入队载荷 = HTML 文档的 UTF-8 编码（HTML 即字节——队列/重试语义不变）
+    expect(sent).toHaveLength(1)
+    const html = Buffer.from(sent[0]!).toString('utf8')
+    expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(html).toContain('<body data-paper-width="80mm">')
+    // UTF-8 店名原样进入（driver 渲染不做 GBK 降级——驱动光栅化兼容 Unicode）
+    expect(html).toContain('测试便利店')
+    expect(html).toContain('可口可乐 330ml')
+    expect(html).toContain(`data:image/png;base64,${PNG_1PX_BASE64}`)
+    // 非 ESC/POS 载荷（对照：spooler/tcp/serial 通道以 1b40 初始化开头）
+    expect(Buffer.from(sent[0]!).toString('hex').startsWith('1b40')).toBe(false)
+  })
+
+  it('driver 通道发送失败同样走「已自动重试 1 次」队列语义（G3 通道无关）', async () => {
+    const driverSettings: AppSettings = {
+      ...SETTINGS,
+      printer_channel: 'driver',
+      printer_name: '前台驱动打印机'
+    }
+    const send = vi.fn(async () => {
+      throw new Error('driver channel 驱动打印失败（打印机：前台驱动打印机）：打印机不存在')
+    })
+    const { deps } = makeDeps({
+      getSettings: vi.fn(() => driverSettings),
+      createChannel: vi.fn(() => ({ name: 'driver' as const, send }))
+    })
+
+    await expect(createPrintOrchestrator(deps).printSale(7)).rejects.toThrow(/已自动重试 1 次/)
+    expect(send).toHaveBeenCalledTimes(2) // 首发 + 重试各一次（同一 HTML 字节）
+  })
+})

@@ -1,8 +1,10 @@
 import { isPrintChannelKind, type PrintChannel, type PrintChannelKind } from './channels/print-channel'
+import { DriverChannel } from './channels/driver.channel'
 import { SerialChannel, DEFAULT_SERIAL_PORT } from './channels/serial.channel'
 import { SpoolerChannel } from './channels/spooler.channel'
 import { TcpChannel } from './channels/tcp.channel'
-import { generateReceiptBytes, type ReceiptPrintVars } from './escpos/escpos-generator'
+import { generateReceiptHtml } from './driver/receipt-html'
+import { generateReceiptBytes } from './escpos/escpos-generator'
 import { isValidReceiptTemplate } from '../db/repositories/template.repo'
 import { DEFAULT_TEMPLATES } from '../../shared/receipt/default-template'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
@@ -18,11 +20,14 @@ import type { AppSettings, PrintTemplate, SaleDetail } from '../../shared/types'
  *   预览（previewSale）与打印（printSale）共用同一份 buildReceiptPayload 组装
  *   代码（G7：两条渲染路径同源，Buffer 与 dataURL 的分叉只发生在分支出口）。
  *   T19（设置页）消费 getChannel 校验与 listSystemPrinters。
+ * - driver 通道分支（printSale 内）：设置通道为 driver 时载荷改走
+ *   generateReceiptHtml（G7 第三渲染器，HTML 即字节过 send——云热敏机
+ *   RAW 丢 GBK/光栅的驱动渲染兜底），队列/重试/G3 语义不变。
  */
 
 /** 打印相关设置（settings 表键名与 ER 设计逐字一致） */
 export interface PrintSettings {
-  /** 'spooler' | 'tcp' | 'serial'；缺省默认 spooler（D5 主通道） */
+  /** 'spooler' | 'tcp' | 'serial' | 'driver'；缺省默认 spooler（D5 主通道） */
   printer_channel?: PrintChannelKind
   /** spooler 通道：系统打印机名 */
   printer_name?: string
@@ -41,7 +46,7 @@ export interface PrintSettings {
 export function getChannel(settings: PrintSettings): PrintChannel {
   const kind = settings.printer_channel ?? 'spooler'
   if (!isPrintChannelKind(kind)) {
-    throw new Error(`未知的打印通道：${String(kind)}（可选：spooler / tcp / serial）`)
+    throw new Error(`未知的打印通道：${String(kind)}（可选：spooler / tcp / serial / driver）`)
   }
   switch (kind) {
     case 'spooler':
@@ -50,6 +55,8 @@ export function getChannel(settings: PrintSettings): PrintChannel {
       return new TcpChannel({ host: settings.tcp_host ?? '', port: settings.tcp_port })
     case 'serial':
       return new SerialChannel({ port: settings.com_port ?? DEFAULT_SERIAL_PORT })
+    case 'driver':
+      return new DriverChannel({ printerName: settings.printer_name ?? '' })
   }
 }
 
@@ -279,11 +286,21 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
   /** 打印（printing:print 主链）：组装 → 生成字节 → 串行队列入队 */
   async function printSale(saleId: number): Promise<void> {
     const payload = await buildReceiptPayload(saleId)
-    const vars: ReceiptPrintVars = {
-      ...payload.vars,
-      logoBuffers: payload.logoBuffers
-    }
-    const bytes = await generateReceiptBytes(payload.template, payload.data, vars)
+    // driver 通道分支：字节载荷 = 收据 HTML 的 UTF-8 编码（G7 第三渲染器
+    // receipt-html——云热敏机 RAW 丢 GBK/光栅的驱动渲染兜底）；其余通道
+    // 走 ESC/POS 字节。PrintQueue 串行/重试/G3 语义对两种载荷完全一致
+    // （HTML 即字节过 send(bytes)——队列/通道全复用，这正是分支点唯一的原因）。
+    const isDriver =
+      appSettingsToPrintSettings(deps.getSettings()).printer_channel === 'driver'
+    const bytes: Uint8Array = isDriver
+      ? Buffer.from(
+          generateReceiptHtml(payload.template, payload.data, payload.vars, payload.logoBuffers),
+          'utf8'
+        )
+      : await generateReceiptBytes(payload.template, payload.data, {
+          ...payload.vars,
+          logoBuffers: payload.logoBuffers
+        })
     // G3：入队失败向上抛（ipc 层转 { ok:false, error }），已落库销售不受影响
     await queue.enqueuePrintJob(bytes)
   }
