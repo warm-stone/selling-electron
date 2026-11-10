@@ -237,6 +237,24 @@ describe('checkout：附加信息校验（service 层镜像校验）', () => {
     expect(count('sales')).toBe(0)
   })
 
+  it('customer.phone 非手机号格式 → SALE_EXTRAS_PHONE_INVALID，零落库（checkout 全新输入严校验）', () => {
+    const cola = addProduct('可乐', { barcode: 'EX19', stock: 10 })
+    expectReject(
+      () =>
+        svc().checkout(
+          [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+          {
+            customer: { name: '张三', phone: '05718888888', address: '', note: '' }
+          }
+        ),
+      'SALE_EXTRAS_PHONE_INVALID',
+      '请输入正确的手机号（1 开头 11 位）'
+    )
+    expect(count('sales')).toBe(0)
+    expect(count('sale_extras')).toBe(0)
+    expect(count('customers')).toBe(0)
+  })
+
   it('customer 四字段全空 + subsidy=false → 合法（视为无客户信息）', () => {
     const cola = addProduct('可乐', { barcode: 'EX05', stock: 10 })
     expect(() =>
@@ -488,6 +506,55 @@ describe('checkout：附加信息回滚原子性（G2 单事务）', () => {
 describe('updateExtra：修改销售附加信息', () => {
   it('单不存在 → SALE_NOT_FOUND', () => {
     expectReject(() => svc().updateExtra(99999, {}), 'SALE_NOT_FOUND')
+  })
+
+  it('电话实际变更但非手机号格式 → SALE_EXTRAS_PHONE_INVALID，零写入', () => {
+    const cola = addProduct('可乐', { barcode: 'EX20', stock: 10 })
+    const service = svc()
+    const receipt = service.checkout(
+      [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+      { customer: { name: '王五', phone: '13800001234', address: '', note: '' } }
+    )
+    expect(count('customers')).toBe(1)
+
+    expectReject(
+      () =>
+        service.updateExtra(receipt.id, {
+          customer: { name: '王五', phone: '12345678901', address: '', note: '' }
+        }),
+      'SALE_EXTRAS_PHONE_INVALID',
+      '请输入正确的手机号（1 开头 11 位）'
+    )
+    // 关联未动：仍指原客户
+    expect(extraRow(receipt.id).customer_id).toBe(1)
+    expect(count('customers')).toBe(1)
+  })
+
+  it('电话未变（存量座机关联原值重传）→ 格式校验放行，可改姓名', () => {
+    const cola = addProduct('可乐', { barcode: 'EX21', stock: 10 })
+    const service = svc()
+    // checkout 带 order_note：确保 sale_extras 行存在（快单路径不写附加行）
+    const receipt = service.checkout(
+      [{ product_id: cola, quantity: 1, unit_price_cents: 100, sn: null }],
+      { order_note: '备注' }
+    )
+    // SQL 直插座机档案并挂接（service 路径已拦座机——存量数据模拟走 DB 直写）
+    db.prepare(
+      "INSERT INTO customers (name, phone, address, note) VALUES ('老客户', '05718888888', '', '')"
+    ).run()
+    db.prepare('UPDATE sale_extras SET customer_id = 1 WHERE sale_id = ?').run(
+      receipt.id
+    )
+
+    const updated = service.updateExtra(receipt.id, {
+      customer: { name: '老客户（改名）', phone: '05718888888', address: '', note: '' }
+    })
+
+    expect(updated.extras?.customer).toMatchObject({
+      name: '老客户（改名）',
+      phone: '05718888888'
+    })
+    expect(count('customers')).toBe(1)
   })
 
   it('voided 单 → SALE_ALREADY_VOIDED（Q4 定案），零写入', () => {

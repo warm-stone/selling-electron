@@ -36,6 +36,7 @@ import { createSaleExtraRepo } from '../db/repositories/sale-extra.repo'
 import type { SaleExtraPatch } from '../db/repositories/sale-extra.repo'
 import { createCustomerRepo } from '../db/repositories/customer.repo'
 import { createSettingsRepo } from '../db/repositories/settings.repo'
+import { isValidMobilePhone, INVALID_PHONE_MESSAGE } from '../../shared/utils/phone'
 import {
   RECENT_SALESPERSONS_KEY,
   parseRecentSalespersons,
@@ -54,6 +55,7 @@ export type SaleErrorCode =
   | 'SALE_SN_SOLD'
   | 'SALE_SN_PRODUCT_MISMATCH'
   | 'SALE_EXTRAS_PHONE_REQUIRED'
+  | 'SALE_EXTRAS_PHONE_INVALID'
   | 'SALE_EXTRAS_SUBSIDY_REQUIRES_CUSTOMER'
 
 /** 带 code 的业务错误（message 为面向用户的中文文案） */
@@ -156,6 +158,10 @@ function assertValidExtras(extras: CheckoutExtrasInput | undefined): void {
       'SALE_EXTRAS_PHONE_REQUIRED',
       '填写客户信息时，电话不能为空'
     )
+  }
+  // 手机号格式（checkout 是全新输入，严校验）
+  if (customer != null && trimTo(customer.phone) !== '' && !isValidMobilePhone(customer.phone)) {
+    throw new SaleServiceError('SALE_EXTRAS_PHONE_INVALID', INVALID_PHONE_MESSAGE)
   }
   if (extras.is_national_subsidy === true) {
     const hasName = customer != null && trimTo(customer.name) !== ''
@@ -511,6 +517,17 @@ export function createSaleService(db: Database.Database) {
             'SALE_EXTRAS_PHONE_REQUIRED',
             '填写客户信息时，电话不能为空'
           )
+        }
+
+        // 手机号格式：与 checkout 严校验不同，仅对「实际变更的电话」生效——
+        // 未变（含存量座机等旧格式关联）放行，patch 未变电话不受格式约束
+        if (
+          customerPatch != null &&
+          phoneT !== '' &&
+          phoneT !== trimTo(existing?.customer?.phone) &&
+          !isValidMobilePhone(phoneT)
+        ) {
+          throw new SaleServiceError('SALE_EXTRAS_PHONE_INVALID', INVALID_PHONE_MESSAGE)
         }
 
         // 综合最终状态（Q5）：final = 已有行被 patch 覆盖后的结果

@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useCartStore } from '../../stores/cart.store'
 import { formatMoney } from '../../../../shared/utils/money'
+import { isValidMobilePhone, INVALID_PHONE_MESSAGE } from '../../../../shared/utils/phone'
 import type { CheckoutExtrasInput, Customer } from '../../../../shared/types'
 
 /**
@@ -15,6 +16,7 @@ import type { CheckoutExtrasInput, Customer } from '../../../../shared/types'
  * 校验规则镜像后端 SaleService（错误文案逐字一致）：
  * - name/address/note 任一非空 ⇒ phone 必填（'填写客户信息时，电话不能为空'）
  * - 国补开 ⇒ name + phone 必填（'参与国补需填写客户姓名和电话'）
+ * - phone 非空 ⇒ 手机号格式（'请输入正确的手机号（1 开头 11 位）'）
  * - ★客户备注缝隙（issues.md L2 修复）：客户信息组以电话为锚——任一客户字段
  *   （含 note）有值而电话为空即阻断，防止「只填客户备注」无载体（phone 空 →
  *   不建档 → note 无处安放）；service 层已镜像同规则（UI+service 双防线）。
@@ -79,7 +81,13 @@ const rules: FormRules = {
     {
       trigger: ['blur', 'change'],
       validator: (_rule, value: string, callback) => {
-        if ((value ?? '').trim() !== '') return callback()
+        const phone = (value ?? '').trim()
+        if (phone !== '') {
+          // 非空先过手机号格式（后端 SALE_EXTRAS_PHONE_INVALID，文案逐字一致）
+          return isValidMobilePhone(phone)
+            ? callback()
+            : callback(new Error(INVALID_PHONE_MESSAGE))
+        }
         // 国补开 ⇒ phone 必填（后端规则二，文案逐字一致）
         if (form.isNationalSubsidy) return callback(new Error('参与国补需填写客户姓名和电话'))
         // name/address/note 任一非空 ⇒ phone 必填（后端规则一，文案逐字一致）

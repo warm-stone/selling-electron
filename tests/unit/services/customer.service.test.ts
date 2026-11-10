@@ -96,6 +96,44 @@ describe('customer.service（计划任务 7：客户管理业务核心）', () =
     expect(countCustomers()).toBe(0)
   })
 
+  it('create 非手机号格式 → CUSTOMER_PHONE_INVALID（座机/短号/含字母），零落库', () => {
+    for (const phone of ['05718888888', '138', '138001380001', '1380013800a']) {
+      const err = expectErr(() =>
+        svc().create({ name: '张三', phone, address: '', note: '' })
+      )
+      expect(err.code).toBe('CUSTOMER_PHONE_INVALID')
+      expect(err.message).toBe('请输入正确的手机号（1 开头 11 位）')
+    }
+    expect(countCustomers()).toBe(0)
+  })
+
+  it('update 电话实际变更但非手机号格式 → CUSTOMER_PHONE_INVALID', () => {
+    const c = mkCustomer('张三', '13800138000')
+    const err = expectErr(() => svc().update(c.id, { phone: '12345678901' }))
+    expect(err.code).toBe('CUSTOMER_PHONE_INVALID')
+    expect(err.message).toBe('请输入正确的手机号（1 开头 11 位）')
+    // 拦截在写入前：原电话未动
+    expect(svc().list('13800138000').total).toBe(1)
+  })
+
+  it('update 电话未变（存量座机等旧格式档案）→ 格式校验放行，可改其他字段', () => {
+    // SQL 直插旧格式档案（service.create 已拦截座机——存量数据模拟走 DB 直写）
+    db.prepare(
+      "INSERT INTO customers (name, phone, address, note) VALUES ('老客户', '05718888888', '', '')"
+    ).run()
+    const legacy = db
+      .prepare('SELECT id FROM customers WHERE phone = ?')
+      .get('05718888888') as { id: number }
+
+    // 电话原值重传 + 改名：未变放行
+    const updated = svc().update(legacy.id, {
+      name: '老客户（改名）',
+      phone: '05718888888'
+    })
+    expect(updated.name).toBe('老客户（改名）')
+    expect(updated.phone).toBe('05718888888')
+  })
+
   it('update 改名成功：phone 不传不动（动态 SET 只刷出现键）', () => {
     const c = mkCustomer('张三', '13800138000')
     const updated = svc().update(c.id, { name: '张三丰' })

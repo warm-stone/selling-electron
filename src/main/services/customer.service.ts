@@ -8,24 +8,28 @@
  *   （CUSTOMER_PHONE_REQUIRED），不能依赖 DB 兜底；
  * - phone 查重：create 全量查、update 排除自身（hit.id !== id）；
  *   错误 message 内嵌现有客户姓名（renderer 直接展示，无需二次查询）；
+ * - phone 手机号格式校验（CUSTOMER_PHONE_INVALID）：create 严校验；
+ *   update 仅在电话实际变更时校验——未变放行，兼容存量座机等旧格式档案
+ *   （只改姓名/地址不被电话格式卡住）；
  * - UNIQUE 兜底（belt-and-suspenders）：better-sqlite3 同步单线程下查重与
  *   写入间无并发窗口，但 repo 调用仍 catch SQLITE_CONSTRAINT_UNIQUE /
  *   message 含 UNIQUE → 映射 CUSTOMER_PHONE_EXISTS；
  * - update 存在性校验：repo.update 对不存在 id 静默（0 行受影响），
  *   service 在 update 后回读校验（repo.getById → CUSTOMER_NOT_FOUND）。
  *
- * 本期边界：无删除（错误码防御性保留）、无订单数/消费额聚合、无导入导出、
- * 无电话格式校验（只 trim 非空）。
+ * 本期边界：无删除（错误码防御性保留）、无订单数/消费额聚合、无导入导出。
  */
 
 import type Database from 'better-sqlite3'
 import type { Customer } from '../../shared/types'
 import { createCustomerRepo } from '../db/repositories/customer.repo'
 import type { CustomerPatch } from '../db/repositories/customer.repo'
+import { isValidMobilePhone, INVALID_PHONE_MESSAGE } from '../../shared/utils/phone'
 
 /** service 错误码（IPC 层透传 message 给 renderer） */
 export type CustomerErrorCode =
   | 'CUSTOMER_PHONE_REQUIRED'
+  | 'CUSTOMER_PHONE_INVALID'
   | 'CUSTOMER_PHONE_EXISTS'
   | 'CUSTOMER_NOT_FOUND'
 
@@ -113,6 +117,9 @@ export function createCustomerService(db: Database.Database) {
       if (phone === '') {
         throw new CustomerServiceError('CUSTOMER_PHONE_REQUIRED', '客户电话不能为空')
       }
+      if (!isValidMobilePhone(phone)) {
+        throw new CustomerServiceError('CUSTOMER_PHONE_INVALID', INVALID_PHONE_MESSAGE)
+      }
       const existing = repo.findByPhone(phone)
       if (existing) {
         throw new CustomerServiceError(
@@ -148,6 +155,15 @@ export function createCustomerService(db: Database.Database) {
         throw new CustomerServiceError('CUSTOMER_PHONE_REQUIRED', '客户电话不能为空')
       }
       if (normalized.phone !== undefined) {
+        // 格式校验仅对「实际变更的电话」生效：未变（含存量座机等旧格式）放行
+        const currentRow = repo.getById(id)
+        if (
+          currentRow != null &&
+          normalized.phone !== currentRow.phone &&
+          !isValidMobilePhone(normalized.phone)
+        ) {
+          throw new CustomerServiceError('CUSTOMER_PHONE_INVALID', INVALID_PHONE_MESSAGE)
+        }
         const hit = repo.findByPhone(normalized.phone)
         if (hit && hit.id !== id) {
           throw new CustomerServiceError(

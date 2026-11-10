@@ -4,11 +4,13 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { Edit, Plus, Search } from '@element-plus/icons-vue'
 import type { Customer } from '../../../shared/types'
+import { isValidMobilePhone, INVALID_PHONE_MESSAGE } from '../../../shared/utils/phone'
 import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 
 /**
  * 客户管理页（Task 11）：搜索（防抖 300ms，keyword 匹配姓名/电话）+ 新增/编辑
- * （四字段：姓名/电话/地址/客户备注；电话必填非空——不做格式校验，照后端语义）。
+ * （四字段：姓名/电话/地址/客户备注；电话必填非空 + 手机号格式校验——镜像
+ * customer.service 规则；编辑时电话未变放行，兼容存量座机等旧格式档案）。
  *
  * - 无删除：本期客户模块不做删除（按钮与接口均不出现），列表仅【编辑】操作。
  * - 服务端分页：customers:list 契约自带 limit/offset 且返回 total，页大小固定 20，
@@ -47,17 +49,23 @@ const form = reactive<CustomerFormState>({
   note: ''
 })
 
-/** 电话必填非空（仅 trim 判空，无格式校验——后端同语义）；空串落库会触发 service 拦截 */
+/** 电话必填非空 + 手机号格式（镜像 service 规则；编辑未变放行兼容存量档案） */
 const rules: FormRules = {
   phone: [
     {
       required: true,
       validator: (_rule, value: string, callback) => {
-        if (typeof value !== 'string' || value.trim().length === 0) {
-          callback(new Error('电话不能为空'))
-        } else {
-          callback()
+        const phone = (value ?? '').trim()
+        if (typeof value !== 'string' || phone.length === 0) {
+          return callback(new Error('电话不能为空'))
         }
+        if (dialogMode.value === 'edit' && phone === editingRow.value?.phone) {
+          return callback()
+        }
+        if (!isValidMobilePhone(phone)) {
+          return callback(new Error(INVALID_PHONE_MESSAGE))
+        }
+        callback()
       },
       trigger: 'blur'
     }

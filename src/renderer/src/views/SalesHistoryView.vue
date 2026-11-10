@@ -12,6 +12,7 @@ import type {
   SaleListItem,
   SaleStatus
 } from '../../../shared/types/domain'
+import { isValidMobilePhone, INVALID_PHONE_MESSAGE } from '../../../shared/utils/phone'
 
 /**
  * 销售记录查询（Task 13）：日期范围 + 状态筛选 + 列表 + 明细（快照列）+ 作废 + 重打入口。
@@ -188,7 +189,7 @@ const salespersonOptions = ref<string[]>([])
 
 // ── 客户电话联想（Q5：失焦查全等项；命中「将关联」/清空「将解绑」/不变不提示）──
 
-type PhoneHintKind = 'match' | 'unbind' | 'new'
+type PhoneHintKind = 'match' | 'unbind' | 'new' | 'invalid'
 
 const phoneHintKind = ref<PhoneHintKind | null>(null)
 const phoneMatch = ref<Customer | null>(null)
@@ -201,6 +202,8 @@ const phoneHintText = computed<string>(() => {
       return '将解绑客户（保存后生效）'
     case 'new':
       return `将以「${extraForm.customerPhone.trim()}」新建客户`
+    case 'invalid':
+      return INVALID_PHONE_MESSAGE
     default:
       return ''
   }
@@ -262,6 +265,12 @@ async function onPhoneBlur(): Promise<void> {
     phoneMatch.value = null
     return
   }
+  // 手机号格式不合法：红色提示，不查客户（合法格式才进入关联/新建判定）
+  if (!isValidMobilePhone(phone)) {
+    phoneHintKind.value = 'invalid'
+    phoneMatch.value = null
+    return
+  }
   const hit = await resolvePhoneMatch(phone)
   // 查询期间输入又变了：过期结果不展示（下次失焦重新判定）
   if (extraForm.customerPhone.trim() !== phone) return
@@ -288,6 +297,10 @@ async function saveExtra(): Promise<void> {
   if (phone !== extraInitial.customerPhone) {
     if (phone === '') {
       patch.customer = null
+    } else if (!isValidMobilePhone(phone)) {
+      // 前端兜底（后端 SALE_EXTRAS_PHONE_INVALID 双防线）——免 IPC 往返直接提示
+      ElMessage.error(INVALID_PHONE_MESSAGE)
+      return
     } else {
       // 命中档案原值回传（后端 find-or-create 命中则 PUT 覆盖，同值覆写不丢数据）；
       // 未命中传空串 → 建裸电话客户（name 可后续在客户管理补录）
@@ -849,6 +862,10 @@ function centsToYuan(cents: number): string {
 
 .sales-history__phone-hint--new {
   color: var(--el-color-primary);
+}
+
+.sales-history__phone-hint--invalid {
+  color: var(--el-color-danger);
 }
 
 .sales-history__edit-scope {
