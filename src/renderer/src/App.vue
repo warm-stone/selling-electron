@@ -37,7 +37,10 @@ const activeMenu = computed(() => route.path)
     <el-aside class="app-aside" width="200px">
       <div class="app-brand">
         <span class="app-brand__logo">销</span>
-        <span class="app-brand__name">{{ appStore.appName }}</span>
+        <div class="app-brand__text">
+          <span class="app-brand__name">{{ appStore.appName }}</span>
+          <span class="app-brand__version">v{{ appStore.appVersion }}</span>
+        </div>
       </div>
       <el-menu class="app-menu" router :default-active="activeMenu">
         <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
@@ -87,11 +90,27 @@ const activeMenu = computed(() => route.path)
   font-weight: 700;
 }
 
+.app-brand__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .app-brand__name {
   color: #ffffff;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.app-brand__version {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: text;
 }
 
 /* 沿用 Element Plus menu 令牌体系做深色定制 */

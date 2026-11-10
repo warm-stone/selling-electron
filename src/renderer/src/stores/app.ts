@@ -8,6 +8,8 @@ import { defineStore } from 'pinia'
 export const useAppStore = defineStore('app', {
   state: () => ({
     /** 应用名（侧边栏品牌区展示） */
-    appName: '桌面销存系统'
+    appName: '桌面销存系统',
+    /** 应用版本号（package.json version 编译期注入） */
+    appVersion: __APP_VERSION__
   })
 })
