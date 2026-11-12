@@ -261,3 +261,34 @@
 ### 验证基线（T10 回归参照，追加后）
 - 三范围（printing/ + printing/diagnostics/ + ipc/）→ 21 文件 352 用例：350 绿 + 1 失败（tcp.channel「连接超时」环境 flake）+ 1 skip；**flake 预置证明**：`git stash -u` 清掉本任务全部改动后该用例仍失败（T6/T8 留档的第 3 次复核）；typecheck node+web 零 error；全量 `npm test` → 951 绿 + 1 flake + 1 skip
 - 证据：task-9-guards.txt 追加段（activeJobs/isBusy/接线链源码锚点 + busy 三用例 + 端到端用例 + stash 证明）
+
+## Task 10 诊断面板 UI + store 扩展 + E2E + 真机清单落地记录（2026-11-12）
+
+### ★ pinia 深度响应式 Proxy 过不了 contextBridge（E2E 抓出的真实产品 bug）
+- exportDiagnosisReport 直传 `this.diagnosisReport` → ipcRenderer.invoke 结构化克隆抛 `An object could not be cloned`（DataCloneError）→ 用户看到「报告导出失败：An object could not be cloned.」
+- 根因：pinia state 是 Vue 深度响应式 Proxy，structuredClone 不接受 Proxy 对象。**此前所有 renderer→main invoke 都只送 primitive / 表单字面量展开（浅 plain object），本任务是首个把 store 内深对象整包回传 IPC 的路径**——这类 bug 单测抓不到（mock 的 window.api 不做克隆），只有真 Electron E2E 能暴露
+- 修复：过桥前 `JSON.parse(JSON.stringify(report))` 深拷贝（报告契约即纯 JSON；对齐 fixtures 深拷贝纪律）。F 终审如再遇「store 对象回传 IPC」，此为定式
+
+### ★ el-dialog 的三个测试时序坑（jsdom 与 E2E 各半）
+- **jsdom 组件测试**：EP 2.x dialog 的 visible/rendered 在 `onMounted` 里按 modelValue 置位——mount() 同步返回时 overlay 仍 display:none 且默认槽不渲染（sync html 380 字符 → flushPromises 后 4693）。mountDialog 必须 async + flush
+- **E2E 关闭≠卸载**：dialog 关闭后 DOM 节点保留（v-show 隐藏）——断言「对话框收起」要用 `toBeHidden()`，`toHaveCount(0)` 永远失败
+- **modal overlay 拦截点击**：场景间遗留打开的 dialog 会盖住侧边栏菜单——gotoSettings 需先收起遗留对话框（`diagnosis-dialog-close` testid）再点菜单
+
+### ★ 「mock 主进程 IPC 不可行」的推翻——removeHandler + handle 重挂实测可行
+- 计划的从简决策基于「_electron 启动真 app，renderer 无法注入 mock」——实测**主进程侧重挂 handler 完全可行**：`electronApp.evaluate(electron => { electron.ipcMain.removeHandler('printing:diagnose'); electron.ipcMain.handle(...) })`（preload 每次 invoke 动态查注册表，无缓存）
+- 落地：场景四~七注入 fixture 报告（**真实 analyzeSnapshot 从 T2 fixtures 产出 findings，零手造**）+ mock repair outcome → store 状态机 / 对话框三区 / L2 确认流 / UAC info 路径 / verify 刷新全链路在 Linux 获得确定性 E2E，且不触任何真打印机/PowerShell（MUST NOT 不破）
+- 计划三场景（①面板渲染 ②Linux 守卫错误态 ③导出禁用）照常落地；注入场景是证据要求（repair-flow.png / export.txt）驱动的超集。平台适配：②用 `test.skip(process.platform === 'win32')`——win32 release CI 跑不到 Linux 守卫，UI 错误路径由注入场景全平台覆盖
+- 证据链：panel-render / report-render / repair-flow（确认弹窗含破坏半径文案）/ diagnosis-error / export.txt（BOM `EF BB BF` 起始）五件
+
+### 信封与文案的两次翻车（测试先红的实际收益）
+- mock repair handler 返回 `{outcome, verify}` 忘了 `ok: true` → store 走 error 分支——**res 信封是契约一部分，spread 构造时显式补 ok**
+- 任务锁定的 L2 破坏半径三句是 substring 断言：往括号内插限定词（「（保留旧端口可回退，建议先确认打印机 IP）」）即破坏 verbatim——文案补充只能加在句号之后
+
+### tsconfig 双侧接线与 LSP 幽灵（T9 立场延续）
+- `tests/unit/renderer/**`（新目录）挂 tsconfig.web.json include + tsconfig.node.json exclude（对齐 tests/unit/components 惯例——.vue 与 element-plus 只有 web 侧能解析）
+- 组件测试 import `src/main/printing/diagnostics/analyze`（纯函数运行时模块）+ fixtures：跨 include 文件在 `--composite false`（typecheck 命令实际形态）下正常编译；LSP 读 composite:true 的 tsconfig 报「File is not listed」幽灵错误——与 preload 引 main schema 同款，忽略（MUST NOT 既定）
+
+### 验证基线
+- `npm run typecheck` node+web 双绿；`npm test` → 966 绿 + 1 skip + 1 失败（tcp.channel 连接超时 flake——`git stash -u` 后仍失败的**第 4 次** stash 复核，环境性非阻塞）
+- `npm run test:e2e` 全量 **99/99 全绿**（92 基线 + qa 套件 + 本任务 diagnosis.spec 7 场景）；组件测试 15 用例（真实 analyzeSnapshot 喂 fixture 报告：三区/排序/徽章矩阵/L1 直发/L2 确认文案三句逐字/L4 引导/空态）
+- 交付面：printing.store（+4 actions + 状态机）、SettingsView 第四张卡（打印通道卡片之后、页面第四张）、DiagnosisDialog.vue（纯 props/emits 可独立挂载）、checklist 第 10 节（诊断跑通 + 5 项 spike + 汇总行）、README 真机验证段 9→10 项同步

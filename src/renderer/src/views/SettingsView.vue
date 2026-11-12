@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Picture, Printer, Refresh } from '@element-plus/icons-vue'
+import { Delete, Picture, Printer, Refresh, Search } from '@element-plus/icons-vue'
+import DiagnosisDialog from '@renderer/components/settings/DiagnosisDialog.vue'
+import { usePrintingStore } from '@renderer/stores/printing.store'
 import type { AppSettings, PrinterChannel } from '../../../shared/types'
 
 interface PrinterEntry {
@@ -22,6 +24,15 @@ const savingPrint = ref(false)
 const testing = ref(false)
 
 const shopForm = reactive({ shop_name: '', shop_phone: '', receipt_note: '' })
+
+/** 打印诊断（T10）：状态与动作全在 printing store（对话框为纯渲染子组件） */
+const printingStore = usePrintingStore()
+
+/** 对话框在「采集中」与「已有报告」时展示；诊断失败态由 error toast 承担（不弹窗） */
+const diagnosisDialogVisible = computed(
+  () =>
+    printingStore.diagnosisState === 'collecting' || printingStore.diagnosisState === 'report'
+)
 
 const printForm = reactive({
   printer_channel: 'spooler' as PrinterChannel,
@@ -419,6 +430,54 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
         </el-button>
       </footer>
     </el-card>
+
+    <!-- ═══ 卡片四：打印机诊断（printer-diagnostics T10——采集 → 规则 → 报告 → 修复建议）═══ -->
+    <el-card class="settings-card diagnosis-card" shadow="never">
+      <template #header>
+        <div class="card-head">
+          <span class="card-head__marker" aria-hidden="true"></span>
+          <span class="card-head__title">打印机诊断</span>
+          <span class="card-head__desc">打印异常时一键采集环境、定位根因</span>
+        </div>
+      </template>
+
+      <p class="diagnosis-intro">
+        诊断会采集系统打印服务状态、每台打印机的驱动与端口、队列任务与事件日志（仅 Windows，约需数秒），
+        生成可导出的诊断报告；发现的问题会附带可执行的修复动作或人工处理引导。
+      </p>
+
+      <footer class="card-foot">
+        <span class="card-foot__hint">诊断只读不改系统；修复动作执行前会再次向您确认。</span>
+        <div class="card-foot__actions">
+          <el-button
+            :disabled="printingStore.diagnosisReport === null"
+            data-testid="diagnosis-export-btn"
+            @click="printingStore.exportDiagnosisReport()"
+          >
+            导出报告
+          </el-button>
+          <el-button
+            type="primary"
+            :icon="Search"
+            data-testid="diagnosis-start-btn"
+            :loading="printingStore.diagnosisState === 'collecting'"
+            @click="printingStore.diagnose()"
+          >
+            开始诊断
+          </el-button>
+        </div>
+      </footer>
+    </el-card>
+
+    <!-- 诊断报告对话框（三区渲染 + 修复动作确认流；IPC 与 toast 在 store） -->
+    <DiagnosisDialog
+      :visible="diagnosisDialogVisible"
+      :report="printingStore.diagnosisReport"
+      :loading="printingStore.diagnosisState === 'collecting'"
+      @update:visible="printingStore.closeDiagnosis()"
+      @repair="(actionId, targetPrinter) => printingStore.repairAction(actionId, targetPrinter)"
+      @export="printingStore.exportDiagnosisReport()"
+    />
   </section>
 </template>
 
@@ -694,5 +753,13 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
   margin: 0;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+/* ── 诊断卡片说明（T10）── */
+.diagnosis-intro {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
 }
 </style>

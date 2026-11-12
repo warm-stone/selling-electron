@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { createTypedInvoke } from '../../../shared/types/ipc'
+import type {
+  DiagnosticReport,
+  RepairActionId
+} from '../../../main/printing/diagnostics/schema'
 
 /**
  * 打印编排全局状态（Task 15）：小票预览弹窗的跨页复用中枢。
@@ -9,10 +13,27 @@ import { createTypedInvoke } from '../../../shared/types/ipc'
  * 打开同一份 ReceiptPreviewDialog——「可复用组件」的全局状态载体。
  * print 走主进程串行队列（printing:print），失败 toast 由主进程 error
  * 文案承担（含通道名 + 重打引导——G3：销售已保存不受影响）。
+ *
+ * printer-diagnostics（T10）追加：打印机诊断三态机 + 报告载荷——
+ * SettingsView「打印机诊断」卡片与 DiagnosisDialog 的共享状态源
+ * （弹窗本体 props/emits 解耦，本 store 承担 IPC 与 toast）。
  */
 
 /** printing:preview res 的运行时结构超集形态（契约只声明 template+sale，附加字段由主进程 PreviewPayload 提供） */
 type PrintingPreviewResult = Awaited<ReturnType<typeof window.api.printing.preview>>
+
+/**
+ * printing:repair res 的运行时结构超集（T9 交接）：契约只声明 ok/error/verify，
+ * 主进程另附 outcome（repair.runner RepairOutcome 的形状镜像——该模块非 main
+ * 纯类型模块，不跨侧 import；字段契约见 diagnostics.ipc「运行时结构超集」注释，
+ * 引导文案在 outcome.detail，前端按 outcome.status 分支）。
+ */
+type PrintingRepairResult = Awaited<ReturnType<typeof window.api.printing.repair>> & {
+  outcome?: { status: 'done' | 'needs-manual' | 'dry-run'; detail?: string; commands?: string[] }
+}
+
+/** 诊断流程状态机：idle 未诊断 / collecting 采集中 / report 已出报告 / error 诊断失败 */
+export type DiagnosisState = 'idle' | 'collecting' | 'report' | 'error'
 
 const typedInvoke = createTypedInvoke(window.api.invoke)
 
@@ -28,7 +49,9 @@ export const usePrintingStore = defineStore('printing', {
     visible: false,
     loading: false,
     printing: false,
-    payload: null as PrintingPreviewResult | null
+    payload: null as PrintingPreviewResult | null,
+    diagnosisState: 'idle' as DiagnosisState,
+    diagnosisReport: null as DiagnosticReport | null
   }),
 
   getters: {
@@ -78,6 +101,87 @@ export const usePrintingStore = defineStore('printing', {
     close(): void {
       this.visible = false
       this.payload = null
+    },
+
+    /**
+     * 开始诊断（printing:diagnose）：collecting → report/error 三态机。
+     * 失败（含非 Windows 平台守卫 G11）error toast；报告就位后 DiagnosisDialog 展示三区。
+     */
+    async diagnose(): Promise<void> {
+      if (this.diagnosisState === 'collecting') return
+      this.diagnosisState = 'collecting'
+      try {
+        const res = await window.api.printing.diagnose()
+        if (res.ok && res.report) {
+          this.diagnosisReport = res.report
+          this.diagnosisState = 'report'
+        } else {
+          this.diagnosisState = 'error'
+          ElMessage.error(res.error ?? '诊断失败')
+        }
+      } catch (err) {
+        this.diagnosisState = 'error'
+        ElMessage.error(`诊断失败：${extractIpcErrorMessage(err)}`)
+      }
+    },
+
+    /**
+     * 执行修复动作（printing:repair）：done 附 verify 时刷新报告；
+     * needs-manual（含 UAC 拒绝）/ dry-run 用 info 引导而非红条（T9 契约）。
+     */
+    async repairAction(actionId: RepairActionId, targetPrinter?: string): Promise<void> {
+      try {
+        const res = (await window.api.printing.repair(
+          actionId,
+          targetPrinter
+        )) as PrintingRepairResult
+        if (res.ok) {
+          if (res.verify) this.diagnosisReport = res.verify
+          if (res.outcome?.status === 'needs-manual') {
+            ElMessage.info(res.outcome.detail ?? '该操作需要人工处理，请按引导步骤操作')
+          } else if (res.outcome?.status === 'dry-run') {
+            ElMessage.info(res.outcome.detail ?? '已执行预演（未改动系统）')
+          } else {
+            ElMessage.success('修复动作已执行')
+          }
+        } else {
+          ElMessage.error(res.error ?? '修复失败')
+        }
+      } catch (err) {
+        ElMessage.error(`修复失败：${extractIpcErrorMessage(err)}`)
+      }
+    },
+
+    /**
+     * 导出诊断报告（printing:diagnoseExport）：保存对话框取消（无 filePath）静默；
+     * 成功 toast 带完整路径。
+     *
+     * ★ 过桥前必须 JSON 深拷贝：pinia state 是 Vue 深度响应式 Proxy，
+     * contextBridge 的结构化克隆不接受 Proxy（DataCloneError「An object
+     * could not be cloned」——T10 E2E 场景七实测）；报告契约即纯 JSON。
+     */
+    async exportDiagnosisReport(): Promise<void> {
+      const report = this.diagnosisReport
+      if (report === null) return
+      try {
+        const plain = JSON.parse(JSON.stringify(report)) as DiagnosticReport
+        const res = await window.api.printing.exportReport(plain)
+        if (!res.ok) {
+          ElMessage.error(res.error ?? '报告导出失败')
+        } else if (res.filePath) {
+          ElMessage.success(`报告已导出：${res.filePath}`)
+        }
+      } catch (err) {
+        ElMessage.error(`报告导出失败：${extractIpcErrorMessage(err)}`)
+      }
+    },
+
+    /**
+     * 关闭诊断对话框：状态机回 idle，报告保留——卡片「导出报告」按钮仍可用，
+     * 重新诊断时整体覆盖。采集中关闭则报告就位后对话框会重新打开（结果送达）。
+     */
+    closeDiagnosis(): void {
+      this.diagnosisState = 'idle'
     }
   }
 })

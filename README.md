@@ -103,7 +103,7 @@ WAL 说明：`.db` 是主数据库文件；`.db-wal` 是预写日志（应用运
 
 ## 真机验证
 
-安装包与打印/扫码等真机环节的逐项验证指引：**[docs/windows-manual-checklist.md](docs/windows-manual-checklist.md)**（9 项：安装建库、打印机列表、spooler 测试打印、结账打印全要素、tcp 通道、扫码枪（含中文输入法状态）、连续结账串行、生僻字降级、数据备份）。
+安装包与打印/扫码等真机环节的逐项验证指引：**[docs/windows-manual-checklist.md](docs/windows-manual-checklist.md)**（10 项：安装建库、打印机列表、spooler 测试打印、结账打印全要素、tcp 通道、扫码枪（含中文输入法状态）、连续结账串行、生僻字降级、数据备份、打印机诊断（含 spike 验证））。
 
 ## 已知设计边界
 
