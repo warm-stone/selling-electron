@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DiagnosticReport, RepairActionId } from '../main/printing/diagnostics/schema'
 import type {
   AppSettings,
   CheckoutExtrasInput,
@@ -219,7 +220,23 @@ const api = {
      * （error 含通道名 + 重打引导）——销售已落库不受影响（G3）。
      */
     print: (saleId: number): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('printing:print', { sale_id: saleId })
+      ipcRenderer.invoke('printing:print', { sale_id: saleId }),
+    /** 打印诊断（printer-diagnostics T1）：采集 → 规则 → 报告；printerName 聚焦单机 */
+    diagnose: (
+      printerName?: string
+    ): Promise<IpcChannels['printing:diagnose']['res']> =>
+      ipcRenderer.invoke('printing:diagnose', { printerName }),
+    /** 执行修复动作（L1 自动 / L2 确认后执行）；verify 为动作后复核报告 */
+    repair: (
+      actionId: RepairActionId,
+      targetPrinter?: string
+    ): Promise<IpcChannels['printing:repair']['res']> =>
+      ipcRenderer.invoke('printing:repair', { actionId, targetPrinter }),
+    /** 导出诊断报告（主进程 showSaveDialog 后写文件；成功返回 filePath） */
+    exportReport: (
+      report: DiagnosticReport
+    ): Promise<IpcChannels['printing:diagnoseExport']['res']> =>
+      ipcRenderer.invoke('printing:diagnoseExport', { report })
   },
 
   // ── 模板（Task 16：小票模板 CRUD + 设默认；类型对齐 IpcChannels 契约防漂移）──

@@ -41,6 +41,10 @@ const EXPECTED_CHANNELS = [
   'printing:printers',
   'printing:preview',
   'printing:print',
+  // 打印诊断（printer-diagnostics T1 契约：诊断/修复/导出）
+  'printing:diagnose',
+  'printing:repair',
+  'printing:diagnoseExport',
   // 模板
   'templates:list',
   'templates:create',

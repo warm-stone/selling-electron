@@ -1,3 +1,4 @@
+import type { DiagnosticReport, RepairActionId } from '../main/printing/diagnostics/schema'
 import type {
   AppSettings,
   CheckoutExtrasInput,
@@ -133,6 +134,15 @@ export interface PrintingApi {
   preview: (saleId: number) => Promise<PrintingPreviewResult>
   /** 小票打印（printing:print）：串行队列 best-effort；失败 { ok:false, error }（G3 不影响已保存销售） */
   print: (saleId: number) => Promise<{ ok: boolean; error?: string }>
+  /** 打印诊断（printing:diagnose）：采集 → 规则 → 报告；printerName 聚焦单机 */
+  diagnose: (printerName?: string) => Promise<IpcChannels['printing:diagnose']['res']>
+  /** 执行修复动作（printing:repair）；verify 为动作后复核报告 */
+  repair: (
+    actionId: RepairActionId,
+    targetPrinter?: string
+  ) => Promise<IpcChannels['printing:repair']['res']>
+  /** 导出诊断报告（printing:diagnoseExport）：主进程选路径写文件，成功返回 filePath */
+  exportReport: (report: DiagnosticReport) => Promise<IpcChannels['printing:diagnoseExport']['res']>
 }
 
 /** 报表（Task 14 日/月查询 + Task 17 导出）：file_path null = 用户取消。 */

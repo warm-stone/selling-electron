@@ -7,6 +7,7 @@
  * **零 Node/Electron 依赖**，两侧可 import。
  */
 
+import type { DiagnosticReport, RepairActionId } from '../../main/printing/diagnostics/schema'
 import type { PaperWidth } from '../receipt/char-grid'
 import type { ReceiptTemplate } from '../receipt/template-schema'
 import type {
@@ -148,6 +149,25 @@ export interface IpcChannels {
     req: { sale_id: number; template_id?: number }
     res: { ok: boolean; error?: string }
   }
+  /**
+   * 打印诊断（printer-diagnostics T1）：采集系统/打印机/app 快照 → 规则引擎
+   * → 诊断报告。printerName 可选（聚焦单机）。动作类通道沿用 { ok, error } 信封；
+   * 采集部分失败时 ok 仍可为 true（细节在 report.snapshot.errors）。
+   */
+  'printing:diagnose': {
+    req: { printerName?: string }
+    res: { ok: boolean; error?: string; report?: DiagnosticReport }
+  }
+  /** 执行修复动作（L1 自动 / L2 需确认；targetPrinter 为 printer scope 动作的归属机）；verify 为动作后复核报告 */
+  'printing:repair': {
+    req: { actionId: RepairActionId; targetPrinter?: string }
+    res: { ok: boolean; error?: string; verify?: DiagnosticReport }
+  }
+  /** 导出诊断报告（主进程 showSaveDialog 后写文件；成功返回 filePath，取消时无） */
+  'printing:diagnoseExport': {
+    req: { report: DiagnosticReport }
+    res: { ok: boolean; filePath?: string; error?: string }
+  }
 
   // ── 模板 ──
   'templates:list': { req: void; res: PrintTemplate[] }
@@ -195,6 +215,9 @@ export const IPC_CHANNEL_NAMES = [
   'printing:printers',
   'printing:preview',
   'printing:print',
+  'printing:diagnose',
+  'printing:repair',
+  'printing:diagnoseExport',
   'templates:list',
   'templates:create',
   'templates:update',
