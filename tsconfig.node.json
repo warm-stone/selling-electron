@@ -26,6 +26,7 @@
     "tests/**/*.ts"
   ],
   "exclude": [
-    "tests/unit/components/**"
+    "tests/unit/components/**",
+    "tests/unit/renderer/**"
   ]
 }
