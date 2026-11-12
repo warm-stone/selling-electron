@@ -1,0 +1,84 @@
+{
+  "printers": [
+    {
+      "name": "POS-80 Printer",
+      "isDefault": true,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "POS80 Printer Driver",
+        "matchesInstalled": true,
+        "printProcessor": "WINPRINT",
+        "manufacturer": "Generic",
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "USB001",
+        "type": "usb",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    }
+  ],
+  "system": {
+    "spooler": { "status": "Running", "startType": "Auto", "dependents": [] },
+    "eventLog": {
+      "adminEvents": [],
+      "app1000Events": [],
+      "operationalEnabled": true
+    },
+    "printConfigs": [
+      {
+        "printerName": "POS-80 Printer",
+        "paperSize": "A4",
+        "widthMicrons": 210000,
+        "heightMicrons": 297000,
+        "orientation": "Portrait"
+      }
+    ]
+  },
+  "app": {
+    "settings": {
+      "channel": "driver",
+      "printerName": "POS-80 Printer",
+      "templatePaperWidth": "80mm"
+    },
+    "electronVersion": "44.10.1",
+    "printOptions": {
+      "pageSizeMode": "custom-microns",
+      "marginsMode": "none",
+      "printBackground": true
+    },
+    "templateFacts": {
+      "hasLogo": true,
+      "logoPx": 180,
+      "cssPadding": "12px 9px"
+    }
+  },
+  "renderSnapshot": {
+    "immediatelyMeasured": 1842,
+    "afterImgDecode": 2107,
+    "heightDelta": 265,
+    "scrollWidth": 307,
+    "paperWidthPx": 307,
+    "horizontalOverflow": false,
+    "dpr": 1
+  },
+  "errors": {},
+  "raw": {}
+}

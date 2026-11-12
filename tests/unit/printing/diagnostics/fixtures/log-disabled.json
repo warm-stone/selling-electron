@@ -1,0 +1,75 @@
+{
+  "printers": [
+    {
+      "name": "Generic / Text Only",
+      "isDefault": true,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "Generic / Text Only",
+        "matchesInstalled": true,
+        "printProcessor": "WINPRINT",
+        "manufacturer": "Microsoft",
+        "rawOnlyBit": true
+      },
+      "port": {
+        "name": "USB001",
+        "type": "usb",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    }
+  ],
+  "system": {
+    "spooler": { "status": "Running", "startType": "Auto", "dependents": [] },
+    "eventLog": {
+      "adminEvents": [],
+      "app1000Events": [],
+      "operationalEnabled": false
+    },
+    "printConfigs": [
+      {
+        "printerName": "Generic / Text Only",
+        "paperSize": "Custom 80 x 297mm",
+        "widthMicrons": 80000,
+        "heightMicrons": null,
+        "orientation": "Portrait"
+      }
+    ]
+  },
+  "app": {
+    "settings": {
+      "channel": "spooler",
+      "printerName": "Generic / Text Only",
+      "templatePaperWidth": "80mm"
+    },
+    "electronVersion": "44.10.1",
+    "printOptions": {
+      "pageSizeMode": "custom-microns",
+      "marginsMode": "none",
+      "printBackground": true
+    },
+    "templateFacts": {
+      "hasLogo": false,
+      "logoPx": null,
+      "cssPadding": "12px 9px"
+    }
+  },
+  "errors": {},
+  "raw": {}
+}

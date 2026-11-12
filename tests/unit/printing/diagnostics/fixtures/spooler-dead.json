@@ -1,0 +1,35 @@
+{
+  "printers": [],
+  "system": {
+    "spooler": { "status": "Stopped", "startType": "Auto", "dependents": ["Fax"] },
+    "eventLog": {
+      "adminEvents": [],
+      "app1000Events": [],
+      "operationalEnabled": true
+    },
+    "printConfigs": []
+  },
+  "app": {
+    "settings": {
+      "channel": "spooler",
+      "printerName": "",
+      "templatePaperWidth": "58mm"
+    },
+    "electronVersion": "44.10.1",
+    "printOptions": {
+      "pageSizeMode": "custom-microns",
+      "marginsMode": "none",
+      "printBackground": true
+    },
+    "templateFacts": {
+      "hasLogo": false,
+      "logoPx": null,
+      "cssPadding": "12px 9px"
+    }
+  },
+  "errors": {
+    "printers": "RPC 服务器不可用",
+    "jobs": "RPC 服务器不可用"
+  },
+  "raw": {}
+}

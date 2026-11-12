@@ -1,0 +1,75 @@
+{
+  "printers": [
+    {
+      "name": "DELIVERY DL-5801PW",
+      "isDefault": true,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "得力 DL-5801PW",
+        "matchesInstalled": true,
+        "printProcessor": "dlpproc",
+        "manufacturer": "得力 Deli",
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "IP_192.168.1.66",
+        "type": "tcp-raw",
+        "hostAddress": "192.168.1.66",
+        "portNumber": 9100,
+        "snmpEnabled": true,
+        "reachable": true
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    }
+  ],
+  "system": {
+    "spooler": { "status": "Running", "startType": "Auto", "dependents": [] },
+    "eventLog": {
+      "adminEvents": [],
+      "app1000Events": [],
+      "operationalEnabled": true
+    },
+    "printConfigs": [
+      {
+        "printerName": "DELIVERY DL-5801PW",
+        "paperSize": "DL58Paper",
+        "widthMicrons": 58000,
+        "heightMicrons": null,
+        "orientation": "Portrait"
+      }
+    ]
+  },
+  "app": {
+    "settings": {
+      "channel": "spooler",
+      "printerName": "DELIVERY DL-5801PW",
+      "templatePaperWidth": "58mm"
+    },
+    "electronVersion": "44.10.1",
+    "printOptions": {
+      "pageSizeMode": "custom-microns",
+      "marginsMode": "none",
+      "printBackground": true
+    },
+    "templateFacts": {
+      "hasLogo": false,
+      "logoPx": null,
+      "cssPadding": "12px 9px"
+    }
+  },
+  "errors": {},
+  "raw": {}
+}

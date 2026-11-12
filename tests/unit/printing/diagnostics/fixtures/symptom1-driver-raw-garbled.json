@@ -1,0 +1,75 @@
+{
+  "printers": [
+    {
+      "name": "XP-58 热敏打印机",
+      "isDefault": true,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "XP-58 Thermal Printer",
+        "matchesInstalled": true,
+        "printProcessor": "WINPRINT",
+        "manufacturer": "Xprinter",
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "USB002",
+        "type": "usb",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    }
+  ],
+  "system": {
+    "spooler": { "status": "Running", "startType": "Auto", "dependents": [] },
+    "eventLog": {
+      "adminEvents": [],
+      "app1000Events": [],
+      "operationalEnabled": true
+    },
+    "printConfigs": [
+      {
+        "printerName": "XP-58 热敏打印机",
+        "paperSize": "XP58Paper",
+        "widthMicrons": 58000,
+        "heightMicrons": null,
+        "orientation": "Portrait"
+      }
+    ]
+  },
+  "app": {
+    "settings": {
+      "channel": "spooler",
+      "printerName": "XP-58 热敏打印机",
+      "templatePaperWidth": "58mm"
+    },
+    "electronVersion": "44.10.1",
+    "printOptions": {
+      "pageSizeMode": "custom-microns",
+      "marginsMode": "none",
+      "printBackground": true
+    },
+    "templateFacts": {
+      "hasLogo": false,
+      "logoPx": null,
+      "cssPadding": "12px 9px"
+    }
+  },
+  "errors": {},
+  "raw": {}
+}
