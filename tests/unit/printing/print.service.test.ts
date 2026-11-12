@@ -179,3 +179,58 @@ describe('PrintQueue（串行队列 + 重试）', () => {
     expect(received).toEqual(['aa', 'bb', 'cc'])
   })
 })
+
+describe('PrintQueue.busy（在途计数——printer-diagnostics T9 busy 门禁的数据源）', () => {
+  it('入队即 true；job 成功定局后回 false（吞链递减先于调用方 await 注册，再让一个微任务兜底）', async () => {
+    const gate = createDeferred<void>()
+    const sendMock = vi.fn(() => gate.promise)
+    const queue = new PrintQueue({ name: 'spooler', send: sendMock })
+
+    expect(queue.busy).toBe(false)
+    const job = queue.enqueuePrintJob(new Uint8Array([0x1b]))
+    expect(queue.busy).toBe(true)
+
+    gate.resolve()
+    await job
+    await Promise.resolve()
+    expect(queue.busy).toBe(false)
+  })
+
+  it('失败定局同样递减：双败 reject（含重试）后 busy 回 false', async () => {
+    const sendMock = vi.fn(async () => {
+      throw new Error('printer down')
+    })
+    const queue = new PrintQueue({ name: 'tcp', send: sendMock })
+
+    const job = queue.enqueuePrintJob(new Uint8Array([0x01]))
+    expect(queue.busy).toBe(true)
+    await expect(job).rejects.toThrow('已自动重试 1 次')
+    await Promise.resolve()
+    expect(queue.busy).toBe(false)
+  })
+
+  it('串行两任务：busy 从首任务入队持续 true 到末任务定局（连续结账窗口全覆盖，无中间假空闲）', async () => {
+    const gate1 = createDeferred<void>()
+    const gate2 = createDeferred<void>()
+    let call = 0
+    const sendMock = vi.fn(() => {
+      const gate = call === 0 ? gate1 : gate2
+      call += 1
+      return gate.promise
+    })
+    const queue = new PrintQueue({ name: 'spooler', send: sendMock })
+
+    const jobA = queue.enqueuePrintJob(new Uint8Array([0x01]))
+    const jobB = queue.enqueuePrintJob(new Uint8Array([0x02]))
+    expect(queue.busy).toBe(true)
+
+    gate1.resolve()
+    await jobA
+    expect(queue.busy).toBe(true) // jobA 已定局但 jobB 接棒在途
+
+    gate2.resolve()
+    await jobB
+    await Promise.resolve()
+    expect(queue.busy).toBe(false)
+  })
+})

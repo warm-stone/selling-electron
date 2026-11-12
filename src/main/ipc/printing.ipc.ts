@@ -9,6 +9,7 @@ import {
   getChannel,
   parseTemplateRow,
   PrintQueue,
+  type PrintOrchestrator,
   type PreviewPayload
 } from '../printing/print.service'
 import type { PrintSettings } from '../printing/print.service'
@@ -165,7 +166,12 @@ export function parseSaleId(req: unknown): number {
   return Number.NaN
 }
 
-export function registerPrintingIpc(db: Database.Database): void {
+/**
+ * 返回编排器（含 isBusy）——main/index.ts 据此把打印队列 busy 接线给
+ * registerDiagnosticsIpc（printer-diagnostics T9 的 busy 门禁数据源）。
+ * 行为零变化：仅多一个返回值，调用方不消费时与原 void 等价。
+ */
+export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
   // 懒 require（T2 模式）：本模块纯部分可在 vitest 纯 Node 环境导入
   const { ipcMain, BrowserWindow, app } = require('electron') as typeof import('electron')
 
@@ -275,4 +281,6 @@ export function registerPrintingIpc(db: Database.Database): void {
       }
     }
   )
+
+  return orchestrator
 }

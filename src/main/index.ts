@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db/database'
 import { registerCustomersIpc } from './ipc/customers.ipc'
+import { registerDiagnosticsIpc } from './ipc/diagnostics.ipc'
 import { registerReportsExportIpc } from './ipc/reports-export.ipc'
 import { registerReportsIpc } from './ipc/reports.ipc'
 import { registerPrintingIpc } from './ipc/printing.ipc'
@@ -76,7 +77,9 @@ if (!gotTheLock) {
     registerReportsExportIpc(db) // Task 17：报表导出（reports:export；数据源走 report.service——T14 统一）
     registerReportsIpc(db) // Task 14：日/月报查询（reports:daily/monthly；剔除 voided + SQL 分桶）
     registerSettingsIpc(db) // Task 19：系统设置（店铺信息/打印配置/Logo）
-    registerPrintingIpc(db) // Task 15：打印编排（preview/print；T19 打印机枚举/测试打印）
+    const printing = registerPrintingIpc(db) // Task 15：打印编排（preview/print；T19 打印机枚举/测试打印）
+    // busy 门禁数据源接线：诊断的 L1 修复/repair 在打印队列在途时让路（T9）
+    registerDiagnosticsIpc(db, { printQueueBusy: printing.isBusy }) // printer-diagnostics T9：打印诊断（diagnose/repair/diagnoseExport）
     registerTemplatesIpc(db) // Task 16：小票模板（五通道 CRUD + setDefault 互斥）
 
     createWindow()

@@ -202,3 +202,62 @@
 - R10/R11 外层 guard 写成 `!depsFailed(A) || !depsFailed(B)` + 内层各自再查：两规则当前依赖同为 ['printConfig']，但 RULE_DEPENDS_ON 若将来分化，内外双层保证各查各的
 - 验证基线：`npm test -- tests/unit/printing/diagnostics/` → 8 文件 142 用例全绿（原 106 + 本任务 36）；`npm run typecheck` node+web 双绿；LSP 双文件零诊断（diagnosis/ 幽灵目录未复发）
 - 证据：task-5-rules-tabledriven.txt（142 绿 + typecheck + mustHave/mustNotHave 矩阵锚点）+ task-5-no-telemetry.txt（空遥测守卫源码锚点 + 针对性运行 + 零 node: import 清单）
+
+## Task 9 编排服务 + IPC 薄层 + 装配落地记录（2026-11-12）
+
+### ★ vi.mock 拦不住运行时 require('electron')——懒 require 可测性的真实边界
+- 探针实测：vitest 纯 Node 下，源码函数体内的 `require('electron')` **能执行**（vitest 给 ESM 模块注入了 CJS require shim）但解析到**真实 electron 包**——其 main 导出二进制路径字符串，`electron.ipcMain` 是 undefined；`vi.mock('electron', ...)` 只拦 vite 的 ESM 模块图，**管不到运行时 require**
+- 后果：既有「懒 require 可测模式」（settings.ipc 等）只保证**模块导入**免 electron——从未有测试真正调用过 require 那一行。要测 handler 注册/信封，注入点是唯一出路：`registerDiagnosticsIpc(db, { getElectron, createService })` 双注入（fake ipcMain 记录通道名 + 捕获 listener 直接调用；fake service 隔离真采集）——生产签名 `registerDiagnosticsIpc(db)` 不变，main/index.ts 一行装配不受影响
+- T10 若要给其他 ipc 补注册测试，照此双注入模式，别再走 vi.mock 死路
+
+### ★ PrintQueue busy 查询悬空的落定（计划预案的兑现）
+- 按计划先读 print.service.ts：PrintQueue 的 queueTail 是 private，**无 busy getter** 且 MUST NOT 改 → 计划预案生效：deps 注入查询函数 + ipc 装配层闭包读取——但装配层也无从观察（队列实例在 printing.ipc 编排器闭包内，改它超出文件清单）→ **生产 `printQueueBusy: () => false`**，注释写明三层事实：门禁语义经 fake 全测 / 并发由 in-flight 兜底 / 未来暴露 getter 后一行接上
+
+### export.service.exportReport 不能直接复用（「复用链」的真实含义）
+- `exportReport(input, format)` 接受 `ReportExportInput`（日/月报）且 Buffer 由它内部 renderBuffer 渲染——**预制 Buffer 无法经它传递**；其 dialog/write/reveal 默认实现也全未导出
+- 落地：诊断导出按同款链路（E2E_EXPORT_DIR 钩子 → showSaveDialog → mkdir+write → showItemInFolder，取消 → null）在 ipc 装配层重实现，语义与 export.service 逐行为对齐（含 E2E 钩子）
+
+### 生产装配的位置学：createDefaultDeps 放 ipc 层而非 service
+- 「service 不得 require electron」+ exportFn 需要 dialog → 所有触 electron 的默认实现必须离开 diagnose.service.ts → createDefaultDeps(db, userDataDir) 落在 diagnostics.ipc.ts（printing.ipc 的 repo→orchestrator 装配同款模式）；service 文件保持零 require（evidence 有 grep 锚点）
+- setChannel 生产实现 = `settingsRepo.set('printer_channel', ch)` 一行——打印链路每次 send 按当前 settings 解析通道（print.service resolveChannel），写 key 即下次打印生效，无需重建任何对象
+
+### repair res 契约无 outcome 字段 → 运行时结构超集
+- T1 冻结的 `printing:repair` res 只有 `{ok, error?, verify?}`，但 needs-manual 的引导文案（L4 全部价值）在 outcome.detail 里——丢弃它 repair 通道对 L4 就废了 → 返回 `{ok, outcome, verify}`，handler 返回类型按 printing.ipc 惯例**内联标注**（不走 IpcChannels 索引，避开 excess property 报错）；先例：preview 载荷即「res 契约的运行时结构超集」。T10 消费时再决定是否扩契约
+
+### 测试策略与坑
+- **fake deps + 真实 analyzeSnapshot**：L1 过滤条件（suggestedActions 含 CANCEL_ERROR_JOBS 且 pending）由真实规则引擎产出——编排与规则两层同锁；合成快照 = healthy-machine 深拷贝 + 覆盖 printers/jobs（T5 策略延续）
+- **fixture 必须深拷贝**（JSON.parse(JSON.stringify)）：service 原地挂 snapshot.renderSnapshot / 写 errors——shallow spread 共享嵌套引用会跨用例污染
+- RECEIPT_CSS 里 `.receipt-logo` 类定义**恒在**（内联样式含类选择器）——断言「无 logo」要用 `not.toContain('base64,')`，用 not.toContain('receipt-logo') 必翻车（自己踩过）
+- 测试触 runRepairAction 的用例必须传 `platform: 'win32'`（SWITCH_* 测试）——仓库测试在 Linux 开发机与 Windows CI 双跑，裸调会撞平台守卫
+- 收集任务时间戳断言用正则 `/^打印机诊断报告-\d{8}-\d{6}\.txt$/`（T8 时区教训延续：+08:00 输入的本地钟输出随机器时区漂）
+
+### 编排时序细节（对齐计划「编排时序」的落定）
+- busy 在 collect **前**读一次（计划步骤序 2→3），值供 L1 门禁用（读后状态变化不追）；collectedAt 在 collect 返回后、render-check 前取；VERIFY 失败（重采 throw）也 try/catch——保持 auto-fixed + 描述注明「复核采集失败」（与 L1 失败同款不阻塞语义）
+- VERIFY 匹配 = code + printerName 双键（machine/appConfig 级 printerName 均 undefined，天然命中）；VERIFY 重采只在 anyAutoFixed 时一次，不循环
+- platform dep 语义定为「显式注入才拦截」：缺省不挡（底层 runner 自带守卫），生产装配传 process.platform 换取非 win32 提前出口——若默认取 process.platform，Linux 上所有 fake deps 测试全会误撞守卫
+
+### 验证基线（T10 回归参照）
+- `npm test -- tests/unit/printing/diagnostics/ tests/unit/ipc/` → 11 文件 204 用例全绿（原 166 + 本任务 38：service 17 + ipc 21）；`npm run typecheck` 双绿；全量 `npm test` → 947 绿 + 1 失败（tcp.channel 环境 Flake，T6/T8 已留档，与本任务无关）
+- LSP 双新文件 + index.ts 零诊断（diagnosis/ 幽灵目录未复发）
+- 证据：`.omo/evidence/task-9-orchestration.txt`（204 绿 + typecheck + 38 用例清单 + 时序断言）+ `.omo/evidence/task-9-guards.txt`（防重入/busy/提权红线/零 electron 源码锚点）
+- main/index.ts 第五处联动落位：import 置顶（customers 后、reports-export 前）+ registerDiagnosticsIpc(db) 紧随 registerPrintingIpc
+
+## Task 9 追加：busy 门禁真实接线（PrintQueue.busy）落地记录（2026-11-12）
+
+### ★ 「暂恒 false」悬空的修复——DI 链五级穿透，而非模块级计数器
+- 首版交付 printQueueBusy: () => false（MUST NOT 改 print.service 约束下的从简）；后续任务解除约束后的真实接线选了 **DI 链**而非模块级 busy 计数器：`PrintQueue.activeJobs → get busy() → orchestrator.isBusy → registerPrintingIpc 返回编排器 → main/index.ts 接线 → registerDiagnosticsIpc(printQueueBusy) → createDefaultDeps 第三参`
+- 拒绝模块级计数器的三个理由：仓库 DI 惯例（全局可变状态过不了审）；多 PrintQueue 实例共享计数会互相污染（测试隔离）；模块函数式接线「不可能被忘记」的代价是「看不见」——显式 index.ts 接线可 grep、可 review
+- registerPrintingIpc `void → PrintOrchestrator` 向后兼容：返回值多出、调用方不消费时与 void 等价（唯一调用方就是 index.ts，grep 过）
+
+### ★ 吞链递减的微任务次序（busy 语义的核心保证）
+- 计数递减挂在 `queueTail = run.then(减, 减)` 吞链上——该 .then 在 enqueuePrintJob 内注册，**先于任何调用方对 run 的 await** → promise 回调按注册序执行 → `await job` 恢复时递减已完成（busy 已归零）；测试里 `await job` 后再让一个 `await Promise.resolve()` 是防注册序被无意改动的兜底
+- 串行窗口无假空闲：jobB 的 send 挂在吞链上，jobA 定界 → 递减 + 吞链 resolve → jobB 接棒——busy 在连续结账全程 ≥1（专门用例锁「无中间假空闲」）
+- 行为零变化红线：吞链回调从 `() => undefined` 改为递减闭包，链上传递值仍是 undefined；enqueue/sendWithRetry 语义未动（既有 13 个 PrintQueue 用例全数原绿）
+
+### 端到端 busy 用例的两个坑（Linux 开发机）
+- **createDefaultDeps 默认 platform=process.platform**：以其为底 spread 覆写建 service 时必须显式 `platform: 'win32'`——否则本机 Linux 直接撞 service 的平台前置守卫（'仅 Windows' reject），用例全崩
+- **fixture 共享引用**：e2e 用例内建快照工厂（每次调用从 FIXTURES spread 新对象）而非模块级常量——service 会原地挂 renderSnapshot/写 errors，常量会被首调污染
+
+### 验证基线（T10 回归参照，追加后）
+- 三范围（printing/ + printing/diagnostics/ + ipc/）→ 21 文件 352 用例：350 绿 + 1 失败（tcp.channel「连接超时」环境 flake）+ 1 skip；**flake 预置证明**：`git stash -u` 清掉本任务全部改动后该用例仍失败（T6/T8 留档的第 3 次复核）；typecheck node+web 零 error；全量 `npm test` → 951 绿 + 1 flake + 1 skip
+- 证据：task-9-guards.txt 追加段（activeJobs/isBusy/接线链源码锚点 + busy 三用例 + 端到端用例 + stash 证明）

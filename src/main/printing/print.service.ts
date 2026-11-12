@@ -64,20 +64,35 @@ export function getChannel(settings: PrintSettings): PrintChannel {
  * 打印任务串行队列（连续结账不交叠）：
  *  - Promise 链保证 job 严格按入队顺序执行，前一个 settle 后一个才开始；
  *  - 失败自动重试 1 次（同一字节重发）；
- *  - 二次失败：向调用方 reject（UI 引导重打，销售已落库不受影响——G3），队列继续。
+ *  - 二次失败：向调用方 reject（UI 引导重打，销售已落库不受影响——G3），队列继续；
+ *  - busy 只读查询（printer-diagnostics T9 busy 门禁的数据源）：入队即 true，
+ *    job 定局（成功/失败）后一个微任务回 false——诊断据此挡 L1 修复/repair。
  */
 export class PrintQueue {
   private queueTail: Promise<unknown> = Promise.resolve()
+  /** 在途任务计数（busy 的数据源；吞链两个回调各递减一次，成败同权） */
+  private activeJobs = 0
 
   constructor(private readonly channel: PrintChannel) {}
 
+  /** 是否有打印任务在途（连续结账的串行窗口内持续 true） */
+  get busy(): boolean {
+    return this.activeJobs > 0
+  }
+
   enqueuePrintJob(bytes: Uint8Array): Promise<void> {
+    this.activeJobs += 1
     const run = this.queueTail.then(() => this.sendWithRetry(bytes))
     // ★ 队尾吞掉失败：确保后续 job 不被前序 rejection 阻断（死锁防线）；
-    //   失败本身仍通过返回的 run 交给调用方。
+    //   失败本身仍通过返回的 run 交给调用方。busy 计数挂在吞链的两个回调上
+    //   （注册先于任何调用方 await）——run 定局后第一个微任务即递减，无论成败。
     this.queueTail = run.then(
-      () => undefined,
-      () => undefined
+      () => {
+        this.activeJobs -= 1
+      },
+      () => {
+        this.activeJobs -= 1
+      }
     )
     return run
   }
@@ -305,7 +320,9 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
     await queue.enqueuePrintJob(bytes)
   }
 
-  return { buildReceiptPayload, previewSale, printSale }
+  // isBusy：队列 busy 的转发（printer-diagnostics T9 busy 门禁消费——registerPrintingIpc
+  // 返回编排器，由 main/index.ts 接线给 registerDiagnosticsIpc）
+  return { buildReceiptPayload, previewSale, printSale, isBusy: () => queue.busy }
 }
 
 export type PrintOrchestrator = ReturnType<typeof createPrintOrchestrator>
