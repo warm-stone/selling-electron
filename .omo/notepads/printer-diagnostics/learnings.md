@@ -28,3 +28,46 @@
 - `npm run typecheck` node+web 双绿；`npm test -- tests/unit/shared/ipc.test.ts tests/unit/printing/diagnostics/schema.test.ts` → 9/9
 - 证据：`.omo/evidence/task-1-contract-check.txt`（typecheck + 测试 + ipc.ts 三通道 ≥6 次出现）+ `.omo/evidence/task-1-no-raw-string.txt`（preload typed 引用清单）
 - 契约锁测试在 `tests/unit/printing/diagnostics/schema.test.ts`（非 src 内 spec——仓库零 src spec 先例；EXPECTED_FINDING_CODES 硬编码 15 清单，改契约必须同步改测试，EXPECTED_CHANNELS 同款模式）
+
+## Task 3 采集脚本构建器落地记录（2026-11-12）
+
+### ★ TS 内联 PS 脚本的最大坑：反斜杠静默丢失
+- 注册表行 `HKLM:\SYSTEM\...` 与 spoolDir 回退路径 `"$env:SystemRoot\System32\..."` 在 TS 字符串里**必须写 `\\`**——JS/TS 单双引号字符串对未知转义（`\S`）不报错、直接丢反斜杠，脚本内容会静默损坏成 `HKLM:SYSTEMCurrentControlSet...`（运行时注册表查询悄悄失败，无任何编译期信号）
+- 全脚本仅这 2 行含反斜杠（PS 双引号串里 `\` 本身是字面量，只有 TS 侧需要转义）；无 `${`/反引号 → 数组 join('\n') 模式（spooler.channel.ts 同款）安全可用
+- 静态性实现：模块级 `const COLLECT_SCRIPT = SCRIPT_LINES.join('\n')` 一次成型，函数只 return——比每次调用重 join 更直白；字符串 `===` 是值比较，两条路径测试都过
+
+### 规格伪码 → 可运行 PS 的必要修补（events 段）
+- 规格伪码直接写 `$out.events.admin = @(...)`，但 PS 里对 $null 的属性赋值会抛 PropertyNotFound——**必须先 `$out.events = @{ admin=@(); app1000=@(); operationalEnabled=$false }` 初始化**再逐部分赋值（初始化同时给了稳定空形状：子查询 SilentlyContinue 返回空时不缺键）
+- 段模板的「10 段同构」实为「5+5」：printers/wmi/jobs/ports/drivers 是 `cmd | Select-Object | ConvertTo-Json -Depth 4` 同构列表段（段内 JSON 字符串化，段级序列化错误不外溢）；spooler/spoolDir/events/tcpProbe/printConfig 按显式规格输出 hashtable/数组，靠尾部 `-Depth 6 -Compress` 总序列化。**两层输出形状不同是故意的**——T4 归一化解析要统一消化（"JSON 字符串数组 → 对象数组"）
+
+### 计数断言比 toContain 硬（测试设计）
+- `count(script, '$_.Exception.Message') === 10` 恰好锁段级 catch 全覆盖——tcpProbe/printConfig 的内层 catch 按规格**故意不记** error（`$reachable=$false` / 空 `{ }`），出现 11 就说明有人破坏了内层语义
+- 其他精确锁：`try {`=12（10 段级+2 内层）、`ConvertTo-Json -Depth 4`=5、`ConvertTo-Json`=6、`# --- section: `=10 且顺序单调递增、末行恒 `exit 0` 且全脚本无 exit 1/2/3
+- 禁词断言先做误伤排查再写：`Start-Service` vs 脚本中 `$svc.StartType`（不冲突：后者无 `-Service`）；`.Connect(` vs `ConnectAsync(`（不冲突：Connect 后跟 A 非 `(`，恰好反证没退化成同步 Connect）；`net stop` vs `Network`（整串不出现）——禁词稍宽就自己打自己
+
+### 其他落地事实
+- `$host` 是 PS 只读自动变量——tcpProbe 用 `$targetHost/$targetPort`（比 $host2/$port2 可读）；`$targetPort = if ($p.PortNumber) { ... } else { 9100 }` 是 PS 5.1 合法的 if 赋值（禁的是三元 `?:`）
+- exit 0 恒定契约已落测试断言（无 exit 1/2/3）——与 spooler.channel 的 exit 2 契约形成镜像对照：**采集通道「有输出=可解析」，打印通道「exit code=成败」**
+- 本 Linux 开发机无 pwsh（`command -v pwsh` 空）——真机 PS 5.1 语法/运行时验证只能归 T4 Windows 执行环节；本任务的结构断言 + 禁词锁是 Linux 侧能做到的全部
+- 验证基线：`npm test -- tests/unit/printing/diagnostics/` → 3 文件 25 用例全绿（T1 9 + T3 13 + 既有 3）；`npm run typecheck` node+web 双绿；证据 `.omo/evidence/task-3-script-assertions.txt` + `.omo/evidence/task-3-field-alignment.txt`（段→schema 字段全对照，T4 按它写归一化解析）
+
+## Task 2 黄金样本 fixtures 落地记录（2026-11-12）
+
+### ★ as 断言 vs 类型注解直赋——JSON 黄金样本唯一的正确姿势（本任务最大坑）
+- `const x: PrintDiagnosticSnapshot = json`（注解直赋）走 **assignability**：JSON 导入的属性是 widened 类型（string/number/boolean/null），`state: string` 不可赋给 `'online'|'offline'|...` 联合 → **6/7 个 export 全红**（spoolerDead 例外：printers 空数组无 state）
+- `const x = json as PrintDiagnosticSnapshot`（as 断言）走 **comparability**：放宽 string ↔ 字面量联合、null → `string | null` → 全绿；但字段缺失/多余/形状漂移仍报 TS2352——编译锁保真
+- 先在 /tmp 用项目 tsc 实验验证再落文件（5 分钟实验省掉一轮全目录返工）
+- vitest 运行时 esbuild 只剥类型不查类型——**as 锁的生效路径全靠 typecheck:node**（tsconfig.node.json include `tests/**/*.ts` + `resolveJsonModule: true` 均已就位，T1 基建恰好够用）
+
+### 相对路径层级：fixtures/ 子目录比任务说明多一级
+- 任务说明写 `../../../../src/...`（4 级）——那是 diagnostics/ 直下文件（schema.test.ts）的层级；fixtures/index.ts 在子目录，实际 **5 级** `../../../../../src/main/printing/diagnostics/schema`，照抄任务说明会解析到 `tests/src/` 编译即红
+
+### fixture 设计决策（T5/T8 消费方注意）
+- **spooler-dead 的 jobs 抑制验证**：printers=[]（RPC 死）+ errors 记 printers/jobs 双段失败——spoolFiles 挂在 printer.queue 里，printers 空则 spool 残留数据自然缺失，jobs-stuck-deleting 的"数据缺失不触发"语义零成本成立，无需发明 system 层新字段
+- **healthy/log-disabled 的 printConfig 宽度对齐**：printConfigs[0].widthMicrons=80000 与模板 80mm 一致，避免 driver-page-size-ignored/printable-area-clip 在全绿基线上误触发；PDF 虚拟机给 Letter（215900×279400μm）——非目标机 + spooler 通道双保险，规则应只看 settings.printerName 对应机器
+- **云打印机 local/network 标志**：DL-5801PW 走 IP_192.168.1.66 端口但 local=true/network=false——Windows Get-Printer 对 IP 端口打印机 Type=Local（IP 端口仍是本地打印机对象），网络语义在 port.type='tcp-raw' 上表达，勿用 network 标志做云判定
+- **预期命中清单只留在任务说明与 evidence，不进 fixture/测试**（fixtures.test.ts 只锁特征字段，findings 期望归 T5 表驱动）
+
+### 验证基线（后续任务回归参照）
+- `npm test -- tests/unit/printing/diagnostics/fixtures.test.ts` → 9/9；`npm run typecheck` node+web 双绿
+- 证据：`.omo/evidence/task-2-fixtures-check.txt`（测试+typecheck）+ `.omo/evidence/task-2-symptom-fidelity.txt`（DL-5801PW/2107/副本 2 grep 各 ≥1）
