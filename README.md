@@ -12,7 +12,7 @@ Windows 桌面销存系统（POS / 进销存）：Electron + Vue 3 + TypeScript 
 - **销售记录**：按日期/状态/客户姓名/电话/是否国补筛选，列表含国补/销售人员/订单备注/客户列，双击查看明细（可修改国补/订单备注/销售人员/客户关联），随时重打小票（使用当前模板）
 - **报表**：日报 / 月报（按日分桶，日报含国补销售额小计与明细两列），导出 `.txt` / `.xlsx` / `.docx`
 - **小票打印**：模板体系（表单式编辑 + 实时预览 + 可用变量说明区，58mm/80mm 双纸宽）、ESC/POS 指令直发（粗体/倍高倍宽/居中/自动切纸/Logo 光栅钳制纸宽）、四种通道（Windows spooler RAW 主通道 / tcp 辅 / 串口备 / driver 驱动渲染兜底——「云」打印机兼容）、打印串行队列（连续结账不交叠）
-- **设置**：店铺信息、打印机通道配置、Logo 上传
+- **设置**：店铺信息、打印机通道配置、Logo 上传；打印机诊断面板（一键采集 → 15 条规则判定 → L1/L2 修复建议与执行 → 三层报告导出）
 
 ## 架构（文字版）
 
@@ -30,7 +30,8 @@ main (Electron 主进程)
     │     ├── escpos/  ESC/POS 纯函数生成器（GBK 编码 + 生僻字降级 '?' + Logo 光栅钳制纸宽/8 点对齐）
     │     │            + 字符网格数学（58mm=32 列 / 80mm=48 列，三渲染同源）
     │     ├── driver/  收据 HTML 生成器（driver 通道载荷——驱动渲染兜底的第三渲染器）
-    │     └── channels/ spooler(主) / tcp(辅) / serial(备) / driver(驱动渲染兜底) + 串行队列
+    │     ├── channels/ spooler(主) / tcp(辅) / serial(备) / driver(驱动渲染兜底) + 串行队列
+    │     └── diagnostics/ 打印机诊断（PowerShell 采集 → 规则引擎 15 条 → L1/L2 修复动作 → 渲染自检 → 三层报告导出）
     ├── export/        txt / xlsx / docx 导出器
     └── scanner/       扫码枪检测器（纯函数状态机 + before-input-event 桥）
 
@@ -49,7 +50,7 @@ main (Electron 主进程)
 | 存储 | better-sqlite3 v13（N-API prebuilds，免 rebuild；WAL 模式；`PRAGMA user_version` 迁移） |
 | 打印 | node-thermal-printer（ESC/POS 指令生成，纯函数零 I/O） |
 | 导出 | exceljs（xlsx）/ docx（.docx）/ 原生 txt（UTF-8 BOM + CRLF） |
-| 测试 | vitest（单元 + golden 字节矩阵，747 用例）+ Playwright `_electron`（E2E 基线 92 场景 + qa 终审套件 20 场景） |
+| 测试 | vitest（单元 + golden 字节矩阵，968 用例）+ Playwright `_electron`（E2E 99 场景，含打印机诊断 8 场景） |
 | 打包 | electron-builder 26（NSIS） |
 
 ## 开发
@@ -60,7 +61,7 @@ main (Electron 主进程)
 npm install        # postinstall 自动补齐 Electron 二进制（install-electron）
 npm run dev        # 启动开发（HMR）
 npm run typecheck  # 类型检查（node + web 两侧）
-npm test           # vitest 单元测试（747 用例）
+npm test           # vitest 单元测试（968 用例）
 npm run test:e2e   # Playwright E2E（globalSetup 自动先构建 out/）
 npm run build      # 构建 out/（main/preload/renderer）
 ```
