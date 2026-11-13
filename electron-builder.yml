@@ -38,4 +38,7 @@ nsis:
   installerLanguages:
     - zh-CN
   language: '2052' # LCID(2052) = zh-CN
-  artifactName: ${productName}-${version}-setup.${ext}
+  # GitHub Release 资产名白名单仅 [0-9A-Za-z._-]——productName 为中文会被
+  # 剥离/需 safeArtifactName 兜底，故产物名直接用 ${name}（与 v0.1.0~v0.3.0
+  # 实际上架名 selling-electron-setup-X.exe 一致），本地名 = 上传名，与上传链路解耦
+  artifactName: ${name}-setup-${version}.${ext}

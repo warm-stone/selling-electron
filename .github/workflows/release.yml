@@ -97,8 +97,8 @@ jobs:
       # 幂等发布：view 命中（re-run 场景）则复用，否则 create draft；
       # upload --clobber 覆盖同名资产。GH_TOKEN 为 Actions 运行时内置
       # GITHUB_TOKEN（发布到本仓库 Releases，无需手动密钥）。
-      # shell 用 bash：gh 自行展开 glob + 规避 PowerShell 对中文产物名
-      # （销存系统-*.exe）的引号/编码坑。
+      # shell 用 bash：gh 自行展开 glob + 规避 PowerShell 引号坑（产物名为
+      # ASCII 的 selling-electron-setup-*.exe，无中文编码问题）。
       - name: Create draft release & upload assets
         shell: bash
         env:
