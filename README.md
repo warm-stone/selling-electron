@@ -82,7 +82,7 @@ npx electron-builder --win nsis   # Linux 上产出未含 uninstaller 的 stub�
 CI（`.github/workflows/release.yml`）——**正式发布流程**：推送 `v*` tag（与 package.json 版本一致，如 `v0.3.0`）→ 全质量门 → 自动发布到 GitHub Releases：
 
 1. **test**（windows-latest）：typecheck → vitest → Playwright E2E（驱动真实 Electron 窗口，含 tcp mock 打印场景）
-2. **release**（windows-latest，依赖 test）：tag 与版本号防呆校验 → `npm run build` → `electron-builder --win nsis --publish always` → GitHub Releases 上架 `销存系统-<版本>-setup.exe`（中文安装向导、可选安装目录）
+2. **release**（windows-latest，依赖 test）：tag 与版本号防呆校验 → `npm run build` → `electron-builder --win nsis --publish never` 产包 → gh CLI 幂等发布（规避 electron-builder v26 双 draft 竞态）→ GitHub Releases 上架 `selling-electron-setup-<版本>.exe`（中文安装向导、可选安装目录）
 
 > 日常 push 验证的旧 ci.yml 已停用（`ci.yml.bak` 留档）；GitCode 镜像的同步发布为手动（GitHub Releases 下载 exe → GitCode Release 页上传）。
 

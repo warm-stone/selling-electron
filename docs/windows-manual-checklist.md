@@ -2,20 +2,20 @@
 
 > 本清单覆盖 CI 与单测无法自动化的真机环节（实机打印机、扫码枪、安装体验、手动备份）。
 > 每项含**操作步骤 / 预期结果 / 勾选框**，逐项执行并勾选。
-> 适用版本：v0.4.0；安装包来源：GitHub Releases（tag `v0.4.0` 自动构建发布，文件名 `销存系统-0.4.0-setup.exe`）。
+> 适用版本：v0.4.0；安装包来源：GitHub Releases（tag `v0.4.0` 自动构建发布，文件名 `selling-electron-setup-0.4.0.exe`）。
 
 ## 准备
 
 - 一台 Windows 10/11 x64 电脑（管理员账户）
 - 热敏小票打印机一台（USB 或网口，已通电）
 - 扫码枪一支（HID 键盘模拟型，USB 即插即用）
-- 从 CI 下载的安装包 `销存系统-0.4.0-setup.exe`
+- 从 CI 下载的安装包 `selling-electron-setup-0.4.0.exe`
 
 ## 1. 安装与首次启动（首启建库）
 
 **操作步骤**
 
-1. 双击 `销存系统-0.4.0-setup.exe`
+1. 双击 `selling-electron-setup-0.4.0.exe`
 2. 安装向导为中文界面；允许选择安装目录（默认 `C:\Users\<用户名>\AppData\Local\Programs\销存系统`）
 3. 完成安装并从桌面/开始菜单启动「销存系统」
 4. 打开资源管理器进入 `%APPDATA%\selling-electron\`（地址栏直接粘贴回车）
