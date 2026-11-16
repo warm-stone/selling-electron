@@ -180,7 +180,8 @@ Generic/Text Only 驱动建立 RAW 通道：
 ## 10. 打印机诊断（真机验证）
 
 > 背景：设置页新增「打印机诊断」卡片（第四张）——一键采集打印服务状态 / 打印机驱动与端口 /
-> 队列任务 / 事件日志，运行 15 条规则产出报告与修复建议。本节验证 CI 无法覆盖的真机行为
+> 队列任务 / 事件日志，运行 17 条规则产出报告与修复建议（v2 增补 R16 driver 坏组合 /
+> R17 printConfig 失明自检）。本节验证 CI 无法覆盖的真机行为
 > （Linux 开发机与非 Windows 平台会被「仅 Windows」守卫优雅拒绝——G11）。
 
 ### 10.1 诊断跑通（Windows 真机 + 热敏打印机）
@@ -248,6 +249,66 @@ Generic/Text Only 驱动建立 RAW 通道：
 
 ---
 
+## 11. v2 真机闭环（诊断复采 + driver 实验三组）
+
+> 背景：printer-diagnostics v2 修复了首轮真机报告（20261115-170820）暴露的 3 个采集 bug
+> （PrinterStatus 位掩码误读 / WER 遥测噪音冒充崩溃 / 视口地板值假溢出）与 3 个盲区
+> （printConfig v4 驱动失明等），并为症状 2（driver 通道版面异常）提供两条实验性
+> workaround 开关（设置页「打印高级选项（实验）」折叠区）。本节在**目标机**
+> （DL-5801PW，Windows，DPR 1.25）上验证修复语义并做 spike C 三组对照实验。
+
+### 11.1 诊断复采（修复语义验证）
+
+**操作步骤**：安装 v2 构建 → 设置页「打印机诊断」→ 开始诊断 → 导出报告
+
+**预期结果**（对照首轮报告 20261115-170820 逐项翻转）
+
+- [ ] 打印机列表 4 台全部显示「在线」（首轮全 unknown——位掩码 0=Normal 修复）
+- [ ] 报告摘要行「WER 崩溃（Application Error 1000）0 条」（首轮 18 条全是
+      UndockedHost 遥测噪音——ProviderName 过滤修复）
+- [ ] renderSnapshot 无水平溢出（首轮 scrollWidth=786 假阳性——元素级测量修复后
+      应为收据实宽 ≈221px）
+- [ ] 「发现问题」区恰好两条新 finding：
+      ① [高] driver-print-combo-known-issue（R16：driver+自定义页宽+零边距坏组合，
+      含 203 dpi / 驱动默认页尺寸 / 切回 spooler 三条 workaround 文案）；
+      ② [信息] printconfig-unavailable（R17：v4 驱动 DEVMODE 配置不可读，
+      页宽比对类诊断本轮不可用）
+- [ ] 报告 printConfig 段：记录该机 fallback 链命中层（source=printconfiguration /
+      printticketxml / win32printerconfig / devmode 之一，或链终值仍空）——回填
+      开发侧 fixture real-machine-20261115.json 的 source 键
+
+### 11.2 spike C 三组对照实验（症状 2 版面异常）
+
+每组实验：设置 → 打印卡片改选项 → 保存 → 测试打印/真实结账打印 → 观察版面
+（左侧空白 / 右截断 / 上方大空白 / logo 后内容消失四项症状逐一记录）。
+
+**实验 ①：显式 DPI = 203**（打印高级选项 → 打印 DPI 填 203 → 保存）
+
+- [ ] 记录：版面四项症状各自 正常 / 异常
+- [ ] 再跑一次诊断：报告 printOptions 段应出现 `dpi=203`（实验值观测链验证）
+
+**实验 ②：使用驱动默认页尺寸**（DPI 恢复留空 → 开关打开 → 保存）
+
+- [ ] 记录：版面四项症状各自 正常 / 异常
+- [ ] **重点观察出纸分页位置**：驱动取不到默认页尺寸会回退 A4——连续纸被按 A4
+      高度切断即为回退证据（记录切断位置距小票顶部约 297mm 与否）
+- [ ] 再跑一次诊断：printOptions 段应出现 `pageSizeMode=printer-default` +
+      `usePrinterDefaultPageSize=true`，且 R16 坏组合 finding 应消失
+      （组合前提随实验生效而不成立）
+
+**实验 ③：切回 spooler 通道**（关闭实验开关 → 通道改「系统打印机」→ 保存）
+
+- [ ] 记录：中文 / logo 是否打出（云固件 RAW 丢 GBK 的预期症状 vs 版面正常与否
+      的权衡结论）
+
+**汇总**
+
+- [ ] 三组实验结论回填开发（哪组版面正常 → 定为该机推荐配置；全异常 → 升级
+      Electron 侧根治排查）
+- [ ] 实验后恢复该机生产可用配置，并在备注记录最终配置
+
+---
+
 ## 结果汇总
 
 | # | 项目 | 结果 | 备注 |
@@ -262,6 +323,7 @@ Generic/Text Only 驱动建立 RAW 通道：
 | 8 | 生僻字降级 | ☐ 通过 ☐ 不通过 | |
 | 9 | 数据备份 | ☐ 通过 ☐ 不通过 | |
 | 10 | 打印机诊断（10.1 跑通 + 10.2 spike 五项） | ☐ 通过 ☐ 不通过（spike 未完成项数：___） | |
+| 11 | v2 真机闭环（11.1 复采翻转 + 11.2 spike C 三组） | ☐ 通过 ☐ 不通过（实验结论已回填：☐ 是 ☐ 否） | |
 
 > 数据文件位置速查：`%APPDATA%\selling-electron\pos.db`（WAL 模式，伴随 `pos.db-wal` / `pos.db-shm`）。
 > 备份要点：**先关闭应用再复制**；日常使用中 .db-wal 会自动合并回 .db（应用正常退出时执行检查点）。

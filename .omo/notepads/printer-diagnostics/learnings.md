@@ -419,3 +419,54 @@ opencode 本版本 `task()` 工具的生命周期管理缺陷：**返回状态�
 1. **升级 oh-my-openagent 4.8.1 → ≥v5.1.50（推荐 5.1.72）**：获得 #6677/#6764 双写者防护 + v5.0.0 active-status 契约 + #11524 fail-fast；#9295 假状态路径仍在（#9299 未合并）但问题面大幅收窄
 2. 升级 opencode 1.18.32→1.19.5 与本 bug 无关（可不动）；V2 是结构性方案但 OMO 兼容性未验证
 3. 报 issue 对象 = `code-yeongyu/oh-my-openagent`（非 opencode）：追加证据到 #9295 或新 issue 交叉引用 #9295/#2409/#6487（本次的「返回 aborted 时会话存活 + gate 矛盾 + mtime/测试翻转双写取证」是现有 issue 均未覆盖的方向）
+
+## ★ v2 重做落地记录（2026-11-16 晚，printer-diagnostics-v2-redo 分支）
+
+用户决策「全部从零重做 v2 + 先 Track A 后 Track B」后的执行终态：
+
+### 交付清单（9 提交，全部主会话直接实施零委派）
+- T1 契约（553bf1b）：17 FindingCode + R16/R17 空依赖 + printConfigs.source? +
+  printOptions.dpi?/usePrinterDefaultPageSize? + AppSettings 两实验键
+- T2 采集脚本（1372eaa）：WER 三件套（ProviderName/Ignore/props 透传）+ printConfig
+  四层 fallback；try/catch 恰 15、$_.Exception.Message 恒 10
+- T3 执行器（8f4b78d）：位掩码优先级表（128>2>1>4>8>16>64>4194304）+ WMI 三表兜底链 +
+  DETECTED_ERROR_STATE_LABELS（in 判定防 ?? 吞 null；较参照补 5/6/7）+ props 索引
+  解析（守卫 ≥13）+ source 分派归一 + parseDevmodeB64（偏移 72/78/80/82/102-165）
+- T4 真机 fixture（1e3806b）：real-machine-20261115.json 修复后语义终态（4 台 online/
+  WER 0/scrollWidth 221/printConfigs v1 形状——Track B 复采后回填 source）
+- T5 规则（fd3930a）：R16（组合三缺一失活；dpr 只进 evidence）+ R17
+  （!rescued && (segError || widthMicrons===null)；条目缺失归 mismatch 域）+
+  golden 回放精确命中集
+- render-check/观测链（7ea7058）：测量源 .receipt-paper（h=scrollHeight+offsetTop，
+  w=scrollWidth，无元素回退）+ 窗口 400×600；WER 摘要文案；diagnostics.ipc 实验键
+  装配（useDefaultPageSize=true → pageSizeMode='printer-default'，R16 前提消失——
+  参照分支未接线的自主补全，兑现 SettingsView「诊断报告会记录实验值」承诺）
+- T6 driver 通道（4a96fbf）：LOGO_DECODE_WAIT_SCRIPT 步骤 1.5（try/catch 不阻塞）+
+  print options 条件组装（usePrinterDefaultPageSize 与 pageSize 物理互斥；dpi Record
+  {horizontal,vertical}；条件 spread 未启用键不存在）+ print.service 三处接线 +
+  vm 沙箱直跑 decode 脚本语义锁
+- T7 settings.ipc（397ddcb）：parseDriverDpi（读侧仅格式归一，值域校验在写侧）+
+  validateSettingsPatch（非法值中文 throw 含 echoInvalidValue 类型回显）+ 条件产出
+  （DB 无行不扩键）+ settings:set 先校验后落库
+- T8 UI+E2E（c6e43f1）：高级折叠区常驻（inert 标注不隐藏）+ dpi input-number
+  50-1200 value-on-clear null + A4 回退警告 + extractIpcErrorMessage；
+  driver-experimental.spec.ts 四场景（UI clamp 越界不可达 → 校验 E2E 走直接 invoke）
+- T9 收口：checklist 第 11 节（11.1 复采翻转五项 + 11.2 spike C 三组）+ 计划文档
+  重写 + boulder paused→active（清除事故期 stale task_sessions）+ 本记录
+
+### 连锁影响实录（R16 新增的下游断言同步）
+- analyze.test.ts symptom2 矩阵 mustHave +R16；diagnosis-dialog.test.ts（renderer
+  单测）symptom2 needs-dev 徽章 2→3（真实 analyzeSnapshot 多产 R16）——
+  **教训：加规则时 grep 全部消费 fixture 的测试（含 renderer/E2E），不止 analyze.test**
+- diagnosis.spec.ts（E2E）用 printer-name-mismatch（spooler 通道）不受 R16/R17 影响，
+  零改动（v2 参照同结论）
+
+### 验证终态
+- 全量单测 59 文件 1025 passed + 1 skipped（tcp flake 本轮未发作）
+- typecheck node+web 双绿；driver-experimental + settings E2E 10/10 绿
+- Track B 待办：构建安装包 → 目标机 11.1 复采 + 11.2 spike C 三组 → 结论回填
+
+### 重做 vs 隔离分支对账结论
+范围一致 + 两处自主改进（DETECTED_ERROR_STATE_LABELS 5/6/7；观测链接线补全）。
+代码零 cherry-pick——`git diff main v2-quarantine-backup -- <path>` 仅作需求参照，
+全部实现按当前基线重写并逐任务独立验证（事故纪律：不信任未验证批次）。
