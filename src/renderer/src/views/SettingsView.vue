@@ -25,6 +25,13 @@ const testing = ref(false)
 
 const shopForm = reactive({ shop_name: '', shop_phone: '', receipt_note: '' })
 
+/** 剥除 Electron invoke 序列化前缀（v2：设置保存失败 toast 人话回显；同 printing.store 模式） */
+function extractIpcErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  const matched = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
+  return matched ? matched[1] : raw
+}
+
 /** 打印诊断（T10）：状态与动作全在 printing store（对话框为纯渲染子组件） */
 const printingStore = usePrintingStore()
 
@@ -40,7 +47,10 @@ const printForm = reactive({
   tcp_host: '',
   tcp_port: '',
   com_port: '',
-  auto_cut: true
+  auto_cut: true,
+  /** driver 通道实验键（printer-diagnostics v2）：dpi 可空——null=未设置（不发送 dpi） */
+  driver_dpi: null as number | null,
+  driver_use_default_page_size: false
 })
 
 const CHANNEL_OPTIONS: Array<{ value: PrinterChannel; title: string; desc: string }> = [
@@ -63,6 +73,9 @@ async function loadSettings(): Promise<void> {
   printForm.tcp_port = settings.tcp_port === null ? '' : String(settings.tcp_port)
   printForm.com_port = settings.com_port ?? ''
   printForm.auto_cut = settings.auto_cut
+  // v2 实验键回显：DB 无行 → 键缺省 → null/false（消费语义一致）
+  printForm.driver_dpi = settings.driver_dpi ?? null
+  printForm.driver_use_default_page_size = settings.driver_use_default_page_size ?? false
 }
 
 async function loadPrinters(): Promise<void> {
@@ -120,12 +133,14 @@ async function savePrint(): Promise<void> {
       tcp_host: printForm.tcp_host,
       tcp_port: printForm.tcp_port === '' ? null : Number.parseInt(printForm.tcp_port, 10),
       com_port: printForm.com_port,
-      auto_cut: printForm.auto_cut
+      auto_cut: printForm.auto_cut,
+      // v2 实验键随行（保存链路不变——主进程 settings:set 值域校验兜底）
+      driver_dpi: printForm.driver_dpi,
+      driver_use_default_page_size: printForm.driver_use_default_page_size
     })
     ElMessage.success('打印设置已保存')
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
-    ElMessage.error(`保存失败：${detail}`)
+    ElMessage.error(`保存失败：${extractIpcErrorMessage(err)}`)
   } finally {
     savingPrint.value = false
   }
@@ -347,6 +362,54 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
             </div>
           </el-form-item>
         </template>
+
+        <!-- ═══ 打印高级选项（实验）折叠区（v2）：常驻可见——非 driver 通道仅标注
+             「仅 driver 通道生效」而非隐藏（避免用户切通道后找不到开关去哪了）═══ -->
+        <el-collapse class="advanced-collapse" data-testid="driver-advanced-collapse">
+          <el-collapse-item name="driverAdvanced">
+            <template #title>
+              <span class="advanced-collapse__title" data-testid="driver-advanced-collapse-title">
+                打印高级选项（实验）
+              </span>
+              <span
+                v-if="printForm.printer_channel !== 'driver'"
+                class="advanced-collapse__inert"
+                data-testid="driver-advanced-inert-hint"
+              >
+                仅 driver 通道生效
+              </span>
+            </template>
+            <el-form-item label="打印 DPI">
+              <el-input-number
+                v-model="printForm.driver_dpi"
+                data-testid="driver-dpi-input"
+                :min="50"
+                :max="1200"
+                :step="1"
+                :value-on-clear="null"
+                class="dpi-input"
+                placeholder="留空=默认（不发送 dpi）"
+              />
+              <div class="field-hint field-hint--block" data-testid="driver-dpi-hint">
+                热敏打印机常见 203；设置后诊断报告会记录该实验值。
+              </div>
+            </el-form-item>
+            <el-form-item label="使用驱动默认页尺寸">
+              <div class="switch-row">
+                <el-switch
+                  v-model="printForm.driver_use_default_page_size"
+                  data-testid="driver-page-size-switch"
+                />
+                <span class="switch-row__state">
+                  {{ printForm.driver_use_default_page_size ? '开' : '关' }}
+                </span>
+              </div>
+              <div class="field-hint field-hint--block" data-testid="driver-page-size-warning">
+                启用后由驱动决定页尺寸；若驱动无法提供默认尺寸将回退 A4（连续纸会被按 A4 分页）。
+              </div>
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
 
         <el-divider class="settings-divider" />
 
@@ -663,6 +726,60 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
 }
 
 .auto-cut-state {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+/* ── 打印高级选项（实验）折叠区（v2）：常驻可见，非 driver 通道标注 inert ── */
+.advanced-collapse {
+  width: 100%;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  margin-bottom: 18px;
+}
+
+.advanced-collapse :deep(.el-collapse-item__header) {
+  padding: 0 14px;
+  border-bottom-color: transparent;
+  background: transparent;
+  gap: 10px;
+}
+
+.advanced-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom-color: transparent;
+  background: transparent;
+}
+
+.advanced-collapse :deep(.el-collapse-item__content) {
+  padding: 8px 14px 4px;
+}
+
+.advanced-collapse__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+/* inert 标注（非 driver 通道）：折叠区常驻、开关仍在——只提示生效条件 */
+.advanced-collapse__inert {
+  font-size: 12px;
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+  border-radius: 4px;
+  padding: 1px 8px;
+}
+
+.dpi-input {
+  width: 200px;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.switch-row__state {
   font-size: 13px;
   color: var(--el-text-color-regular);
 }
