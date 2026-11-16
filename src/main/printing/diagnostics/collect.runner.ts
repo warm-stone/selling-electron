@@ -18,6 +18,27 @@
  * 解析」（空 stdout / 非 JSON / 非 JSON 对象）与执行层失败（非零退出 / 超时 /
  * 落盘失败 / 非 win32）reject，段级失败一律记 snapshot.errors[section] 正常返回。
  *
+ * v2 真机缺陷修复（printer-diagnostics v2 / T3，报告 20261115-170820 驱动）：
+ * - **Bug1（PrinterStatus 位掩码误读）**：Get-Printer 的 PrinterStatus 经
+ *   ConvertTo-Json 是**数字**位掩码（0=Normal/1=Paused/2=Error/128=Offline/…，
+ *   控制台显示 Normal 只是 CDXML 标签映射）——v1 按字符串 'normal' 匹配恒落
+ *   unknown（真机 4 台全 unknown 的根因）。v2 改 asNumber 读取 + 优先级位表
+ *   mapPrinterStatusBitmask；数字缺失时走 WMI 兜底链（ExtendedPrinterStatus
+ *   1-18 表 → PrinterStatus 1-7 防御表 → unknown）。三套枚举语义不同，
+ *   映射表独立维护禁合并（learnings v2 查证结论）。
+ * - **Bug2（WER 提取易碎）**：事件 1000 的 message 措辞随语言/版本漂移，v2
+ *   优先从 T3 透传的 props 数组按 EventData 固定索引提取（props[0]=应用名 /
+ *   props[3]=模块名，语言中立），守卫 props.length ≥ 13；缺失/过短回退既有
+ *   中英文正则（正则路径不动，作 Message 兜底）。
+ * - **printConfig 四层 fallback 归一**：按 entry.source 分派——
+ *   win32printerconfig 0.1mm→μm（×100）、devmode Base64 blob DEVMODEW 偏移
+ *   解析（dmFields@72 u32 / dmPaperSize@78 u16 / dmPaperLength@80 i16 /
+ *   dmPaperWidth@82 i16 / dmFormName@102-165 UTF-16LE，blob ≥166 字节守卫）、
+ *   printconfiguration/printticketxml/无 source（v1 兼容形状）μm 直传；
+ *   输出条目条件携带 source 键（v1 形状输入无此键 → 输出亦无，toEqual 兼容）。
+ * - **DetectedErrorState 人类可读标签**：0/1/2=无错误(null)、3=low-paper、
+ *   4=no-paper、8=jammed、9=offline；表外值保留 String(n) 原值（防御不丢数据）。
+ *
  * 双层 JSON（T3 交接的关键坑）：printers/wmi/jobs/ports/drivers 五个列表段在
  * PS 侧已被段内 ConvertTo-Json 字符串化，再经外层 ConvertTo-Json 序列化——
  * stdout 里呈「段级 JSON 字符串（或其数组）」，必须防御性二次解析：
@@ -304,7 +325,12 @@ interface PrinterSectionRecord {
   name: string
   driverName: string | null
   portName: string | null
-  printerStatus: string | null
+  /**
+   * Get-Printer PrinterStatus——真机经 ConvertTo-Json 是位掩码**数字**
+   * （0=Normal/128=Offline/…；Bug1 修复：v1 当字符串读恒 null → unknown）。
+   * 缺失/非数字 → null → 落 WMI 兜底链。
+   */
+  printerStatus: number | null
   shared: boolean
 }
 
@@ -312,6 +338,10 @@ interface WmiSectionRecord {
   name: string
   workOffline: boolean
   detectedErrorState: number | null
+  /** Win32_Printer.ExtendedPrinterStatus（1-18 枚举；3=Idle 等健在值——WMI 兜底链首选信号） */
+  extendedPrinterStatus: number | null
+  /** 防御字段：Win32_Printer.PrinterStatus（1-7 枚举；当前脚本未采集，记录带了就读） */
+  printerStatus: number | null
   attributes: number | null
   local: boolean
   network: boolean
@@ -352,6 +382,8 @@ interface ConfigSectionRecord {
   widthMicrons: number | null
   heightMicrons: number | null
   orientation: string
+  /** T3 v2 四层 fallback 的来源标注（v1 形状输入无此键 → 输出亦无，toEqual 兼容） */
+  source?: string
 }
 
 function normalizePrintersItem(raw: unknown): PrinterSectionRecord | null {
@@ -363,7 +395,7 @@ function normalizePrintersItem(raw: unknown): PrinterSectionRecord | null {
     name,
     driverName: asString(rec['DriverName']),
     portName: asString(rec['PortName']),
-    printerStatus: asString(rec['PrinterStatus']),
+    printerStatus: asNumber(rec['PrinterStatus']),
     shared: rec['Shared'] === true
   }
 }
@@ -377,6 +409,8 @@ function normalizeWmiItem(raw: unknown): WmiSectionRecord | null {
     name,
     workOffline: rec['WorkOffline'] === true,
     detectedErrorState: asNumber(rec['ExtendedDetectedErrorState']),
+    extendedPrinterStatus: asNumber(rec['ExtendedPrinterStatus']),
+    printerStatus: asNumber(rec['PrinterStatus']),
     attributes: asNumber(rec['Attributes']),
     local: rec['Local'] === true,
     network: rec['Network'] === true,
@@ -433,18 +467,85 @@ function normalizeProbeItem(raw: unknown): ProbeSectionRecord | null {
   return { name, reachable: rec['reachable'] === true }
 }
 
+/**
+ * printConfig 条目归一（v2：按 entry.source 分派 T3 四层 fallback 的单位/编码差异）：
+ * - printconfiguration / printticketxml / 无 source（v1 兼容形状）：μm 直传；
+ * - win32printerconfig：PaperWidth/PaperLength 0.1mm 原值（T3 不换算）→ μm（×100）；
+ * - devmode：Base64 blob 的 DEVMODEW 偏移解析（见 parseDevmodeB64）。
+ * 输出条目条件携带 source 键——v1 形状输入（无 source）输出亦无此键（toEqual 兼容）。
+ */
 function normalizeConfigItem(raw: unknown): ConfigSectionRecord | null {
   const rec = asRecord(raw)
   if (rec === null) return null
   const printerName = asString(rec['printerName'])
   if (printerName === null || printerName === '') return null
+  const source = asString(rec['source'])
+  const orientation = asString(rec['orientation']) ?? ''
+
+  if (source === 'win32printerconfig') {
+    const widthTenthMm = asNumber(rec['paperWidthTenthMm'])
+    const lengthTenthMm = asNumber(rec['paperLengthTenthMm'])
+    return {
+      printerName,
+      paperSize: asString(rec['paperSize']) ?? '',
+      widthMicrons: widthTenthMm != null ? widthTenthMm * 100 : null,
+      heightMicrons: lengthTenthMm != null ? lengthTenthMm * 100 : null,
+      orientation,
+      source
+    }
+  }
+  if (source === 'devmode') {
+    const devmode = parseDevmodeB64(asString(rec['devmodeB64']))
+    return {
+      printerName,
+      paperSize: devmode.paperSize,
+      widthMicrons: devmode.widthMicrons,
+      heightMicrons: devmode.heightMicrons,
+      orientation,
+      source
+    }
+  }
   return {
     printerName,
     paperSize: asString(rec['paperSize']) ?? '',
     widthMicrons: asNumber(rec['widthMicrons']),
     heightMicrons: asNumber(rec['heightMicrons']),
-    orientation: asString(rec['orientation']) ?? ''
+    orientation,
+    ...(source != null ? { source } : {})
   }
+}
+
+/**
+ * DEVMODE Base64 blob 偏移解析（v2 盲区 4 的注册表兜底层——PS 只编码，TS 侧解析）。
+ * DEVMODEW 偏移（librarian 查证已纠正，learnings v2 查证结论★1）：
+ * dmFields@72 u32 小端（有效位 DM_PAPERSIZE=0x2 / DM_PAPERLENGTH=0x4 /
+ * DM_PAPERWIDTH=0x8）、dmPaperSize@78 u16、dmPaperLength@80 i16、dmPaperWidth@82
+ * i16（0.1mm 单位 → ×100 得 μm）、dmFormName@102-165 UTF-16LE。
+ * - blob <166 字节 → 全空（短 blob 越界读不可信，规则层按缺数据降级）；
+ * - dmPaperSize ≥ 256（DMPAPER_USER 自定义表单）：宽高在 Forms 定义不在
+ *   DEVMODE——取 dmFormName（截零）作 paperSize，宽高 null；
+ * - dmFields 同置 DM_PAPERLENGTH|DM_PAPERWIDTH 才有可读宽高，否则 null/null。
+ */
+function parseDevmodeB64(
+  b64: string | null
+): { paperSize: string; widthMicrons: number | null; heightMicrons: number | null } {
+  if (b64 === null) return { paperSize: '', widthMicrons: null, heightMicrons: null }
+  const blob = Buffer.from(b64, 'base64')
+  if (blob.length < 166) return { paperSize: '', widthMicrons: null, heightMicrons: null }
+  const dmFields = blob.readUInt32LE(72)
+  const dmPaperSize = blob.readUInt16LE(78)
+  if (dmPaperSize >= 256) {
+    const formName = blob.toString('utf16le', 102, 166).split('\0')[0].trim()
+    return { paperSize: formName, widthMicrons: null, heightMicrons: null }
+  }
+  if ((dmFields & 0x4) !== 0 && (dmFields & 0x8) !== 0) {
+    return {
+      paperSize: '',
+      widthMicrons: blob.readInt16LE(82) * 100,
+      heightMicrons: blob.readInt16LE(80) * 100
+    }
+  }
+  return { paperSize: '', widthMicrons: null, heightMicrons: null }
 }
 
 // ══════════════ 原生段解析 ══════════════
@@ -499,11 +600,24 @@ function parseEventsSection(v: unknown): PrintDiagnosticSnapshot['system']['even
       const time = asString(er?.['time'])
       if (er === null || time === null || time === '') continue
       const message = asString(er['message']) ?? ''
-      app1000Events.push({
-        time,
-        faultingApp: extractFaultingField(message, 'app'),
-        faultingModule: extractFaultingField(message, 'module')
-      })
+      // Bug2 修复：T3 透传的 WER props 数组（事件 1000 EventData 固定字段序：
+      // [0]=应用名 [3]=模块名，语言中立不随措辞漂移）优先；守卫 length ≥ 13
+      //（完整 EventData 20 项，[11]=模块路径是第 12 项——短数组说明形状漂移，
+      // 索引不可信）；缺失/过短回退 message 正则（中英文两套模式兜底）。
+      const props = er['props']
+      if (Array.isArray(props) && props.length >= 13) {
+        app1000Events.push({
+          time,
+          faultingApp: propStr(props[0]) || 'unknown',
+          faultingModule: propStr(props[3]) || 'unknown'
+        })
+      } else {
+        app1000Events.push({
+          time,
+          faultingApp: extractFaultingField(message, 'app'),
+          faultingModule: extractFaultingField(message, 'module')
+        })
+      }
     }
   }
   return {
@@ -538,10 +652,119 @@ function extractFaultingField(message: string, kind: 'app' | 'module'): string {
   return 'unknown'
 }
 
-/** printConfig 段为原生对象数组（PS 侧已把 Width/Length 映射为 width/heightMicrons，直接消费） */
+/**
+ * WER props 元素防御归一（Bug2）：null/undefined/对象 → ''（无可提取值）；
+ * 标量 → String().trim()。空串由调用方归一为 'unknown'（与正则路径
+ * extractFaultingField 的失败填值契约对齐）。
+ */
+function propStr(v: unknown): string {
+  if (v === null || v === undefined || typeof v === 'object') return ''
+  return String(v).trim()
+}
+
+/** printConfig 段为原生对象数组（T3 v2 按层标注 source；条目归一按 source 分派，见 normalizeConfigItem） */
 function parsePrintConfigSection(v: unknown): ConfigSectionRecord[] {
   const items = Array.isArray(v) ? v : []
   return items.map(normalizeConfigItem).filter((x): x is ConfigSectionRecord => x !== null)
+}
+
+// ══════════════ v2 状态映射表（三套枚举语义不同——独立维护，禁合并） ══════════════
+
+/**
+ * Get-Printer PrinterStatus 位掩码优先级表（Bug1 修复核心）——**有序**数组，
+ * 遍历首个命中的位决定。真机实测 PrinterStatus 是位掩码数字而非 'Normal'
+ * 字符串：OFFLINE=128 / ERROR=2 / PAUSED=1 / PENDING_DELETION=4 /
+ * PAPER_JAM=8 / PAPER_OUT=16 / PAPER_PROBLEM=64 / DOOR_OPEN=4194304；
+ * 运行态位（256 IOActive 起）与 0（Normal）不扰动判定 → online。
+ */
+const PRINTER_STATUS_BITMASK: ReadonlyArray<{
+  bit: number
+  state: PrinterDiagnostic['status']['state']
+  detectedError: string | null
+}> = [
+  { bit: 128, state: 'offline', detectedError: null },
+  { bit: 2, state: 'error', detectedError: null },
+  { bit: 1, state: 'paused', detectedError: null },
+  { bit: 4, state: 'error', detectedError: 'pending-deletion' },
+  { bit: 8, state: 'error', detectedError: 'paper-jam' },
+  { bit: 16, state: 'error', detectedError: 'paper-out' },
+  { bit: 64, state: 'error', detectedError: 'paper-problem' },
+  { bit: 4194304, state: 'error', detectedError: 'door-open' }
+]
+
+/**
+ * Get-Printer PrinterStatus 位掩码 → {state, detectedError}：遍历优先级表首个
+ * 命中位决定；其余（含 0=Normal 与全部运行态位）→ online。
+ */
+function mapPrinterStatusBitmask(mask: number): {
+  state: PrinterDiagnostic['status']['state']
+  detectedError: string | null
+} {
+  for (const entry of PRINTER_STATUS_BITMASK) {
+    if ((mask & entry.bit) !== 0) return { state: entry.state, detectedError: entry.detectedError }
+  }
+  return { state: 'online', detectedError: null }
+}
+
+/**
+ * Win32_Printer.PrinterStatus 1-7 表（防御字段：当前脚本未采集，wmi 记录带了
+ * 就读）。1=Other/2=Unknown/6=StoppedPrinting → unknown；3=Idle/4=Printing/
+ * 5=Warmup → online；7=Offline → offline。表外值 → unknown。
+ */
+const WIN32_PRINTER_STATUS_1_7: Readonly<Record<number, PrinterDiagnostic['status']['state']>> = {
+  1: 'unknown',
+  2: 'unknown',
+  3: 'online',
+  4: 'online',
+  5: 'online',
+  6: 'unknown',
+  7: 'offline'
+}
+
+/**
+ * Win32_Printer.ExtendedPrinterStatus 1-18 表（wmi 兜底链首选信号）：
+ * 3=Idle/4=Printing/17=IOActive/18=ManualFeed → online；7=Offline → offline；
+ * 8=Paused → paused；9=Error → error；2=Unknown（无 bidi 状态监视器的低价
+ * 热敏机常态——「拿不到状态」非故障）与表外值（1/5/6/10-16）→ unknown。
+ */
+const EXTENDED_PRINTER_STATUS_1_18: Readonly<Record<number, PrinterDiagnostic['status']['state']>> =
+  {
+    2: 'unknown',
+    3: 'online',
+    4: 'online',
+    7: 'offline',
+    8: 'paused',
+    9: 'error',
+    17: 'online',
+    18: 'online'
+  }
+
+/**
+ * Win32_Printer.ExtendedDetectedErrorState 人类可读标签表（v1 裸 String(n) 的
+ * 替代）：0=Unknown/1=Other/2=NoError → null（无错误）；3=LowPaper/4=NoPaper/
+ * 5=LowToner/6=NoToner/7=DoorOpen/8=Jammed/9=Offline → 标签。表外值保留
+ * String(n) 原值（防御不丢真机数据）。
+ */
+const DETECTED_ERROR_STATE_LABELS: Readonly<Record<number, string | null>> = {
+  0: null,
+  1: null,
+  2: null,
+  3: 'low-paper',
+  4: 'no-paper',
+  5: 'low-toner',
+  6: 'no-toner',
+  7: 'door-open',
+  8: 'jammed',
+  9: 'offline'
+}
+
+/**
+ * ExtendedDetectedErrorState → 人类可读标签：表内 0/1/2 = 无错误（null），
+ * 3-9 = 错误标签；表外值保留 String(n) 原值。注意不能用 `表[n] ?? String(n)`
+ * ——表内显式 null 会被 ?? 当键缺失吞成 String(n)，故用 in 判定。
+ */
+function wmiDetectedErrorLabel(n: number): string | null {
+  return n in DETECTED_ERROR_STATE_LABELS ? DETECTED_ERROR_STATE_LABELS[n] : String(n)
 }
 
 // ══════════════ PrinterDiagnostic 装配 ══════════════
@@ -620,16 +843,29 @@ function assemblePrinterDiagnostic(
   const probe = portName !== null ? probeByName.get(portName.toLowerCase()) : undefined
   const driverName = printer?.driverName ?? wmi?.driverName ?? null
 
-  // 状态判定优先级：WMI WorkOffline 脱机标志（printer-offline-flag 的判定信号）>
-  // Get-Printer PrinterStatus 映射；source 标注判定来源
+  // 状态判定优先级（v2 归一链）：WMI WorkOffline 脱机标志（printer-offline-flag
+  // 的判定信号）> Get-Printer PrinterStatus 位掩码表（Bug1 修复）> WMI
+  // ExtendedPrinterStatus 1-18 表 > WMI PrinterStatus 1-7 防御表 > unknown；
+  // source 标注判定来源
+  const wmiLabel =
+    wmi?.detectedErrorState != null ? wmiDetectedErrorLabel(wmi.detectedErrorState) : null
   let state: PrinterDiagnostic['status']['state']
   let source: string
+  let bitAnnotation: string | null = null
   if (wmi?.workOffline === true) {
     state = 'offline'
     source = 'wmi-workoffline'
   } else if (printer?.printerStatus != null) {
-    state = mapPrinterStatus(printer.printerStatus)
+    const mapped = mapPrinterStatusBitmask(printer.printerStatus)
+    state = mapped.state
+    bitAnnotation = mapped.detectedError
     source = 'win32-printer'
+  } else if (wmi?.extendedPrinterStatus != null) {
+    state = EXTENDED_PRINTER_STATUS_1_18[wmi.extendedPrinterStatus] ?? 'unknown'
+    source = 'wmi'
+  } else if (wmi?.printerStatus != null) {
+    state = WIN32_PRINTER_STATUS_1_7[wmi.printerStatus] ?? 'unknown'
+    source = 'wmi'
   } else {
     state = 'unknown'
     source = 'wmi'
@@ -643,10 +879,9 @@ function assemblePrinterDiagnostic(
     shared: printer?.shared ?? false,
     status: {
       state,
-      detectedError:
-        wmi?.detectedErrorState != null && wmi.detectedErrorState !== 0
-          ? String(wmi.detectedErrorState)
-          : null,
+      // 位掩码纸类标注（paper-jam 等）优先；无标注时 WMI DetectedErrorState
+      // 人类可读标签（0/1/2 → null；表外值 String(n) 防御保留）
+      detectedError: bitAnnotation ?? wmiLabel,
       source
     },
     driver: {
@@ -679,20 +914,6 @@ function assemblePrinterDiagnostic(
       statusMask: j.statusMask,
       isOwnedByCurrentUser: isOwnedByCurrentUser(j.owner, currentUserName)
     }))
-  }
-}
-
-/** Get-Printer PrinterStatus → schema state（Normal→online/Paused→paused/Offline→offline/其他→unknown） */
-function mapPrinterStatus(s: string): PrinterDiagnostic['status']['state'] {
-  switch (s.toLowerCase()) {
-    case 'normal':
-      return 'online'
-    case 'paused':
-      return 'paused'
-    case 'offline':
-      return 'offline'
-    default:
-      return 'unknown'
   }
 }
 

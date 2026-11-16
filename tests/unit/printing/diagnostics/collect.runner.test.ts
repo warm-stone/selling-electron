@@ -54,13 +54,13 @@ function makeFakeExecFile(behavior: FakeBehavior, calls: CapturedCall[]): Collec
 
 // ══════════════ 测试数据（真实双层 JSON 形状） ══════════════
 
-/** Get-Printer 段记录（PS Select-Object 字段名原样） */
+/** Get-Printer 段记录（PS Select-Object 字段名原样；PrinterStatus 经 ConvertTo-Json 是位掩码数字——0=Normal/1=Paused） */
 const PRINTERS = [
-  { Name: 'POS-80', DriverName: 'POS80 Driver', PortName: 'USB001', PrinterStatus: 'Normal', Type: 'Local', Shared: true, Published: false },
-  { Name: 'Microsoft Print to PDF', DriverName: 'Microsoft Print To PDF', PortName: 'PORTPROMPT:', PrinterStatus: 'Normal', Type: 'Local', Shared: false, Published: false },
-  { Name: '得力云打印', DriverName: '得力 DL-5801PW', PortName: 'IP_192.168.1.66', PrinterStatus: 'Normal', Type: 'Local', Shared: false, Published: false },
-  { Name: 'LPR 老打印机', DriverName: 'Generic / Text Only', PortName: 'IP_192.168.1.99', PrinterStatus: 'Paused', Type: 'Local', Shared: false, Published: false },
-  { Name: '前台, 备用机', DriverName: 'Generic / Text Only', PortName: 'COM3', PrinterStatus: 'Normal', Type: 'Local', Shared: true, Published: false }
+  { Name: 'POS-80', DriverName: 'POS80 Driver', PortName: 'USB001', PrinterStatus: 0, Type: 'Local', Shared: true, Published: false },
+  { Name: 'Microsoft Print to PDF', DriverName: 'Microsoft Print To PDF', PortName: 'PORTPROMPT:', PrinterStatus: 0, Type: 'Local', Shared: false, Published: false },
+  { Name: '得力云打印', DriverName: '得力 DL-5801PW', PortName: 'IP_192.168.1.66', PrinterStatus: 0, Type: 'Local', Shared: false, Published: false },
+  { Name: 'LPR 老打印机', DriverName: 'Generic / Text Only', PortName: 'IP_192.168.1.99', PrinterStatus: 1, Type: 'Local', Shared: false, Published: false },
+  { Name: '前台, 备用机', DriverName: 'Generic / Text Only', PortName: 'COM3', PrinterStatus: 0, Type: 'Local', Shared: true, Published: false }
 ]
 
 /** Win32_Printer 段记录；Attributes 位 4096 = RAW_ONLY */
@@ -233,13 +233,13 @@ describe('runCollect（打印诊断采集执行器）', () => {
         ]
       })
 
-      // PDF 打印机：ExtendedDetectedErrorState 8 → '8'；PORTPROMPT: → other
+      // PDF 打印机：ExtendedDetectedErrorState 8 → 'jammed' 人类可读标签（v2）；PORTPROMPT: → other
       const pdf = findPrinter(snapshot, 'Microsoft Print to PDF')
-      expect(pdf.status.detectedError).toBe('8')
+      expect(pdf.status.detectedError).toBe('jammed')
       expect(pdf.port.type).toBe('other')
       expect(pdf.driver.rawOnlyBit).toBe(false)
 
-      // 得力云打印：PrinterStatus Normal 但 WorkOffline=true → offline（wmi 优先）；
+      // 得力云打印：PrinterStatus 0(Normal) 但 WorkOffline=true → offline（wmi 优先）；
       // IP_ 端口 9100 → tcp-raw + SNMP true + 探测不可达回填；驱动不在清单 → false
       expect(findPrinter(snapshot, '得力云打印')).toEqual({
         name: '得力云打印',
@@ -254,7 +254,7 @@ describe('runCollect（打印诊断采集执行器）', () => {
         jobs: []
       })
 
-      // LPR 打印机：IP_ 端口 515 → tcp-lpr；PrinterStatus Paused → paused；探测可达
+      // LPR 打印机：IP_ 端口 515 → tcp-lpr；PrinterStatus 位掩码 1(Paused) → paused；探测可达
       const lpr = findPrinter(snapshot, 'LPR 老打印机')
       expect(lpr.status).toEqual({ state: 'paused', detectedError: null, source: 'win32-printer' })
       expect(lpr.port).toEqual({ name: 'IP_192.168.1.99', type: 'tcp-lpr', hostAddress: '192.168.1.99', portNumber: 515, snmpEnabled: false, reachable: true })
@@ -386,9 +386,9 @@ describe('runCollect（打印诊断采集执行器）', () => {
         '得力云打印',
         'LPR 老打印机'
       ])
-      // printers 段的 shared 丢失 → false；状态无 PrinterStatus 来源 → unknown（wmi 兜底）
+      // printers 段的 shared 丢失 → false；状态落 WMI 兜底链（ExtendedPrinterStatus=3 Idle → online）
       expect(findPrinter(snapshot, 'POS-80').shared).toBe(false)
-      expect(findPrinter(snapshot, 'POS-80').status).toEqual({ state: 'unknown', detectedError: null, source: 'wmi' })
+      expect(findPrinter(snapshot, 'POS-80').status).toEqual({ state: 'online', detectedError: null, source: 'wmi' })
     })
 
     it('段缺失 → 缺失段记 errors + 在场段正常', async () => {
@@ -481,9 +481,9 @@ describe('runCollect（打印诊断采集执行器）', () => {
       const stdout = JSON.stringify({
         printers: [
           JSON.stringify([
-            { Name: '串口机', DriverName: 'D', PortName: 'COM3', PrinterStatus: 'Normal', Type: 'Local', Shared: false, Published: false },
-            { Name: '并口机', DriverName: 'D', PortName: 'LPT1', PrinterStatus: 'Normal', Type: 'Local', Shared: false, Published: false },
-            { Name: 'WSD 机', DriverName: 'D', PortName: 'WSD-1a2b3c4d-5e6f', PrinterStatus: 'Normal', Type: 'Local', Shared: false, Published: false }
+            { Name: '串口机', DriverName: 'D', PortName: 'COM3', PrinterStatus: 0, Type: 'Local', Shared: false, Published: false },
+            { Name: '并口机', DriverName: 'D', PortName: 'LPT1', PrinterStatus: 0, Type: 'Local', Shared: false, Published: false },
+            { Name: 'WSD 机', DriverName: 'D', PortName: 'WSD-1a2b3c4d-5e6f', PrinterStatus: 0, Type: 'Local', Shared: false, Published: false }
           ])
         ],
         wmi: [],
@@ -520,6 +520,314 @@ describe('runCollect（打印诊断采集执行器）', () => {
       expect(snapshot.app.settings).toEqual({ channel: '', printerName: '', templatePaperWidth: '' })
       expect(snapshot.app.printOptions).toEqual({ pageSizeMode: '', marginsMode: '', printBackground: false })
       expect(snapshot.app.templateFacts).toEqual({ hasLogo: false, logoPx: null, cssPadding: '' })
+    })
+  })
+
+  // ══════════════ v2：状态映射（Bug1 位掩码 + WMI 兜底链 + 错误标签） ══════════════
+
+  /** 单台打印机最小 stdout（printers/wmi 段可独立覆写；其余段空但齐全） */
+  function onePrinterStdout(
+    printerRec: Record<string, unknown> | null,
+    wmiRec: Record<string, unknown> | null
+  ): string {
+    return JSON.stringify({
+      printers: printerRec !== null ? [JSON.stringify([printerRec])] : [],
+      wmi: wmiRec !== null ? [JSON.stringify([wmiRec])] : [],
+      jobs: [],
+      ports: [],
+      drivers: [],
+      spooler: { status: 'Running', startType: 'Auto', dependents: [] },
+      spoolDir: { spoolDir: 'C:\\spool', files: [] },
+      events: { admin: [], app1000: [], operationalEnabled: false },
+      tcpProbe: [],
+      printConfig: []
+    })
+  }
+
+  const basePrinterRec = { Name: 'T', DriverName: 'D', PortName: 'USB001', Type: 'Local', Shared: false, Published: false }
+  const baseWmiRec = { Name: 'T', WorkOffline: false, Local: true, Network: false, Default: false, PortName: 'USB001', DriverName: 'D', PrintProcessor: 'winprint', Manufacturer: null }
+
+  describe('v2 状态映射：PrinterStatus 位掩码（Bug1）', () => {
+    it('位掩码优先级表逐位命中：128 offline > 2 error > 1 paused > 纸类/门位（带标注）', async () => {
+      const cases: Array<[number, string, string | null]> = [
+        [0, 'online', null], // Normal（真机 4 台全 0——v1 误判 unknown 的修复锚）
+        [128, 'offline', null],
+        [2, 'error', null],
+        [1, 'paused', null],
+        [4, 'error', 'pending-deletion'],
+        [8, 'error', 'paper-jam'],
+        [16, 'error', 'paper-out'],
+        [64, 'error', 'paper-problem'],
+        [4194304, 'error', 'door-open'],
+        [1024, 'online', null], // Printing 运行态位不扰动
+        [512, 'online', null], // Busy
+        [129, 'offline', null] // 组合位：128 优先于 1
+      ]
+      for (const [mask, state, detectedError] of cases) {
+        const { snapshot } = await collect({
+          kind: 'ok',
+          stdout: onePrinterStdout({ ...basePrinterRec, PrinterStatus: mask }, null)
+        })
+        expect(findPrinter(snapshot, 'T').status, `mask=${mask}`).toEqual({
+          state,
+          detectedError,
+          source: 'win32-printer'
+        })
+      }
+    })
+
+    it('位掩码纸类标注优先于 WMI DetectedErrorState 标签', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: onePrinterStdout(
+          { ...basePrinterRec, PrinterStatus: 8 },
+          { ...baseWmiRec, ExtendedDetectedErrorState: 4 }
+        )
+      })
+      expect(findPrinter(snapshot, 'T').status.detectedError).toBe('paper-jam')
+    })
+  })
+
+  describe('v2 状态映射：WMI 兜底链（printerStatus 缺失时）', () => {
+    it('ExtendedPrinterStatus 1-18 表：3/4/17/18→online、7→offline、8→paused、9→error、2/表外→unknown', async () => {
+      const cases: Array<[number, string]> = [
+        [2, 'unknown'], // Unknown——无 bidi 状态监视器的低价热敏机常态（非故障）
+        [3, 'online'], // Idle（真机 USB 热敏机在线空闲典型值）
+        [4, 'online'],
+        [7, 'offline'],
+        [8, 'paused'],
+        [9, 'error'],
+        [17, 'online'],
+        [18, 'online'],
+        [1, 'unknown'], // Other 表外
+        [10, 'unknown'] // Busy 表外
+      ]
+      for (const [ext, state] of cases) {
+        const { snapshot } = await collect({
+          kind: 'ok',
+          stdout: onePrinterStdout(null, { ...baseWmiRec, ExtendedPrinterStatus: ext })
+        })
+        expect(findPrinter(snapshot, 'T').status, `ext=${ext}`).toEqual({
+          state,
+          detectedError: null,
+          source: 'wmi'
+        })
+      }
+    })
+
+    it('无 ExtendedPrinterStatus 时落 Win32 PrinterStatus 1-7 防御表（3→online、7→offline、2→unknown）', async () => {
+      for (const [st, state] of [
+        [3, 'online'],
+        [7, 'offline'],
+        [2, 'unknown']
+      ] as Array<[number, string]>) {
+        const { snapshot } = await collect({
+          kind: 'ok',
+          stdout: onePrinterStdout(null, { ...baseWmiRec, PrinterStatus: st })
+        })
+        expect(findPrinter(snapshot, 'T').status.state, `PrinterStatus=${st}`).toBe(state)
+      }
+    })
+
+    it('两段状态字段全缺 → unknown（source wmi）', async () => {
+      const { snapshot } = await collect({ kind: 'ok', stdout: onePrinterStdout(null, baseWmiRec) })
+      expect(findPrinter(snapshot, 'T').status).toEqual({ state: 'unknown', detectedError: null, source: 'wmi' })
+    })
+  })
+
+  describe('v2 DetectedErrorState 人类可读标签', () => {
+    it('0/1/2→null（无错误）、3-9→标签、表外值保留 String(n)', async () => {
+      const cases: Array<[number, string | null]> = [
+        [0, null],
+        [1, null],
+        [2, null], // NoError——v1 会误报 '2'
+        [3, 'low-paper'],
+        [4, 'no-paper'],
+        [5, 'low-toner'],
+        [6, 'no-toner'],
+        [7, 'door-open'],
+        [8, 'jammed'],
+        [9, 'offline'],
+        [99, '99'] // 表外值防御保留原值
+      ]
+      for (const [n, label] of cases) {
+        const { snapshot } = await collect({
+          kind: 'ok',
+          stdout: onePrinterStdout(null, { ...baseWmiRec, ExtendedDetectedErrorState: n })
+        })
+        expect(findPrinter(snapshot, 'T').status.detectedError, `state=${n}`).toBe(label)
+      }
+    })
+  })
+
+  // ══════════════ v2：WER props 索引解析（Bug2） ══════════════
+
+  describe('v2 事件 1000：props 索引优先 + message 正则兜底', () => {
+    function eventsStdout(app1000: unknown[]): string {
+      return JSON.stringify({
+        ...defaultSections(),
+        events: { admin: [], app1000, operationalEnabled: false }
+      })
+    }
+
+    /** 完整 WER EventData props（≥13 项；[0]=应用名 [3]=模块名 [10]/[11]=路径） */
+    const fullProps = [
+      'spoolsv.exe', '10.0.19041.1', '0x5d891b2f', 'dlpproc.dll', '2.0.0.0', '0x1a2b3c4d',
+      '0xc0000005', '12', 'ntdll.dll', 'x', 'C:\\Windows\\System32\\spoolsv.exe',
+      'C:\\Windows\\System32\\dlpproc.dll', '2030', 'extra', 'more'
+    ]
+
+    it('props ≥13 项 → 按索引 [0]/[3] 提取（message 为空也能命中——语言中立）', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: eventsStdout([{ time: '2026-11-15T09:00:00.000+08:00', message: '', props: fullProps }])
+      })
+      expect(snapshot.system.eventLog.app1000Events).toEqual([
+        { time: '2026-11-15T09:00:00.000+08:00', faultingApp: 'spoolsv.exe', faultingModule: 'dlpproc.dll' }
+      ])
+    })
+
+    it('props 过短（<13，形状漂移不可信）→ 回退 message 正则', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: eventsStdout([
+          {
+            time: '2026-11-15T09:00:00.000+08:00',
+            message: '错误应用程序名称: pos.exe，版本: 1.0\n错误模块名称: ntdll.dll，版本: 10.0',
+            props: ['pos.exe', 'x']
+          }
+        ])
+      })
+      expect(snapshot.system.eventLog.app1000Events).toEqual([
+        { time: '2026-11-15T09:00:00.000+08:00', faultingApp: 'pos.exe', faultingModule: 'ntdll.dll' }
+      ])
+    })
+
+    it('props 索引值为空串/null/对象 → unknown（与正则失败填值契约对齐）', async () => {
+      const props: unknown[] = [...fullProps]
+      props[0] = ''
+      props[3] = null
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: eventsStdout([{ time: '2026-11-15T09:00:00.000+08:00', message: 'irrelevant', props }])
+      })
+      expect(snapshot.system.eventLog.app1000Events).toEqual([
+        { time: '2026-11-15T09:00:00.000+08:00', faultingApp: 'unknown', faultingModule: 'unknown' }
+      ])
+    })
+
+    it('无 props 键（v1 形状/旧脚本输出）→ message 正则路径不受影响', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: eventsStdout([
+          {
+            time: '2026-11-11T08:00:00.000+08:00',
+            message: 'Faulting application name: legacy.exe, version: 3.1\nFaulting module name: ntdll.dll, version: 10.0'
+          }
+        ])
+      })
+      expect(snapshot.system.eventLog.app1000Events).toEqual([
+        { time: '2026-11-11T08:00:00.000+08:00', faultingApp: 'legacy.exe', faultingModule: 'ntdll.dll' }
+      ])
+    })
+  })
+
+  // ══════════════ v2：printConfig 四层 fallback 归一 ══════════════
+
+  describe('v2 printConfig 归一：source 分派（单位换算 / DEVMODE 解析 / v1 兼容）', () => {
+    function configStdout(configs: unknown[]): string {
+      return JSON.stringify({ ...defaultSections(), printConfig: configs })
+    }
+
+    /** 构造 DEVMODEW blob（Base64）：偏移 72/78/80/82 + dmFormName@102 UTF-16LE */
+    function devmodeB64(opts: {
+      dmFields?: number
+      dmPaperSize?: number
+      dmPaperLength?: number
+      dmPaperWidth?: number
+      formName?: string
+      length?: number
+    }): string {
+      const blob = Buffer.alloc(opts.length ?? 220)
+      if (blob.length >= 166) {
+        blob.writeUInt32LE(opts.dmFields ?? 0, 72)
+        blob.writeUInt16LE(opts.dmPaperSize ?? 0, 78)
+        blob.writeInt16LE(opts.dmPaperLength ?? 0, 80)
+        blob.writeInt16LE(opts.dmPaperWidth ?? 0, 82)
+        if (opts.formName !== undefined) blob.write(opts.formName, 102, 64, 'utf16le')
+      }
+      return blob.toString('base64')
+    }
+
+    it('win32printerconfig：0.1mm 原值 ×100 → μm，source 随行（paperSize/orientation 数字枚举归一空串，原值留档 raw 层）', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: configStdout([
+          { printerName: 'DL-5801PW', paperSize: 256, widthMicrons: null, heightMicrons: null, paperWidthTenthMm: 580, paperLengthTenthMm: 2000, orientation: 1, source: 'win32printerconfig' }
+        ])
+      })
+      expect(snapshot.system.printConfigs).toEqual([
+        { printerName: 'DL-5801PW', paperSize: '', widthMicrons: 58000, heightMicrons: 200000, orientation: '', source: 'win32printerconfig' }
+      ])
+      expect(snapshot.raw.printConfig).toContain('paperWidthTenthMm')
+    })
+
+    it('devmode：dmFields 置 PAPERLENGTH|PAPERWIDTH → 宽高 i16 ×100', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: configStdout([
+          { printerName: 'T', devmodeB64: devmodeB64({ dmFields: 0xc, dmPaperSize: 1, dmPaperLength: 2970, dmPaperWidth: 2100 }), source: 'devmode' }
+        ])
+      })
+      expect(snapshot.system.printConfigs).toEqual([
+        { printerName: 'T', paperSize: '', widthMicrons: 210000, heightMicrons: 297000, orientation: '', source: 'devmode' }
+      ])
+    })
+
+    it('devmode：dmPaperSize ≥256（DMPAPER_USER 自定义表单）→ 取 dmFormName，宽高 null', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: configStdout([
+          { printerName: 'T', devmodeB64: devmodeB64({ dmFields: 0xc, dmPaperSize: 256, dmPaperLength: 2970, dmPaperWidth: 580, formName: 'DL58 Receipt' }), source: 'devmode' }
+        ])
+      })
+      expect(snapshot.system.printConfigs).toEqual([
+        { printerName: 'T', paperSize: 'DL58 Receipt', widthMicrons: null, heightMicrons: null, orientation: '', source: 'devmode' }
+      ])
+    })
+
+    it('devmode：dmFields 未置宽高位 / blob <166 字节 / b64 缺失 → 全空（缺数据不猜）', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: configStdout([
+          { printerName: 'A', devmodeB64: devmodeB64({ dmFields: 0x2, dmPaperSize: 1, dmPaperLength: 2970, dmPaperWidth: 2100 }), source: 'devmode' },
+          { printerName: 'B', devmodeB64: devmodeB64({ dmFields: 0xc, dmPaperWidth: 580, length: 100 }), source: 'devmode' },
+          { printerName: 'C', source: 'devmode' }
+        ])
+      })
+      expect(snapshot.system.printConfigs).toEqual([
+        { printerName: 'A', paperSize: '', widthMicrons: null, heightMicrons: null, orientation: '', source: 'devmode' },
+        { printerName: 'B', paperSize: '', widthMicrons: null, heightMicrons: null, orientation: '', source: 'devmode' },
+        { printerName: 'C', paperSize: '', widthMicrons: null, heightMicrons: null, orientation: '', source: 'devmode' }
+      ])
+    })
+
+    it('printconfiguration/printticketxml：μm 直传 + source 随行；v1 形状（无 source）输出亦无键', async () => {
+      const { snapshot } = await collect({
+        kind: 'ok',
+        stdout: configStdout([
+          { printerName: 'P1', paperSize: 'A4', widthMicrons: 210000, heightMicrons: 297000, orientation: 'Portrait', source: 'printconfiguration' },
+          { printerName: 'P2', paperSize: null, widthMicrons: 58000, heightMicrons: 200000, orientation: null, source: 'printticketxml' },
+          { printerName: 'P3', paperSize: 'X', widthMicrons: 80000, heightMicrons: null, orientation: '' }
+        ])
+      })
+      expect(snapshot.system.printConfigs).toEqual([
+        { printerName: 'P1', paperSize: 'A4', widthMicrons: 210000, heightMicrons: 297000, orientation: 'Portrait', source: 'printconfiguration' },
+        { printerName: 'P2', paperSize: '', widthMicrons: 58000, heightMicrons: 200000, orientation: '', source: 'printticketxml' },
+        { printerName: 'P3', paperSize: 'X', widthMicrons: 80000, heightMicrons: null, orientation: '' }
+      ])
+      // v1 兼容锁：无 source 输入的条目输出不得携带 source 键（历史报告 toEqual 兼容）
+      expect('source' in snapshot.system.printConfigs[2]).toBe(false)
     })
   })
 })
