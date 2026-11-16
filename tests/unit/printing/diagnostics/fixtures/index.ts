@@ -1,5 +1,5 @@
 /**
- * printer-diagnostics T2 黄金样本（7 组真实故障机症状复刻）。
+ * printer-diagnostics T2 黄金样本（7 组真实故障机症状复刻 + v2 真机基线）。
  *
  * 规则引擎（T5）表驱动测试与报告导出（T8）golden 快照的共同输入：
  * 每组 fixture 对应 docs/windows-manual-checklist.md 的症状语义与
@@ -19,6 +19,7 @@ import spoolerDeadJson from './spooler-dead.json'
 import logDisabledJson from './log-disabled.json'
 import printerNameMismatchJson from './printer-name-mismatch.json'
 import healthyMachineJson from './healthy-machine.json'
+import realMachine20261115Json from './real-machine-20261115.json'
 
 /** 症状 1a：热敏机驱动把 RAW 字节当图形渲染（中文名 + WINPRINT + rawOnlyBit=false + spooler 通道） */
 export const symptom1DriverRawGarbled = symptom1DriverRawGarbledJson as PrintDiagnosticSnapshot
@@ -41,6 +42,18 @@ export const printerNameMismatch = printerNameMismatchJson as PrintDiagnosticSna
 /** 全绿基线（Generic / Text Only 主力机 + PDF 虚拟机 + 事件 307 正常业务打印完成） */
 export const healthyMachine = healthyMachineJson as PrintDiagnosticSnapshot
 
+/**
+ * 真机 2026-11-15 基线（v2 golden 回放数据锚——打印机诊断报告-20261115-170820.txt）。
+ * 修复后语义终态：4 台全 online（PrinterStatus=0 位掩码归一，Bug1）、WER
+ * ProviderName 过滤后 app1000Events=0 条（18 条 UndockedHost 遥测噪音被压掉，
+ * Bug2）、v4 驱动 printConfig fallback 链终值全空（盲区 4 的 R17 输入）、
+ * 元素级测量 scrollWidth=221 不溢出（Bug3 假阳性 786 消除）。
+ * 症状 2 现场：channel=driver + DL-5801PW + 58mm + dpr=1.25（R16 坏组合证据源）。
+ * printConfigs 条目暂为 v1 形状（无 source 键）——Track B 真机复采后按实际
+ * fallback 命中层回填 source。
+ */
+export const realMachine20261115 = realMachine20261115Json as PrintDiagnosticSnapshot
+
 /** 键 = fixture 文件名去 .json；T5 表驱动 / T8 golden 快照按 key 遍历 */
 export const FIXTURES: Record<string, PrintDiagnosticSnapshot> = {
   'symptom1-driver-raw-garbled': symptom1DriverRawGarbled,
@@ -49,5 +62,6 @@ export const FIXTURES: Record<string, PrintDiagnosticSnapshot> = {
   'spooler-dead': spoolerDead,
   'log-disabled': logDisabled,
   'printer-name-mismatch': printerNameMismatch,
-  'healthy-machine': healthyMachine
+  'healthy-machine': healthyMachine,
+  'real-machine-20261115': realMachine20261115
 }

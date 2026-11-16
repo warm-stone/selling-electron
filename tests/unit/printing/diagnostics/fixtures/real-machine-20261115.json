@@ -1,0 +1,207 @@
+{
+  "printers": [
+    {
+      "name": "导出为WPS PDF",
+      "isDefault": false,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "Kingsoft Virtual Printer Driver",
+        "matchesInstalled": true,
+        "printProcessor": "winprint",
+        "manufacturer": null,
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "Kingsoft Virtual Printer Port",
+        "type": "other",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    },
+    {
+      "name": "Microsoft XPS Document Writer",
+      "isDefault": false,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "Microsoft XPS Document Writer v4",
+        "matchesInstalled": true,
+        "printProcessor": "winprint",
+        "manufacturer": null,
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "PORTPROMPT:",
+        "type": "other",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    },
+    {
+      "name": "Microsoft Print to PDF",
+      "isDefault": false,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "Microsoft Print To PDF",
+        "matchesInstalled": true,
+        "printProcessor": "winprint",
+        "manufacturer": null,
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "PORTPROMPT:",
+        "type": "other",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    },
+    {
+      "name": "DL-5801PW",
+      "isDefault": true,
+      "local": true,
+      "network": false,
+      "shared": false,
+      "status": {
+        "state": "online",
+        "detectedError": null,
+        "source": "win32-printer"
+      },
+      "driver": {
+        "name": "DL-5801PW",
+        "matchesInstalled": true,
+        "printProcessor": "winprint",
+        "manufacturer": null,
+        "rawOnlyBit": false
+      },
+      "port": {
+        "name": "USB001",
+        "type": "usb",
+        "hostAddress": null,
+        "portNumber": null,
+        "snmpEnabled": null,
+        "reachable": null
+      },
+      "queue": {
+        "jobCount": 0,
+        "errorJobs": 0,
+        "deletingJobs": 0,
+        "spoolFiles": { "spl": 0, "shd": 0 }
+      },
+      "jobs": []
+    }
+  ],
+  "system": {
+    "spooler": { "status": "Running", "startType": "Automatic", "dependents": ["Fax"] },
+    "eventLog": {
+      "adminEvents": [],
+      "app1000Events": [],
+      "operationalEnabled": false
+    },
+    "printConfigs": [
+      {
+        "printerName": "导出为WPS PDF",
+        "paperSize": "",
+        "widthMicrons": null,
+        "heightMicrons": null,
+        "orientation": ""
+      },
+      {
+        "printerName": "Microsoft XPS Document Writer",
+        "paperSize": "",
+        "widthMicrons": null,
+        "heightMicrons": null,
+        "orientation": ""
+      },
+      {
+        "printerName": "Microsoft Print to PDF",
+        "paperSize": "",
+        "widthMicrons": null,
+        "heightMicrons": null,
+        "orientation": ""
+      },
+      {
+        "printerName": "DL-5801PW",
+        "paperSize": "",
+        "widthMicrons": null,
+        "heightMicrons": null,
+        "orientation": ""
+      }
+    ]
+  },
+  "app": {
+    "settings": {
+      "channel": "driver",
+      "printerName": "DL-5801PW",
+      "templatePaperWidth": "58mm"
+    },
+    "electronVersion": "44.10.1",
+    "printOptions": {
+      "pageSizeMode": "custom-microns",
+      "marginsMode": "none",
+      "printBackground": true
+    },
+    "templateFacts": {
+      "hasLogo": false,
+      "logoPx": null,
+      "cssPadding": "12px 9px"
+    }
+  },
+  "renderSnapshot": {
+    "immediatelyMeasured": 538,
+    "afterImgDecode": 538,
+    "heightDelta": 0,
+    "scrollWidth": 221,
+    "paperWidthPx": 221,
+    "horizontalOverflow": false,
+    "dpr": 1.25
+  },
+  "errors": {},
+  "raw": {}
+}

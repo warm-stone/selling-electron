@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { FIXTURES } from './fixtures'
 
-// ── printer-diagnostics T2 黄金样本：7 组真实故障机症状复刻 ──
-// 只锁特征字段（症状保真度），findings 期望归 T5 规则引擎表驱动测试锁定。
+// ── printer-diagnostics 黄金样本：7 组真实故障机症状复刻 + v2 真机基线 ──
+// 只锁特征字段（症状保真度），findings 期望归规则引擎表驱动测试锁定。
 
 const EXPECTED_FIXTURE_KEYS = [
   'symptom1-driver-raw-garbled',
@@ -11,11 +11,12 @@ const EXPECTED_FIXTURE_KEYS = [
   'spooler-dead',
   'log-disabled',
   'printer-name-mismatch',
-  'healthy-machine'
+  'healthy-machine',
+  'real-machine-20261115'
 ] as const
 
-describe('printer-diagnostics fixtures（T2 黄金样本）', () => {
-  it('FIXTURES 7 键齐全（键 = fixture 文件名去 .json）', () => {
+describe('printer-diagnostics fixtures（黄金样本）', () => {
+  it('FIXTURES 8 键齐全（键 = fixture 文件名去 .json）', () => {
     expect(Object.keys(FIXTURES).sort()).toEqual([...EXPECTED_FIXTURE_KEYS].sort())
   })
 
@@ -122,5 +123,38 @@ describe('printer-diagnostics fixtures（T2 黄金样本）', () => {
     expect(snap.system.eventLog.app1000Events).toHaveLength(0)
     expect(snap.system.eventLog.operationalEnabled).toBe(true)
     expect(snap.app.settings.printerName).toBe('Generic / Text Only')
+  })
+
+  it('real-machine-20261115：修复后真机基线（4 台 online + WER 噪音归零 + printConfig 全空 + 元素级测量不溢出）', () => {
+    const snap = FIXTURES['real-machine-20261115']
+    // Bug1 修复后语义：PrinterStatus=0 位掩码 → online（首轮真机报告误判 unknown）
+    expect(snap.printers).toHaveLength(4)
+    expect(snap.printers.every((p) => p.status.state === 'online')).toBe(true)
+    expect(snap.printers.every((p) => p.status.source === 'win32-printer')).toBe(true)
+    const dl = snap.printers.find((p) => p.name === 'DL-5801PW')
+    expect(dl?.isDefault).toBe(true)
+    expect(dl?.port).toMatchObject({ name: 'USB001', type: 'usb' })
+    expect(dl?.driver).toMatchObject({ name: 'DL-5801PW', matchesInstalled: true, printProcessor: 'winprint', rawOnlyBit: false })
+    // Bug2 修复后语义：18 条 UndockedHost 遥测噪音被 ProviderName 过滤 → 0 条
+    expect(snap.system.eventLog.app1000Events).toHaveLength(0)
+    expect(snap.system.eventLog.operationalEnabled).toBe(false)
+    // 盲区 4 现场：v4 驱动 Get-PrintConfiguration 全空（fallback 链终值无宽高）
+    expect(snap.system.printConfigs).toHaveLength(4)
+    expect(snap.system.printConfigs.every((c) => c.widthMicrons === null)).toBe(true)
+    // Bug3 修复后语义：元素级测量 221px = 58mm 纸宽，无假溢出（首轮 786px 是视口地板值）
+    expect(snap.renderSnapshot).toEqual({
+      immediatelyMeasured: 538,
+      afterImgDecode: 538,
+      heightDelta: 0,
+      scrollWidth: 221,
+      paperWidthPx: 221,
+      horizontalOverflow: false,
+      dpr: 1.25
+    })
+    // 症状 2 现场（R16 坏组合证据源）：driver + custom-microns + margins-none + DPR 1.25
+    expect(snap.app.settings).toEqual({ channel: 'driver', printerName: 'DL-5801PW', templatePaperWidth: '58mm' })
+    expect(snap.app.printOptions).toMatchObject({ pageSizeMode: 'custom-microns', marginsMode: 'none' })
+    expect(snap.app.templateFacts.hasLogo).toBe(false)
+    expect(snap.errors).toEqual({})
   })
 })
