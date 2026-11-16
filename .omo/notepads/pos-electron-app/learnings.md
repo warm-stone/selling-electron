@@ -641,3 +641,10 @@
 - **量高换算**：executeJavaScript 读 `document.documentElement.scrollHeight` + `body[data-paper-width]`；px→μm ×25400/96 + **2000μm 安全垫**（倍高 transform 不占布局高度，防末行裁切）；页宽 58mm→58000μm / 80mm→80000μm
 - **pngjs.d.ts 位置教训**：环境声明放 src/main/** 只进 node tsconfig；web 程序经 tests/unit/components/ReceiptPreview.test.ts → escpos-generator → raster.ts 的**既有同源验证 import 链**同样触达 pngjs（TS7016）——跨 tsconfig 共享的声明必须放 **src/shared/**（两侧 include 公共区）
 - **验收矩阵**：typecheck node+web 双绿；vitest 745 通过（tcp 192.0.2.1 超时用例为预存环境 flaky，干净 main 复现确认无关）；e2e print-flow+settings 9/9（含新 driver 通道选项场景）
+
+## gitcode remote 运维约定（2026-11-13 用户拍板）
+
+### ★ gitcode 由用户手工维护，agent 不执行推送
+- **约定**：`gitcode` remote（git@gitcode.com:warm-stone/selling-electron.git）的一切同步（main 推送、tag 推送、Release 上传）由**用户手工维护**，agent 一律不对其执行 push——不尝试、不等待、不列为发布流程的遗留项
+- **背景（网络实证）**：本机网络环境公司网关阻断 SSH 22 端口——2026-11-13 发布 v0.4.0 时 GitHub push 实证 22 超时、靠 `ssh.github.com:443` 绕行才推成功；gitcode 无此绕行端点，推送不可稳定完成，故整体移交用户手工维护
+- **发布流程影响**：发布/同步只管 GitHub `origin`（push main + push tag 触发 CI 即完成）；README「GitCode 镜像同步发布为手动」的描述即此约定的文档面。agent 侧唯一动作：发布完成时可提醒用户"gitcode 需手工同步"，不代做

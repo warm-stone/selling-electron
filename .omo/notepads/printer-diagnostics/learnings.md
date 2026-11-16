@@ -310,3 +310,61 @@
 
 ### 状态
 F1-F4 已标 [~]（等待用户明确批准后勾选闭合）。commits c71ae4f..3afc803，967 单测 + 99 E2E 全绿。
+
+## 真机首轮实战发现（2026-11-15，报告 打印机诊断报告-20261115-170820.txt）→ v2 缺陷清单
+
+管线端到端跑通（采集/解析/规则/自检/报告全链路真机 OK，raw 层立功）。但 0 findings ≠ 机器健康，真机数据暴露 3 个确认 bug + 3 个盲区：
+
+### 确认 bug（代码已核实）
+1. mapPrinterStatus 字符串匹配 vs 数字枚举：真机 Get-Printer 的 PrinterStatus 经 ConvertTo-Json 是数字（0=Normal），collect.runner.ts:686 按字符串 'normal' 匹配 → 全部打印机 state=unknown（应为 online）。修复：PrintQueueStatus 数字映射表
+2. WER 查询缺 ProviderName 过滤：真机 18 条 Id=1000 全是 UndockedHost 遥测噪音（非 WER 崩溃），collect-script events 段需加 ProviderName='Application Error'（librarian 查证中）+ 摘要文案改「WER 崩溃」
+3. render-check 宽度假阳性：documentElement.scrollWidth=786px 是默认 800px 视口减滚动条（DPR 1.25），非收据溢出（收据实际 221px）。修复：改测 .receipt-paper 元素本身 + 窗口显式尺寸
+
+### 盲区（设计缺口）
+4. Get-PrintConfiguration 对 v4 驱动全空（paperSize=''/width=null）→ 规则 10/11 主探测器失明且无降级 finding——违反「缺数据≠健康」精神。修复：空数据产 info 级降级 finding + 替代采集方案（librarian 查证中）
+5. dpr=1.25 无任何规则消费（schema 设计了字段但 15 条规则零读取）——真机恰是 125% 缩放（Electron #39179 dpi 问题域）
+6. 已知坏组合无规则：channel=driver + custom-microns + margins-none + silent 正是 Electron #31705(closed not planned)/#50481(热敏机右截断=症状原文) 的 broken combo——新规则 driver-print-combo-known-issue（needs-dev + dpi/usePrinterDefaultPageSize/切 spooler 三条 workaround），不依赖 printConfig
+
+### 症状 2 真机根因链
+driver 通道 + custom-microns + margins-none + silent（#31705/#50481 组合）× DPR 1.25（#39179 域）× v4 驱动（PrintConfig 全空佐证）——收据 HTML 本身健康（内容高 538px/Δ0）。修复实验=checklist spike C：dpi 显式设置/usePrinterDefaultPageSize/反向切 spooler
+
+### v2 资源
+- librarian 查证会话（WER ProviderName/PrintQueueStatus 枚举表/Get-PrintConfiguration 替代方案）：ses_e1d8889a5ffe7GZyh7isYzpmCK（task_id 可续接）
+- v2 修复提案已呈用户，等待批准后走新计划
+
+## v2 查证结论（librarian 研究，2026-11-15，全部 VERIFIED——含对原稿的 2 处关键纠正）
+
+### ★ 纠正 1：DEVMODE 偏移（我原稿写错）
+正确偏移（DEVMODEW）：dmDeviceName[32]@0-63 / dmSize@68 / dmFields(u32)@72 / **dmOrientation@76 / dmPaperSize@78 / dmPaperLength@80 / dmPaperWidth@82** / dmCollate@100 / dmFormName[32]@102-165。原稿 76/78/80 漏算 dmOrientation 整体偏移 -2，会读错字段。单位 0.1mm（×100→μm）；有效位 DM_PAPERSIZE=0x2/DM_PAPERLENGTH=0x4/DM_PAPERWIDTH=0x8；dmPaperSize≥256(DMPAPER_USER)=自定义表单（尺寸在表单定义，名字取 dmFormName）；blob 长度守卫 ≥166
+
+### ★ 纠正 2：中文事件日志的模块行叫「错误模块名称」不是「故障模块名称」
+实机原文（zh-CN Win10/11）：
+  错误应用程序名称: explorer.exe，版本: …，时间戳: …
+  错误模块名称: ntdll.dll，版本: …，时间戳: …
+  异常代码: 0xc000071f
+标点：半角冒号+空格；字段分隔全角逗号「，」。「故障模块名称」只出现在 WER 问题签名/可靠性监视器（另一套字符串）。现有正则 /(?:错误|故障)?模块名(?:称)?[:：]/ 仍匹配（错误前缀）✓
+★ 最稳做法：Properties[] 索引解析（语言中立，EventData 位置固定）：[0]应用名 [3]模块名 [6]异常代码 [10]应用路径 [11]模块路径；守卫 Properties.Count≥13；正则做 Message 兜底
+
+### WER 事件过滤（已证实）
+- ProviderName='Application Error'（精确，官方 Get-WinEvent 文档 Example 18 原文；中文 Windows provider 名不本地化）
+- @{LogName='Application';ProviderName='Application Error';Id=1000;StartTime=…} 语法确认；Level=2 可选加固（WER 1000=Error 级，UndockedHost 遥测=Informational）
+- ⚠ FilterHashtable 的 Id×ProviderName 是笛卡尔积交叉匹配——每个 provider/Id 对单独一条查询
+- 其他崩溃类：Windows Error Reporting 1001（问题签名 P1-P10）、Application Hang 1002、.NET Runtime 1026（不是 1000；与 1000 同秒成对出现，模块 KERNELBASE.dll、异常 0xe0434352）
+- NoEventsFound：PS 5.1 零匹配抛错（FQEID NoEventsFound,…GetWinEventCommand）——必须 -ErrorAction Ignore
+
+### PrintQueueStatus 数值映射（Get-Printer 的 PrinterStatus=uint32 位掩码）
+0=Normal（健康空闲）· 1=Paused · 2=Error · 4=PendingDeletion · 8=PaperJam · 16=PaperOut · 32=ManualFeed · 64=PaperProblem · **128=Offline** · 256=IOActive · 512=Busy · 1024=Printing · 2048=OutputBinFull · 4096=NotAvailable · 8192=Waiting · 16384=Processing · 32768=Initializing · 65536=WarmingUp · 131072=TonerLow · 262144=NoToner · 524288=PagePunt · 1048576=UserIntervention · 2097152=OutOfMemory · **4194304=DoorOpen** · 8388608=ServerUnknown · 16777216=PowerSave
+ConvertTo-Json 序列化数字、控制台显示 Normal（CDXML 标签映射）——预期行为。判异常用 -band 位测试
+
+### Win32_Printer 三套枚举（绝不能共用映射表）
+- PrinterStatus（1-7）：1=Other **2=Unknown 3=Idle** 4=Printing 5=Warmup 6=StoppedPrinting 7=Offline
+- ExtendedPrinterStatus（1-18）：…8=Paused 9=Error 10=Busy 17=IOActive 18=ManualFeed
+- DetectedErrorState：0=Unknown 1=Other **2=NoError** 3=LowPaper 4=NoPaper 8=Jammed 9=Offline
+- USB 热敏机在线空闲典型=3/Idle；无 bidi 状态监视器的低价热敏机常报 **2=Unknown=「拿不到状态」非故障**——判离线用 WorkOffline + Get-Printer 128 位
+- ⚠ Get-Printer 位掩码(0=正常) vs Win32 PrinterStatus 量表(无 0 值) 语义完全不同
+
+### Get-PrintConfiguration 空值根因 + fallback 链（已证实）
+- 根因：v4 走 PrintTicket；队列配置为自定义表单（dmPaperSize≥256）或 PrintTicket 无显式 PageMediaSize → PaperSize 空/Width-Length null（社区实证原话）。Width/Length 有值时单位=微米
+- fallback 链（PS 5.1 无提权）：Get-PrintConfiguration → PrintTicketXML 解析（MediaSizeWidth/Height μm）→ **Win32_PrinterConfiguration（PaperWidth/PaperLength 0.1mm——v3/热敏首选基本必中）** → HKCU\Printers\DevModes2\<打印机> / DevModePerUser（blob 可能是「打印机名」值名或同名子键默认值，两处都查）→ HKLM\…\Print\Printers\<name>\DefaultDevMode → PrinterPaperNames（仅名单）
+- Get-PrinterProperty 排除（文档明示需管理员）；Get-PrinterForm 未验证存在勿用
+- 现场待验证两点：① Win32_PrinterConfiguration 对 v4 虚拟机是否非空；② HKLM Print 键标准用户可读性
