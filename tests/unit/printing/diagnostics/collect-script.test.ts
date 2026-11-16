@@ -48,9 +48,10 @@ describe('buildCollectScript 采集脚本结构锁（printer-diagnostics T3，�
     expect(count(script, '# --- section: ')).toBe(10)
   })
 
-  it('每段独立 try/catch：try ≥10、catch ≥10、catch 记 error 恰好 10 处（段级全覆盖）', () => {
-    expect(count(script, 'try {')).toBeGreaterThanOrEqual(10)
-    expect(count(script, 'catch')).toBeGreaterThanOrEqual(10)
+  it('每段独立 try/catch：try/catch 恰好 15（10 段级 + tcpProbe 内层 1 + printConfig 四层 4），catch 记 error 恰好 10 处（段级全覆盖；层 catch 空不记）', () => {
+    // v2 重定：printConfig 单层 → 四层（+3）；层 catch 空，Message 恒 10 段级
+    expect(count(script, 'try {')).toBe(15)
+    expect(count(script, 'catch')).toBe(15)
     expect(count(script, '$_.Exception.Message')).toBe(10)
   })
 
@@ -116,6 +117,12 @@ describe('buildCollectScript 采集脚本结构锁（printer-diagnostics T3，�
     expect(script).toContain('message=$_.Message')
   })
 
+  it('v2 events.app1000：ProviderName 过滤压 UndockedHost 噪音 + Ignore 压 NoEventsFound + props 数组透传（PS 只搬运零解析）', () => {
+    expect(script).toContain("ProviderName='Application Error'")
+    expect(script).toContain('-ErrorAction Ignore')
+    expect(script).toContain('props=@($_.Properties | ForEach-Object { $_.Value })')
+  })
+
   it('tcpProbe 独立查询端口（不依赖 $out.ports），探测对象限 IP_* 端口', () => {
     expect(script).toContain('Get-PrinterPort -ErrorAction SilentlyContinue')
     expect(script).toContain("-like 'IP_*'")
@@ -124,6 +131,26 @@ describe('buildCollectScript 采集脚本结构锁（printer-diagnostics T3，�
   it('CIM 而非 WMI：Win32_Printer / Win32_PrintJob 均走 Get-CimInstance', () => {
     expect(script).toContain('Get-CimInstance Win32_Printer')
     expect(script).toContain('Get-CimInstance Win32_PrintJob')
+  })
+
+  it('v2 printConfig 四层 fallback：printconfiguration → printticketxml → win32printerconfig → devmode（blob Base64 编码非解析）', () => {
+    expect(script).toContain("source='printconfiguration'")
+    expect(script).toContain('MediaSizeWidth')
+    expect(script).toContain('MediaSizeHeight')
+    expect(script).toContain('Win32_PrinterConfiguration')
+    expect(script).toContain('paperWidthTenthMm')
+    expect(script).toContain('paperLengthTenthMm')
+    expect(script).toContain('devmodeB64')
+    expect(script).toContain('ToBase64String')
+    expect(script).toContain('DevModes2')
+    expect(script).toContain('DevModePerUser')
+    expect(script).toContain('DefaultDevMode')
+    // TS 源 \\ → 产物单反斜杠（learnings「反斜杠静默丢失」坑的防线）
+    expect(script).toContain('HKCU:\\Printers\\DevModes2')
+    expect(script).toContain("'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers\\'")
+    // 正则产物形态：单反斜杠 \d + WQL 单引号转义
+    expect(script).toContain(`'MediaSizeWidth="(\\d+)"'`)
+    expect(script).toContain(`$prn.Name.Replace("'", "''")`)
   })
 
   it('脚本零中文字面量（段名/字段全英文，降低编码风险）', () => {

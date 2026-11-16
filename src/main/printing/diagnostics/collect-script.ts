@@ -1,5 +1,6 @@
 /**
- * 打印诊断 PowerShell 采集脚本构建器（printer-diagnostics 计划 Wave 2 / T3）。
+ * 打印诊断 PowerShell 采集脚本构建器（printer-diagnostics 计划 Wave 2 / T3；
+ * v2 真机缺陷修复版：events 噪音过滤 + printConfig 四层 fallback 链）。
  *
  * 契约要点（消费方：T4 落盘执行 + 归一化解析）：
  * - **完全静态**：零参数、零 I/O、零运行时值拼接——buildCollectScript() 两次调用
@@ -13,7 +14,29 @@
  * - **exit 0 恒定契约**：与 spooler 打印通道（exit 2 = 发送失败）的关键差异——
  *   采集脚本 exit code 恒为 0，部分失败记在各段 JSON（catch 落
  *   `@{ error = $_.Exception.Message }`），执行器永远信任「有输出 = 可解析」。
- *   10 段独立 try/catch，段间互不拖垮。
+ *   10 段独立 try/catch，段间互不拖垮；段内内层 catch（tcpProbe 单端口 /
+ *   printConfig 单层落空）**故意不记** error——落空继续下一层/下一台，
+ *   不污染段级语义。
+ * - **v2 改动一（events.app1000，真机 Bug2）**：FilterHashtable 加
+ *   `ProviderName='Application Error'` 精确过滤（真机 18 条 Id=1000 全是
+ *   UndockedHost 遥测噪音而非 WER 崩溃；provider 名在中文 Windows 不本地化）
+ *   + `-ErrorAction Ignore`（PS 5.1 零匹配抛 NoEventsFound，SilentlyContinue
+ *   仍写 $Error 流污染输出）+ `props=@($_.Properties | ForEach-Object { $_.Value })`
+ *   事件属性值数组透传——**PS 只搬运零解析**（语言中立的索引解析归 T4：
+ *   props[0]=应用名 / props[3]=模块名，位置由 EventData 定义固定）。
+ * - **v2 改动二（printConfig 四层 fallback，真机盲区 4）**：v4 驱动队列走
+ *   PrintTicket，Get-PrintConfiguration 常全空（paperSize=''/width=null）→
+ *   规则 10/11 主探测器失明。每台打印机按序尝试四层（每层独立 try、空 catch
+ *   落下层；层拿到**有效宽高**即停——非拿到就信；每台迭代开头重置
+ *   $entry/$cfg 防跨打印机残留）：
+ *   1. printconfiguration：Get-PrintConfiguration 且 Width 非空（μm 原值）；
+ *   2. printticketxml：复用同 $cfg 的 PrintTicketXML，正则双命中
+ *      MediaSizeWidth/MediaSizeHeight（μm 原值，[long] 转数字）；
+ *   3. win32printerconfig：Get-CimInstance（打印机名做 WQL 单引号转义），
+ *      PaperWidth/PaperLength **0.1mm 单位原值透传，PS 不换算**（归 T4 ×100）；
+ *   4. devmode：HKCU DevModes2 → DevModePerUser（每键两形态：打印机名值名 /
+ *      同名子键默认值）→ HKLM DefaultDevMode，blob 以 Base64 透传——
+ *      **编码非解析**（DEVMODEW 偏移解析归 T4）。
  * - **段名 = schema.ts DiagnosticSectionName 十段**：printers / wmi / jobs /
  *   ports / drivers / spooler / spoolDir / events / tcpProbe / printConfig；
  *   段内字段名对齐 PrintDiagnosticSnapshot（T4 归一化解析的目标形状）。
@@ -105,7 +128,7 @@ const SCRIPT_LINES: readonly string[] = [
   'try {',
   '  $out.events = @{ admin = @(); app1000 = @(); operationalEnabled = $false }',
   "  $out.events.admin = @(Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-PrintService/Admin';StartTime=(Get-Date).AddDays(-7)} -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { @{time=$_.TimeCreated.ToString('o'); id=$_.Id} })",
-  "  $out.events.app1000 = @(Get-WinEvent -FilterHashtable @{LogName='Application';Id=1000;StartTime=(Get-Date).AddDays(-7)} -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object { @{time=$_.TimeCreated.ToString('o'); message=$_.Message} })",
+  "  $out.events.app1000 = @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Error';Id=1000;StartTime=(Get-Date).AddDays(-7)} -MaxEvents 20 -ErrorAction Ignore | ForEach-Object { @{time=$_.TimeCreated.ToString('o'); message=$_.Message; props=@($_.Properties | ForEach-Object { $_.Value })} })",
   '  $out.events.operationalEnabled = $false',
   "  $logInfo = Get-WinEvent -ListLog 'Microsoft-Windows-PrintService/Operational' -ErrorAction SilentlyContinue",
   '  if ($logInfo) { $out.events.operationalEnabled = [bool]$logInfo.IsEnabled }',
@@ -136,17 +159,69 @@ const SCRIPT_LINES: readonly string[] = [
   "  $out.tcpProbe = @{ error = $_.Exception.Message }",
   '}',
   '',
-  // ---- section: printConfig（内层空 catch：单台配置缺失不拖垮整段）----
+  // ---- section: printConfig（v2 四层 fallback：每台独立层 try、空 catch 落下层；段级 catch 记 error）----
   '# --- section: printConfig ---',
   'try {',
   '  $configs = @()',
   '  foreach ($prn in (Get-Printer -ErrorAction SilentlyContinue)) {',
+  '    $entry = $null',
+  '    $cfg = $null',
   '    try {',
   '      $cfg = Get-PrintConfiguration -PrinterName $prn.Name -ErrorAction SilentlyContinue',
-  '      if ($cfg) {',
-  "        $configs += @{printerName=$prn.Name; paperSize=$cfg.PaperSize; widthMicrons=$cfg.Width; heightMicrons=$cfg.Length; orientation=$cfg.Orientation}",
+  '      if ($cfg -and $cfg.Width) {',
+  "        $entry = @{printerName=$prn.Name; paperSize=$cfg.PaperSize; widthMicrons=$cfg.Width; heightMicrons=$cfg.Length; orientation=$cfg.Orientation; source='printconfiguration'}",
   '      }',
   '    } catch { }',
+  '    if (-not $entry) {',
+  '      try {',
+  '        if ($cfg -and $cfg.PrintTicketXML) {',
+  '          $xml = $cfg.PrintTicketXML',
+  '          $xmlW = $null',
+  '          $xmlH = $null',
+  "          if ($xml -match 'MediaSizeWidth=\"(\\d+)\"') { $xmlW = [long]$Matches[1] }",
+  "          if ($xml -match 'MediaSizeHeight=\"(\\d+)\"') { $xmlH = [long]$Matches[1] }",
+  '          if ($xmlW -and $xmlH) {',
+  "            $entry = @{printerName=$prn.Name; paperSize=$null; widthMicrons=$xmlW; heightMicrons=$xmlH; orientation=$null; source='printticketxml'}",
+  '          }',
+  '        }',
+  '      } catch { }',
+  '    }',
+  '    if (-not $entry) {',
+  '      try {',
+  "        $wqlName = $prn.Name.Replace(\"'\", \"''\")",
+  "        $w32 = Get-CimInstance Win32_PrinterConfiguration -Filter \"Name='$wqlName'\" -ErrorAction SilentlyContinue",
+  '        if ($w32 -and $w32.PaperWidth -and $w32.PaperLength) {',
+  "          $entry = @{printerName=$prn.Name; paperSize=$w32.PaperSize; widthMicrons=$null; heightMicrons=$null; paperWidthTenthMm=$w32.PaperWidth; paperLengthTenthMm=$w32.PaperLength; orientation=$w32.Orientation; source='win32printerconfig'}",
+  '        }',
+  '      } catch { }',
+  '    }',
+  '    if (-not $entry) {',
+  '      try {',
+  '        $bytes = $null',
+  "        $devKey = Get-ItemProperty -Path 'HKCU:\\Printers\\DevModes2' -Name $prn.Name -ErrorAction SilentlyContinue",
+  '        if ($devKey) { $bytes = $devKey.($prn.Name) }',
+  '        if (-not $bytes) {',
+  "          $devItem = Get-Item -Path ('HKCU:\\Printers\\DevModes2\\' + $prn.Name) -ErrorAction SilentlyContinue",
+  "          if ($devItem) { $bytes = $devItem.GetValue('') }",
+  '        }',
+  '        if (-not $bytes) {',
+  "          $devKey = Get-ItemProperty -Path 'HKCU:\\Printers\\DevModePerUser' -Name $prn.Name -ErrorAction SilentlyContinue",
+  '          if ($devKey) { $bytes = $devKey.($prn.Name) }',
+  '        }',
+  '        if (-not $bytes) {',
+  "          $devItem = Get-Item -Path ('HKCU:\\Printers\\DevModePerUser\\' + $prn.Name) -ErrorAction SilentlyContinue",
+  "          if ($devItem) { $bytes = $devItem.GetValue('') }",
+  '        }',
+  '        if (-not $bytes) {',
+  "          $devKey = Get-ItemProperty -Path ('HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers\\' + $prn.Name) -Name DefaultDevMode -ErrorAction SilentlyContinue",
+  '          if ($devKey) { $bytes = $devKey.DefaultDevMode }',
+  '        }',
+  '        if ($bytes -is [byte[]]) {',
+  "          $entry = @{printerName=$prn.Name; paperSize=$null; widthMicrons=$null; heightMicrons=$null; orientation=$null; devmodeB64=[Convert]::ToBase64String($bytes); source='devmode'}",
+  '        }',
+  '      } catch { }',
+  '    }',
+  '    if ($entry) { $configs += $entry }',
   '  }',
   '  $out.printConfig = $configs',
   '} catch {',
