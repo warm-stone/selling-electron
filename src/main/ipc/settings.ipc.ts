@@ -26,14 +26,22 @@ import { parseRecentSalespersons, RECENT_SALESPERSONS_KEY } from '../services/sa
  *
  * KV 序列化约定（settings 表 value TEXT）：
  *  - 字符串字段原样存（'' 合法）；
- *  - 可空字段（printer_name/tcp_host/com_port/tcp_port）：null ≡ ''；
- *  - tcp_port 存十进制字符串；auto_cut 存 '1' / '0'。
+ *  - 可空字段（printer_name/tcp_host/com_port/tcp_port/driver_dpi）：null ≡ ''；
+ *  - tcp_port 存十进制字符串；auto_cut 存 '1' / '0'；
+ *  - v2 driver 通道实验键（printer-diagnostics v2）：driver_dpi 存十进制
+ *    字符串、driver_use_default_page_size 存 '1' / '0'（缺省 false）。读侧
+ *    rowsToAppSettings 条件产出归一值；写侧序列化 + 50-1200 值域校验
+ *    （validateSettingsPatch）。
  *  - 旧 logo_path 行（单 Logo 时代残留）不再读写，DB 残留行无害（不做迁移）。
  */
 
 // ════════════════ 纯映射（可单测） ════════════════
 
-/** 全默认值（DB 无任何行时的 settings:get 返回）：通道默认 spooler（D5 主通道） */
+/**
+ * 全默认值（DB 无任何行时的 settings:get 返回）：通道默认 spooler（D5 主通道）。
+ * v2 driver 通道实验键（driver_dpi/driver_use_default_page_size）缺省不产出
+ * （可选字段——rowsToAppSettings 条件产出，见其注释）。
+ */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   shop_name: '',
   shop_phone: '',
@@ -73,9 +81,63 @@ function nullableString(raw: string | undefined): string | null {
   return raw === undefined || raw === '' ? null : raw
 }
 
+/**
+ * driver 通道实验键归一读（printer-diagnostics v2）：
+ * 十进制字符串 → number（仅格式解析——50-1200 值域校验归 validateSettingsPatch，
+ * 读侧不提前做：DB 旁路写入的越界值仍如实回显，交诊断/设置页呈现）；
+ * ''/脏值 → null（null ≡ '' 可空惯例，同 tcp_port parsePort 模式）。
+ */
+function parseDriverDpi(raw: string | undefined): number | null {
+  if (raw === undefined || raw === '' || !/^\d+$/.test(raw)) return null
+  return Number.parseInt(raw, 10)
+}
+
+/**
+ * 非法值回显（校验报错「当前值」渲染）：数字直印（NaN/Infinity 无引号），
+ * 其余走 JSON.stringify——字符串带引号（'203' → "203"）、对象/布尔原形，
+ * 序列化失败（循环引用等旁路值）回落 String。类型信息可见是回显的价值。
+ */
+function echoInvalidValue(v: unknown): string {
+  if (typeof v === 'number') return Number.isNaN(v) ? 'NaN' : String(v)
+  try {
+    const j = JSON.stringify(v)
+    if (j !== undefined) return j
+  } catch {
+    // 循环引用等 JSON 不可序列化值 → String 兜底
+  }
+  return String(v)
+}
+
+/**
+ * settings:set 入参校验（printer-diagnostics v2）：driver 通道实验键值域。
+ * 与 printer_channel 的静默回落（parseChannel）刻意不同——实验键写错值若被
+ * 静默吞掉，用户会以为 13/13.5/'203' 已生效而真机验证全盘失真，故逐类
+ * 中文报错 throw（→ invoke reject → renderer error toast 回显）：
+ *  - driver_dpi：null/undefined 合法（清除/缺省——null ≡ '' KV 惯例）；
+ *    非空必须整数且 50 ≤ v ≤ 1200（0/负/小数/字符串/超界全拒绝）
+ *  - driver_use_default_page_size：仅 true/false（undefined 缺省 false）
+ * 既有键不校验（printer_channel 走 parseChannel 静默回落——历史语义不变）。
+ */
+export function validateSettingsPatch(patch: Partial<AppSettings>): void {
+  const dpi = patch.driver_dpi
+  if (dpi !== undefined && dpi !== null) {
+    if (typeof dpi !== 'number' || !Number.isInteger(dpi) || dpi < 50 || dpi > 1200) {
+      throw new Error(
+        `driver_dpi 需为 50-1200 的整数（热敏打印机常见 203/300），当前值：${echoInvalidValue(dpi)}`
+      )
+    }
+  }
+  const useDefault = patch.driver_use_default_page_size
+  if (useDefault !== undefined && typeof useDefault !== 'boolean') {
+    throw new Error(
+      `driver_use_default_page_size 仅接受 true/false（缺省 false），当前值：${echoInvalidValue(useDefault)}`
+    )
+  }
+}
+
 /** KV 快照 → AppSettings（settings:get 返回值；缺 key 全走默认值） */
 export function rowsToAppSettings(kv: Record<string, string>): AppSettings {
-  return {
+  const settings: AppSettings = {
     shop_name: kv['shop_name'] ?? '',
     shop_phone: kv['shop_phone'] ?? '',
     receipt_note: kv['receipt_note'] ?? '',
@@ -86,6 +148,14 @@ export function rowsToAppSettings(kv: Record<string, string>): AppSettings {
     com_port: nullableString(kv['com_port']),
     auto_cut: parseBool(kv['auto_cut'], true)
   }
+  // v2 driver 通道实验键条件产出：DB 无行 → 键缺省（可选字段，旧契约消费方
+  // 零感知）；有行 → 归一值（dpi 数字或 null；页尺寸开关布尔，脏值回落 false）。
+  // 「恰好白名单键」回归锁见 tests/unit/ipc/settings.ipc.test.ts——缺省态不扩键。
+  if (kv['driver_dpi'] !== undefined) settings.driver_dpi = parseDriverDpi(kv['driver_dpi'])
+  if (kv['driver_use_default_page_size'] !== undefined) {
+    settings.driver_use_default_page_size = parseBool(kv['driver_use_default_page_size'], false)
+  }
+  return settings
 }
 
 /** Partial<AppSettings> → KV 条目（settings:set 入参序列化；未知 key 忽略，只写契约 key） */
@@ -101,6 +171,15 @@ export function appSettingsPatchToKv(patch: Partial<AppSettings>): Record<string
   if (patch.tcp_port !== undefined) kv['tcp_port'] = String(patch.tcp_port ?? '')
   if (patch.com_port !== undefined) kv['com_port'] = str(patch.com_port)
   if (patch.auto_cut !== undefined) kv['auto_cut'] = patch.auto_cut ? '1' : '0'
+  // v2 实验键序列化（生产入口先经 validateSettingsPatch 值域校验）：
+  // driver_dpi null → ''（null ≡ '' 可空惯例，同 tcp_port）/ 数字 → 十进制字符串；
+  // driver_use_default_page_size → '1' / '0'（auto_cut 模式）。
+  if (patch.driver_dpi !== undefined) {
+    kv['driver_dpi'] = patch.driver_dpi === null ? '' : String(patch.driver_dpi)
+  }
+  if (patch.driver_use_default_page_size !== undefined) {
+    kv['driver_use_default_page_size'] = patch.driver_use_default_page_size ? '1' : '0'
+  }
   return kv
 }
 
@@ -214,7 +293,10 @@ export function registerSettingsIpc(db: Database.Database): void {
   ipcMain.handle('settings:get', (): AppSettings => currentSettings())
 
   ipcMain.handle('settings:set', (_event, req: Partial<AppSettings> | undefined): AppSettings => {
-    repo.setMany(appSettingsPatchToKv(req ?? {}))
+    const patch = req ?? {}
+    // v2 实验键值域校验先行：写错值 throw 中文错误（不静默吞——防真机验证失真）
+    validateSettingsPatch(patch)
+    repo.setMany(appSettingsPatchToKv(patch))
     return currentSettings()
   })
 

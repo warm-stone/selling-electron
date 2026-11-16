@@ -14,11 +14,12 @@ import {
   readRecentSalespersons,
   removeLogoFile,
   rowsToLogoInfos,
-  rowsToAppSettings
+  rowsToAppSettings,
+  validateSettingsPatch
 } from '../../../src/main/ipc/settings.ipc'
 import { buildTestPrintBytes, TEST_PRINT_SALE, toPrintSettings } from '../../../src/main/ipc/printing.ipc'
 import { DEFAULT_TEMPLATES } from '../../../src/shared/receipt/default-template'
-import type { PrintTemplate } from '../../../src/shared/types'
+import type { AppSettings, PrintTemplate } from '../../../src/shared/types'
 import { encodeGbk } from '../../../src/main/printing/escpos/gb2312-encoder'
 import { rmTempDirSync } from '../../helpers/cleanup'
 
@@ -68,7 +69,7 @@ describe('settings.ipc 纯映射：rowsToAppSettings', () => {
     expect('logo_path' in DEFAULT_APP_SETTINGS).toBe(false)
   })
 
-  it('KV 行 → AppSettings 类型化映射（端口 string→number，auto_cut 字符串→boolean）；DB 残留 logo_path 行被忽略', () => {
+  it('KV 行 → AppSettings 类型化映射（端口 string→number，auto_cut 字符串→boolean；v2 实验键 driver_dpi/driver_use_default_page_size 同步映射）；DB 残留 logo_path 行被忽略', () => {
     const settings = rowsToAppSettings({
       shop_name: '我的小店',
       shop_phone: '13800000000',
@@ -80,7 +81,10 @@ describe('settings.ipc 纯映射：rowsToAppSettings', () => {
       tcp_host: '192.168.1.50',
       tcp_port: '9100',
       com_port: '\\\\.\\COM3',
-      auto_cut: '0'
+      auto_cut: '0',
+      // v2：driver 通道实验键（DB 有行 → 条件产出归一值）
+      driver_dpi: '203',
+      driver_use_default_page_size: '1'
     })
     expect(settings).toEqual({
       shop_name: '我的小店',
@@ -91,7 +95,9 @@ describe('settings.ipc 纯映射：rowsToAppSettings', () => {
       tcp_host: '192.168.1.50',
       tcp_port: 9100,
       com_port: '\\\\.\\COM3',
-      auto_cut: false
+      auto_cut: false,
+      driver_dpi: 203,
+      driver_use_default_page_size: true
     })
   })
 
@@ -146,17 +152,149 @@ describe('settings.ipc 纯映射：appSettingsPatchToKv（settings:set 序列化
     })
   })
 
-  it('round-trip：patch → kv → rowsToAppSettings 值语义一致', () => {
+  it("round-trip：patch → kv → rowsToAppSettings 值语义一致（v2 实验键随行：203 → '203' → 203）", () => {
     const patch = {
       shop_name: '我的小店',
       printer_channel: 'serial' as const,
       com_port: '\\\\.\\COM3',
-      auto_cut: true
+      auto_cut: true,
+      driver_dpi: 203,
+      driver_use_default_page_size: true
     }
     expect(rowsToAppSettings(appSettingsPatchToKv(patch))).toEqual({
       ...DEFAULT_APP_SETTINGS,
       ...patch
     })
+  })
+
+  it('round-trip 清除闭环：driver_dpi null → 空串 → 读回归一 null（null ≡ 空串惯例）', () => {
+    expect(
+      rowsToAppSettings(appSettingsPatchToKv({ driver_dpi: null, driver_use_default_page_size: false }))
+    ).toEqual({
+      ...DEFAULT_APP_SETTINGS,
+      driver_dpi: null,
+      driver_use_default_page_size: false
+    })
+  })
+})
+
+describe('settings.ipc v2：driver 实验键读侧归一（rowsToAppSettings 条件产出）', () => {
+  it("driver_dpi 十进制串 → number；空串 → null（null ≡ 空串可空惯例，同 tcp_port 模式）", () => {
+    expect(rowsToAppSettings({ driver_dpi: '203' }).driver_dpi).toBe(203)
+    expect(rowsToAppSettings({ driver_dpi: '' }).driver_dpi).toBeNull()
+  })
+
+  it('driver_dpi 脏值 → null；超值域十进制串透传（读侧仅格式归一——值域校验在写侧 settings:set，手改 DB 属旁路、读侧不炸）', () => {
+    expect(rowsToAppSettings({ driver_dpi: 'abc' }).driver_dpi).toBeNull()
+    expect(rowsToAppSettings({ driver_dpi: '99999' }).driver_dpi).toBe(99999)
+  })
+
+  it("driver_use_default_page_size：'1'→true / '0'→false / 脏值→false（缺省语义）", () => {
+    expect(rowsToAppSettings({ driver_use_default_page_size: '1' }).driver_use_default_page_size).toBe(true)
+    expect(rowsToAppSettings({ driver_use_default_page_size: '0' }).driver_use_default_page_size).toBe(false)
+    expect(rowsToAppSettings({ driver_use_default_page_size: 'garbage' }).driver_use_default_page_size).toBe(false)
+  })
+
+  it('DB 无 driver 行 → 两键缺省（条件产出——旧契约消费方零感知）', () => {
+    const settings = rowsToAppSettings({ shop_name: 'x' })
+    expect('driver_dpi' in settings).toBe(false)
+    expect('driver_use_default_page_size' in settings).toBe(false)
+  })
+})
+
+describe('settings.ipc v2：appSettingsPatchToKv driver 实验键写侧序列化', () => {
+  it("数字 → 十进制字符串；布尔 → '1'/'0'（auto_cut 模式）", () => {
+    expect(appSettingsPatchToKv({ driver_dpi: 203, driver_use_default_page_size: true })).toEqual({
+      driver_dpi: '203',
+      driver_use_default_page_size: '1'
+    })
+    expect(appSettingsPatchToKv({ driver_use_default_page_size: false })).toEqual({
+      driver_use_default_page_size: '0'
+    })
+  })
+
+  it('null → 空串（清除路径：null ≡ 空串，同 tcp_port 惯例）', () => {
+    expect(appSettingsPatchToKv({ driver_dpi: null })).toEqual({ driver_dpi: '' })
+  })
+
+  it('两键缺省 → 不产出条目（既有键不受新键波及）', () => {
+    expect(appSettingsPatchToKv({ shop_name: '我的小店' })).toEqual({ shop_name: '我的小店' })
+  })
+})
+
+describe('settings.ipc v2：validateSettingsPatch（settings:set 入参值域校验）', () => {
+  it('合法：缺省 / null（清除）/ 203 / 50 / 1200 / 布尔两态 → 不抛', () => {
+    expect(() => validateSettingsPatch({})).not.toThrow()
+    expect(() => validateSettingsPatch({ driver_dpi: null })).not.toThrow()
+    expect(() => validateSettingsPatch({ driver_dpi: 203 })).not.toThrow()
+    expect(() => validateSettingsPatch({ driver_dpi: 50 })).not.toThrow()
+    expect(() => validateSettingsPatch({ driver_dpi: 1200 })).not.toThrow()
+    expect(() => validateSettingsPatch({ driver_use_default_page_size: true })).not.toThrow()
+    expect(() => validateSettingsPatch({ driver_use_default_page_size: false })).not.toThrow()
+  })
+
+  it('非法 dpi 数字逐类中文报错（含值回显）：0 / -1 / 13.5 / 1201 / NaN / Infinity / true', () => {
+    const cases: ReadonlyArray<[unknown, string]> = [
+      [0, '0'],
+      [-1, '-1'],
+      [13.5, '13.5'],
+      [1201, '1201'],
+      [Number.NaN, 'NaN'],
+      [Number.POSITIVE_INFINITY, 'Infinity'],
+      [true, 'true']
+    ]
+    for (const [value, echo] of cases) {
+      expect(() => validateSettingsPatch({ driver_dpi: value } as Partial<AppSettings>)).toThrow(
+        `driver_dpi 需为 50-1200 的整数（热敏打印机常见 203/300），当前值：${echo}`
+      )
+    }
+  })
+
+  it('非法 dpi 字符串/对象：回显保留类型形态（"203" 带引号 / {} 原形）', () => {
+    expect(() =>
+      validateSettingsPatch({ driver_dpi: '203' } as unknown as Partial<AppSettings>)
+    ).toThrow('driver_dpi 需为 50-1200 的整数（热敏打印机常见 203/300），当前值："203"')
+    expect(() => validateSettingsPatch({ driver_dpi: {} } as Partial<AppSettings>)).toThrow('当前值：{}')
+  })
+
+  it('非法 driver_use_default_page_size 逐类中文报错：1 / "true" / null / {}', () => {
+    const cases: ReadonlyArray<[unknown, string]> = [
+      [1, '1'],
+      ['true', '"true"'],
+      [null, 'null'],
+      [{}, '{}']
+    ]
+    for (const [value, echo] of cases) {
+      expect(() =>
+        validateSettingsPatch({ driver_use_default_page_size: value } as Partial<AppSettings>)
+      ).toThrow(`driver_use_default_page_size 仅接受 true/false（缺省 false），当前值：${echo}`)
+    }
+  })
+
+  it('既有键不在校验范围（printer_channel 静默回落是历史语义，v2 只管两实验键）', () => {
+    expect(() => validateSettingsPatch({ printer_channel: 'bluetooth' as never })).not.toThrow()
+  })
+
+  it('写侧全链路（validate → serialize → repo.setMany → 读回）：合法 patch 保存成功往返', () => {
+    const db = openDb()
+    const repo = createSettingsRepo(db)
+    const patch: Partial<AppSettings> = { driver_dpi: 203, driver_use_default_page_size: true }
+    validateSettingsPatch(patch)
+    repo.setMany(appSettingsPatchToKv(patch))
+    const settings = rowsToAppSettings(repo.getAll())
+    expect(settings.driver_dpi).toBe(203)
+    expect(settings.driver_use_default_page_size).toBe(true)
+  })
+
+  it('非法值在落库前被拒：validate 抛错 → setMany 不执行 → DB 无脏行', () => {
+    const db = openDb()
+    const repo = createSettingsRepo(db)
+    const patch = { driver_dpi: 13 } as Partial<AppSettings>
+    expect(() => {
+      validateSettingsPatch(patch)
+      repo.setMany(appSettingsPatchToKv(patch))
+    }).toThrow('driver_dpi 需为 50-1200 的整数（热敏打印机常见 203/300），当前值：13')
+    expect(repo.get('driver_dpi')).toBeNull()
   })
 })
 
@@ -182,10 +320,13 @@ describe('settings.ipc 读通道：readRecentSalespersons（settings:getRecentSa
     expect(readRecentSalespersons(repo)).toEqual([])
   })
 
-  it('白名单不泄漏回归：settings 表存在 recent_salespersons 行时 rowsToAppSettings 返回对象无该键（恰好白名单 9 键）', () => {
+  it('白名单不泄漏回归：settings 表含 recent_salespersons 行时 rowsToAppSettings 无该键（恰好白名单 11 键——v2 两实验键入列）', () => {
     const db = openDb()
     const repo = createSettingsRepo(db)
     repo.set(RECENT_SALESPERSONS_KEY, '["x"]')
+    // v2：实验键有行 → 白名单扩为 11 键（改清单非删断言——T1 learnings 预言兑现）
+    repo.set('driver_dpi', '203')
+    repo.set('driver_use_default_page_size', '1')
     // 前置成立性：行确实已写入 settings 表
     expect(repo.get(RECENT_SALESPERSONS_KEY)).toBe('["x"]')
 
@@ -195,6 +336,8 @@ describe('settings.ipc 读通道：readRecentSalespersons（settings:getRecentSa
       [
         'auto_cut',
         'com_port',
+        'driver_dpi',
+        'driver_use_default_page_size',
         'printer_channel',
         'printer_name',
         'receipt_note',
@@ -204,6 +347,8 @@ describe('settings.ipc 读通道：readRecentSalespersons（settings:getRecentSa
         'tcp_port'
       ].sort()
     )
+    expect(settings.driver_dpi).toBe(203)
+    expect(settings.driver_use_default_page_size).toBe(true)
   })
 })
 
