@@ -395,3 +395,27 @@ opencode 本版本 `task()` 工具的生命周期管理缺陷：**返回状态�
 2. gate 拒绝=会话活着——等待而非换新会话重派
 3. 产物验证前 mtime 采样检测第二写手
 4. 大任务拆小、避免长会话撞超时假状态
+
+## ★★ 事故定性修正（2026-11-16 晚，librarian 调研 + 本地 dist 源码双重验证）
+
+**前文「opencode task 生命周期 bug」的定性是错的。正确归属：oh-my-openagent (OMO) 插件层 v4.8.1 的 delegate-task sync-session-poller。**
+
+### 本地实证（dist 源码逐条命中）
+- 三条错误字符串全部出自 `~/.cache/opencode/packages/oh-my-openagent@latest/node_modules/oh-my-openagent/dist/index.js`，opencode 1.18.32 二进制内零命中：
+  - `Task aborted.\n\nSession ID:` @ L112984（parent_abort 返回路径）
+  - `promptAsync skipped by gate: ${status}` @ L56241/L57156（gate 正确检测会话存活）
+  - `Poll inactivity timeout` 同文件
+- **fire-and-forget 实锤** @ L112872-112879：`abortSyncSession` 内 `client.session.abort({...}).catch(仅log)`——无 await；调用点 L112975 紧接 `return "Task aborted"`——**工具立即返回终态，子会话 abort 异步进行、失败静默**
+- OMO 本地版本确证 4.8.1（2026-06-09，落后当前 5.1.72 约 5 个月）
+
+### 上游 issue 映射（librarian 全量核对）
+- **#9295（OPEN，修复 PR #9299 未合并）**：假状态解耦本体——与本次事故同串证据（Task aborted + 1800000ms 超时）；5.1.4/5.1.5 源码锚定 limit:100 判定缺陷
+- **#2409（MERGED，4.8.1 已含但修法就是 fire-and-forget，不完整）**：场景描述与本次完全同构（"both sessions could continue editing the same files"）
+- **#6487（CLOSED，修复 #6677/#6764 于 v5.0.0）**：双写者损坏——**4.8.1 不含此修复**
+- **#11520（CLOSED，#11524 首含 v5.1.50）**：continuation 挂死 30 分钟——4.8.1 不含
+- 上游 opencode v1.18.32→v1.19.5 共 141 提交逐一核对：task.ts/session-prompt.ts 零变更——**升 opencode 无效**
+
+### 修正后的处置路径
+1. **升级 oh-my-openagent 4.8.1 → ≥v5.1.50（推荐 5.1.72）**：获得 #6677/#6764 双写者防护 + v5.0.0 active-status 契约 + #11524 fail-fast；#9295 假状态路径仍在（#9299 未合并）但问题面大幅收窄
+2. 升级 opencode 1.18.32→1.19.5 与本 bug 无关（可不动）；V2 是结构性方案但 OMO 兼容性未验证
+3. 报 issue 对象 = `code-yeongyu/oh-my-openagent`（非 opencode）：追加证据到 #9295 或新 issue 交叉引用 #9295/#2409/#6487（本次的「返回 aborted 时会话存活 + gate 矛盾 + mtime/测试翻转双写取证」是现有 issue 均未覆盖的方向）
