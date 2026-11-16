@@ -63,10 +63,10 @@
 - `docs/windows-manual-checklist.md` 新增「打印机诊断」真机验证节（含 spike 验证点）
 
 ### Definition of Done
-- [ ] `npm run typecheck` 全绿（node + web 两侧）
-- [ ] `npm test` 全部通过（含新增单测与 7 组 fixtures 表驱动）
-- [ ] `npm run test:e2e` 诊断面板场景通过（本地，mock IPC）
-- [ ] reports/诊断报告 fixture golden 快照测试通过（BOM + 三层结构 + JSON 附录往返）
+- [x] `npm run typecheck` 全绿（node + web 两侧）
+- [x] `npm test` 全部通过（含新增单测与 7 组 fixtures 表驱动）
+- [x] `npm run test:e2e` 诊断面板场景通过（本地，mock IPC）
+- [x] reports/诊断报告 fixture golden 快照测试通过（BOM + 三层结构 + JSON 附录往返）
 
 ### Must Have
 - 采集脚本：UTF-8 BOM 落盘、首行 `[Console]::OutputEncoding`、每段独立 try/catch、exit 0 + JSON 内嵌 section errors、PS 5.1 语法、`-NoProfile -NonInteractive -ExecutionPolicy Bypass -File`
@@ -930,19 +930,19 @@ Max Concurrent: 5（Wave 3）
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [~] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, run command). For each "Must NOT Have": search codebase for forbidden patterns（Set-PrinterPort / 消息文本解析 / src/**/*.spec.ts / 新 npm 依赖 / 裸字符串 IPC）— reject with file:line if found. Check evidence files exist in .omo/evidence/. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [~] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `npm run typecheck` + `npm test`. Review all changed files for: `as any`/`@ts-ignore`、empty catches、console.log 残留、unused imports、AI slop（过度注释/过度抽象/泛型命名 data/result）。重点：schema.ts 类型完备性、analyze.ts 规则 evidence 路径真实性、PS 脚本 PS 5.1 兼容。
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [~] F3. **Real Manual QA** — `unspecified-high`（+ `playwright` skill）
+- [x] F3. **Real Manual QA** — `unspecified-high`（+ `playwright` skill）
   From clean state: `npm run test:e2e` 全量（含诊断面板新场景）；执行每任务 QA 场景抽查（重点：fixtures 表驱动全绿、报告 golden 快照、BOM 字节断言、防重入、G11 拒绝）；核对 docs/windows-manual-checklist.md 诊断节存在且含 spike 验证点。Save evidence to `.omo/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [~] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do"，read actual diff（git log/diff）。Verify 1:1——计划内全建（无遗漏）、计划外未建（无蔓延，尤其：无 DEVMODE 采集、无 WS-Discovery 客户端、无打印参数自动改写、无新依赖）。Check "Must NOT do" compliance per task. Detect cross-task contamination.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
@@ -977,8 +977,8 @@ ls .omo/evidence/          # Expected: task-1..10 + final-qa 证据文件
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" present（编码 guardrail / G11 拒绝 / 规则结构化消费 / UAC 1223 / 五处联动 / BOM+脱敏+封顶 / 编排闭环）
-- [ ] All "Must NOT Have" absent（13 项 guardrails）
-- [ ] 7 组 fixtures 表驱动全绿（两台真实故障机症状可被诊断命中）
-- [ ] typecheck / vitest / e2e 全绿
-- [ ] docs/windows-manual-checklist.md 含诊断真机验证节 + spike 验证点
+- [x] All "Must Have" present（编码 guardrail / G11 拒绝 / 规则结构化消费 / UAC 1223 / 五处联动 / BOM+脱敏+封顶 / 编排闭环）
+- [x] All "Must NOT Have" absent（13 项 guardrails）
+- [x] 7 组 fixtures 表驱动全绿（两台真实故障机症状可被诊断命中）
+- [x] typecheck / vitest / e2e 全绿
+- [x] docs/windows-manual-checklist.md 含诊断真机验证节 + spike 验证点
