@@ -11,6 +11,7 @@ import {
   healthyMachine,
   logDisabled,
   printerNameMismatch,
+  realMachine20261115,
   spoolerDead,
   symptom1CloudUtf8,
   symptom1DriverRawGarbled,
@@ -18,10 +19,10 @@ import {
 } from './fixtures/index'
 
 /**
- * printer-diagnostics T5 —— 规则引擎表驱动测试。
+ * printer-diagnostics 规则引擎表驱动测试（T5 + v2 R16/R17）。
  *
  * 三层锁定：
- * 1. 7 组黄金样本的命中/不命中矩阵（症状语义 ↔ 规则编码）；
+ * 1. 8 组黄金样本的命中/不命中矩阵（症状语义 ↔ 规则编码）+ 真机 golden 回放；
  * 2. 命中细节（severity / status / suggestedActions / description 关键短语）；
  * 3. 负变体 + 结构不变量（evidence 非空、动作值域、printer scope 必带 printerName）。
  * 纯函数零 I/O——全部用例免 mock。
@@ -40,7 +41,7 @@ const LEGAL_ACTION_IDS: readonly RepairActionId[] = [
   'GENERIC_TEXT_ONLY_GUIDE'
 ]
 
-/** 合法 FindingCode 全集（schema 15 个——规则引擎不得产出枚举外的 code） */
+/** 合法 FindingCode 全集（schema 17 个——规则引擎不得产出枚举外的 code） */
 const LEGAL_FINDING_CODES: readonly FindingCode[] = [
   'spooler-stopped',
   'jobs-stuck-error',
@@ -56,7 +57,9 @@ const LEGAL_FINDING_CODES: readonly FindingCode[] = [
   'logo-measurement-race',
   'printer-offline-flag',
   'queue-paused',
-  'printer-name-mismatch'
+  'printer-name-mismatch',
+  'driver-print-combo-known-issue',
+  'printconfig-unavailable'
 ]
 
 function codesOf(findings: Finding[]): FindingCode[] {
@@ -70,9 +73,9 @@ function findFinding(findings: Finding[], code: FindingCode): Finding {
   return hit as Finding
 }
 
-// ══════════════ 第一层：7 组黄金样本命中矩阵 ══════════════
+// ══════════════ 第一层：8 组黄金样本命中矩阵 ══════════════
 
-describe('analyzeSnapshot 表驱动（7 组黄金样本 → 命中/不命中矩阵）', () => {
+describe('analyzeSnapshot 表驱动（8 组黄金样本 → 命中/不命中矩阵）', () => {
   const table: Array<{
     name: string
     snapshot: PrintDiagnosticSnapshot
@@ -94,8 +97,8 @@ describe('analyzeSnapshot 表驱动（7 组黄金样本 → 命中/不命中矩�
     {
       name: 'symptom2DriverLayout（症状 2：driver 通道布局异常）',
       snapshot: symptom2DriverLayout,
-      mustHave: ['driver-page-size-ignored', 'logo-measurement-race'],
-      mustNotHave: ['printable-area-clip']
+      mustHave: ['driver-page-size-ignored', 'logo-measurement-race', 'driver-print-combo-known-issue'],
+      mustNotHave: ['printable-area-clip', 'printconfig-unavailable']
     },
     {
       name: 'spoolerDead（spooler 服务停止 + printers/jobs 段采集失败）',
@@ -120,6 +123,28 @@ describe('analyzeSnapshot 表驱动（7 组黄金样本 → 命中/不命中矩�
       snapshot: healthyMachine,
       mustHave: [],
       mustNotHave: []
+    },
+    {
+      name: 'realMachine20261115（真机基线：坏组合 + printConfig 失明——首轮 0 findings 事故的修复锚）',
+      snapshot: realMachine20261115,
+      mustHave: ['driver-print-combo-known-issue', 'printconfig-unavailable'],
+      mustNotHave: [
+        'spooler-stopped',
+        'jobs-stuck-error',
+        'jobs-stuck-deleting',
+        'port-wsd-instability',
+        'snmp-false-offline',
+        'driver-missing',
+        'driver-crash-loop',
+        'raw-garbled-risk',
+        'cloud-printer-raw-utf8',
+        'driver-page-size-ignored',
+        'printable-area-clip',
+        'logo-measurement-race',
+        'printer-offline-flag',
+        'queue-paused',
+        'printer-name-mismatch'
+      ]
     }
   ]
 
@@ -133,6 +158,32 @@ describe('analyzeSnapshot 表驱动（7 组黄金样本 → 命中/不命中矩�
 
   it('healthyMachine：findings 为空数组（未命中不产出 pass 占位）', () => {
     expect(analyzeSnapshot(healthyMachine)).toEqual([])
+  })
+
+  it('真机 golden 回放：real-machine-20261115 精确命中集恰为 [driver-print-combo-known-issue, printconfig-unavailable]', () => {
+    const findings = analyzeSnapshot(realMachine20261115)
+    expect(codesOf(findings)).toEqual(['driver-print-combo-known-issue', 'printconfig-unavailable'])
+    // R16 细节：high / printer scope / needs-dev / 空动作（workaround 为文案引导）
+    const combo = findFinding(findings, 'driver-print-combo-known-issue')
+    expect(combo.severity).toBe('high')
+    expect(combo.scope).toBe('printer')
+    expect(combo.printerName).toBe('DL-5801PW')
+    expect(combo.status).toBe('needs-dev')
+    expect(combo.suggestedActions).toEqual([])
+    // dpr=1.25 只进 evidence 不进判定
+    expect(combo.evidence).toContain("app.settings.channel='driver'")
+    expect(combo.evidence).toContain('dpr=1.25')
+    expect(combo.description).toContain('203')
+    expect(combo.description).toContain('A4')
+    expect(combo.description).toContain('spooler')
+    // R17 细节：info / pending / 空动作 + evidence 指向链终值
+    const unavailable = findFinding(findings, 'printconfig-unavailable')
+    expect(unavailable.severity).toBe('info')
+    expect(unavailable.status).toBe('pending')
+    expect(unavailable.printerName).toBe('DL-5801PW')
+    expect(unavailable.evidence).toBe(
+      `system.printConfigs['DL-5801PW'].widthMicrons=null (source='none')`
+    )
   })
 })
 
@@ -385,6 +436,105 @@ describe('规则专项（合成样本锁定 fixture 未覆盖的规则分支）'
     expect(f.suggestedActions).toEqual([])
     // 纸宽偏差同时超容差 → driver-page-size-ignored 也命中
     expect(codesOf(analyzeSnapshot(snap))).toContain('driver-page-size-ignored')
+  })
+
+  // ── v2 R16 driver-print-combo-known-issue 专项 ──
+
+  it('R16 负变体：marginsMode 非 none → 不产（组合前提三缺一即失活）', () => {
+    const snap: PrintDiagnosticSnapshot = {
+      ...symptom2DriverLayout,
+      app: {
+        ...symptom2DriverLayout.app,
+        printOptions: { ...symptom2DriverLayout.app.printOptions, marginsMode: 'default' }
+      }
+    }
+    const codes = codesOf(analyzeSnapshot(snap))
+    expect(codes).not.toContain('driver-print-combo-known-issue')
+    // 其余规则不受影响
+    expect(codes).toContain('driver-page-size-ignored')
+  })
+
+  it('R16 负变体：channel 非 driver / 目标机缺位 → 不产', () => {
+    const spoolerChannel: PrintDiagnosticSnapshot = {
+      ...symptom2DriverLayout,
+      app: {
+        ...symptom2DriverLayout.app,
+        settings: { ...symptom2DriverLayout.app.settings, channel: 'spooler' }
+      }
+    }
+    expect(codesOf(analyzeSnapshot(spoolerChannel))).not.toContain('driver-print-combo-known-issue')
+    // 目标机缺位（printerName 不在列表）→ 归 printer-name-mismatch 域
+    const noTarget: PrintDiagnosticSnapshot = {
+      ...symptom2DriverLayout,
+      app: {
+        ...symptom2DriverLayout.app,
+        settings: { ...symptom2DriverLayout.app.settings, printerName: '不存在的机器' }
+      }
+    }
+    const codes = codesOf(analyzeSnapshot(noTarget))
+    expect(codes).not.toContain('driver-print-combo-known-issue')
+    expect(codes).toContain('printer-name-mismatch')
+  })
+
+  it('R16 与 R10 并存：printConfig 有值时两规则同时产出（组合规则是兜底层非替代）', () => {
+    const codes = codesOf(analyzeSnapshot(symptom2DriverLayout))
+    expect(codes).toContain('driver-page-size-ignored')
+    expect(codes).toContain('driver-print-combo-known-issue')
+  })
+
+  // ── v2 R17 printconfig-unavailable 专项 ──
+
+  it('R17 segError 路径：printConfig 段采集失败 → info 级降级 finding（evidence 指向 errors）', () => {
+    // 真实 runner 语义：段级 {error} → errors 记档 + printConfigs 置空（takeSection 契约）
+    const snap: PrintDiagnosticSnapshot = {
+      ...healthyMachine,
+      errors: { ...healthyMachine.errors, printConfig: 'WMI 查询超时' },
+      system: { ...healthyMachine.system, printConfigs: [] }
+    }
+    const f = findFinding(analyzeSnapshot(snap), 'printconfig-unavailable')
+    expect(f.severity).toBe('info')
+    expect(f.status).toBe('pending')
+    expect(f.evidence).toBe(`errors.printConfig='WMI 查询超时'`)
+    // 段失败守卫同时抑制 R10/R11（缺数据不产结论）
+    expect(codesOf(analyzeSnapshot(snap))).not.toContain('driver-page-size-ignored')
+  })
+
+  it('R17 负变体：中间层救回（widthMicrons 非 null）→ 不产；条目缺失该机 → 不产', () => {
+    // healthyMachine 目标机配置 80000μm 有值 → 救回
+    expect(codesOf(analyzeSnapshot(healthyMachine))).not.toContain('printconfig-unavailable')
+    // printerNameMismatch：目标 'POS-80' 无 printConfigs 条目 → 归 mismatch 域，不产 R17
+    expect(codesOf(analyzeSnapshot(printerNameMismatch))).not.toContain('printconfig-unavailable')
+  })
+
+  it('R17 与 source 标注：条目带 fallback 层标注时 evidence 随行', () => {
+    const snap: PrintDiagnosticSnapshot = {
+      ...realMachine20261115,
+      system: {
+        ...realMachine20261115.system,
+        printConfigs: realMachine20261115.system.printConfigs.map((c) =>
+          c.printerName === 'DL-5801PW' ? { ...c, source: 'devmode' } : c
+        )
+      }
+    }
+    const f = findFinding(analyzeSnapshot(snap), 'printconfig-unavailable')
+    expect(f.evidence).toContain(`source='devmode'`)
+  })
+
+  it('R10 evidence 增强：条目带 source 标注时随行（无标注保持 v1 形状）', () => {
+    const withSource: PrintDiagnosticSnapshot = {
+      ...symptom2DriverLayout,
+      system: {
+        ...symptom2DriverLayout.system,
+        printConfigs: [
+          { printerName: 'POS-80 Printer', paperSize: 'A4', widthMicrons: 210000, heightMicrons: 297000, orientation: 'Portrait', source: 'win32printerconfig' }
+        ]
+      }
+    }
+    const f = findFinding(analyzeSnapshot(withSource), 'driver-page-size-ignored')
+    expect(f.evidence).toContain(`source='win32printerconfig'`)
+    // v1 形状（无 source）：evidence 不含 source 尾注（symptom2 原样）
+    const f1 = findFinding(analyzeSnapshot(symptom2DriverLayout), 'driver-page-size-ignored')
+    expect(f1.evidence).not.toContain('source=')
   })
 })
 

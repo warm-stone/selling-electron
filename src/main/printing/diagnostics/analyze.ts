@@ -1,14 +1,25 @@
 /**
- * 打印诊断规则引擎（printer-diagnostics 计划 Wave 3 / T5）。
+ * 打印诊断规则引擎（printer-diagnostics 计划 Wave 3 / T5；v2 增补 R16/R17 两规则）。
  *
- * analyzeSnapshot(snapshot) → Finding[]：15 条规则按 RULE_DEPENDS_ON 声明的
+ * analyzeSnapshot(snapshot) → Finding[]：17 条规则按 RULE_DEPENDS_ON 声明的
  * 依赖段做前置守卫——任一依赖段采集失败（记入 snapshot.errors）即跳过该规则
  * （缺数据不产结论）；spooler-stopped 命中时抑制 jobs-stuck-error /
  * jobs-stuck-deleting（服务停机下的队列状态无意义，重启后自然失效）。
  *
+ * v2 增补（真机 2026-11-15 报「0 findings ≠ 健康」事故的修复承载）：
+ * - R16 driver-print-combo-known-issue：已知坏组合探测（channel=driver +
+ *   custom-microns + margins-none 命中 Electron GDI 静默打印已知问题群
+ *   #31705/#50481，DPR≠1 时叠加 #39179 域）——premise 全在 app 合成段，
+ *   RULE_DEPENDS_ON=[]（沿 R12 先例）；不依赖 printConfig（printConfig 失明
+ *   时的兜底层，有值时 R10/R11 仍并产出更具体证据）。
+ * - R17 printconfig-unavailable：printConfig 缺数据自检（缺数据≠健康）——
+ *   段失败守卫会抑制 R10/R11，本规则空依赖反向兜底「目标机链终值无宽高 OR
+ *   段采集失败」，info 级降级提示。
+ * - 两新规则均不参与 spooler-stopped 抑制链。
+ *
  * 设计红线（T5 规格锁定）：
  * - 零 I/O / 零副作用 / 不解析本地化消息文本——纯 Node 环境全测；
- * - 只产 schema 的 15 个 FindingCode、只引用 9 个 RepairActionId；
+ * - 只产 schema 的 17 个 FindingCode、只引用 9 个 RepairActionId；
  * - evidence 为结构化字段路径引用（如 `printers['X'].driver.rawOnlyBit=false`），
  *   报告导出（T8）与人审按 evidence 直接定位数据源；
  * - 未命中的规则不产出（不产 pass 占位 Finding——status:'pass' 契约上不出现）。
@@ -59,6 +70,19 @@ function findTarget(s: PrintDiagnosticSnapshot): PrinterDiagnostic | undefined {
 /** 按打印机名查 DEVMODE 打印配置（printConfig 段） */
 function findPrintConfig(s: PrintDiagnosticSnapshot, printerName: string) {
   return s.system.printConfigs.find((c) => c.printerName === printerName)
+}
+
+/**
+ * printConfigs 条目的 fallback 层标注（v2 归一随行的可选 source 字段——
+ * 'printconfiguration'/'printticketxml'/'win32printerconfig'/'devmode'）。
+ * v1 形状条目（无 source 键）返回 null，调用方按「无标注」处理（evidence
+ * 保持 v1 形状，非破坏性）。
+ */
+function printConfigSource(
+  config: PrintDiagnosticSnapshot['system']['printConfigs'][number] | undefined
+): string | null {
+  const src = config?.source
+  return typeof src === 'string' && src !== '' ? src : null
 }
 
 /** 模板宽（μm）；规格外纸宽（如 'A4'）返回 undefined——调用方按缺数据跳过 */
@@ -310,6 +334,9 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
       const templateWidth = templateWidthMicrons(s)
       if (settings.channel === 'driver' && config && config.widthMicrons !== null && templateWidth !== undefined) {
         const diff = Math.abs(config.widthMicrons - templateWidth)
+        // v2 微调：条目携带 fallback 层标注（source 字段）时随行进 evidence——
+        // 无标注保持 v1 evidence 形状不变（非破坏性）
+        const srcNote = printConfigSource(config)
         // R10 driver-page-size-ignored：DEVMODE 纸宽 ≠ 模板宽（驱动忽略页宽设置）
         if (!depsFailed('driver-page-size-ignored') && diff > WIDTH_TOLERANCE) {
           findings.push({
@@ -317,7 +344,7 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
             severity: 'high',
             scope: 'printer',
             printerName: target.name,
-            evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons}（模板 '${settings.templatePaperWidth}'=${templateWidth}）`,
+            evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons}（模板 '${settings.templatePaperWidth}'=${templateWidth}）${srcNote !== null ? `, source='${srcNote}'` : ''}`,
             suggestedActions: ['SWITCH_TO_SPOOLER_CHANNEL', 'REINSTALL_DRIVER_GUIDE'],
             status: 'needs-dev',
             description: `driver 通道下「${target.name}」的实际纸张宽度为 ${config.widthMicrons}μm，与模板 ${settings.templatePaperWidth}（${templateWidth}μm）偏差 ${diff}μm——驱动忽略了应用下发的自定义页宽，版面按错误纸宽排布。可切回 spooler 通道规避，根治需排查驱动页宽协商（需开发介入）。`
@@ -329,13 +356,68 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
               severity: 'medium',
               scope: 'printer',
               printerName: target.name,
-              evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons} < 模板宽 ${templateWidth} - ${CLIP_DEFICIT}`,
+              evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons} < 模板宽 ${templateWidth} - ${CLIP_DEFICIT}${srcNote !== null ? `, source='${srcNote}'` : ''}`,
               suggestedActions: [],
               status: 'needs-dev',
               description: `「${target.name}」的实际纸宽（${config.widthMicrons}μm）比模板（${templateWidth}μm）窄超过 4mm——内容超出可打印区域会被裁切（右侧缺失）。需按实际纸宽调整模板（需开发介入）。`
             })
           }
         }
+      }
+    }
+
+    // ── R16 driver-print-combo-known-issue（v2：已知坏组合探测，不依赖 printConfig） ──
+    // premise 全在 app 合成段（channel + printOptions 两维度），RULE_DEPENDS_ON=[]
+    // 沿 R12 先例（空依赖合法）；dpr 只进 evidence 不进判定（不做 dpr 感知规则）；
+    // RepairActionId 零新增（三条 workaround 为纯文案引导，实验开关在设置页高级区）。
+    // printConfig 有值时 R10/R11 仍并产出更具体证据——本规则是 printConfig 失明时
+    // 的兜底层。目标机缺位（findTarget 未命中）归 printer-name-mismatch 规则域。
+    if (
+      settings.channel === 'driver' &&
+      s.app.printOptions.pageSizeMode === 'custom-microns' &&
+      s.app.printOptions.marginsMode === 'none'
+    ) {
+      const dpr = s.renderSnapshot?.dpr
+      findings.push({
+        code: 'driver-print-combo-known-issue',
+        severity: 'high',
+        scope: 'printer',
+        printerName: target.name,
+        evidence:
+          `app.settings.channel='${settings.channel}' + printOptions{pageSizeMode='${s.app.printOptions.pageSizeMode}', marginsMode='${s.app.printOptions.marginsMode}'}` +
+          (dpr !== undefined && dpr !== 1 ? ` dpr=${dpr}(非整数缩放渲染)` : ''),
+        suggestedActions: [],
+        status: 'needs-dev',
+        description: `当前 driver 渲染通道组合为「自定义页宽（custom-microns）+ 零边距（none）」——该组合命中 Electron Windows GDI 静默打印的已知问题群：驱动可能忽略应用下发的自定义页宽、边距处理回归导致内容右侧截断、显示缩放（DPR≠1）下渲染尺寸偏差。可依次尝试三条实验性规避：① 在设置页「打印高级选项（实验）」将打印 DPI 显式设为 203（热敏打印机常见值）；② 启用「使用驱动默认页尺寸」——注意：驱动取不到默认页尺寸时会回退 A4 纸（58/80mm 连续纸会被按 A4 高度分页切断），实验时请观察出纸分页位置；③ 若该机 RAW 通道可用，反向切换回 spooler 通道绕开 driver 渲染链。以上均为规避手段，根治需开发介入定位。`
+      })
+    }
+
+    // ── R17 printconfig-unavailable（v2：printConfig 缺数据自检——缺数据≠健康） ──
+    // 触发双路径：目标机 printConfigs 条目链终值无宽高（widthMicrons===null，含
+    // fallback 链走完仍空）OR printConfig 段采集失败（errors 记录）。中间层救回
+    //（widthMicrons 非 null）则不报——R10/R11 恢复视力，无需降级提示。段失败
+    // 守卫会抑制 R10/R11，本规则空依赖（RULE_DEPENDS_ON=[]）反向兜底；printConfigs
+    // 条目缺失该机（Get-Printer 枚举就没有它）归 printer-name-mismatch 规则域，不报。
+    {
+      const config = findPrintConfig(s, target.name)
+      const rescued = config !== undefined && config.widthMicrons !== null
+      const segError = Object.prototype.hasOwnProperty.call(s.errors, 'printConfig')
+        ? s.errors['printConfig']
+        : undefined
+      if (!rescued && (segError !== undefined || config?.widthMicrons === null)) {
+        findings.push({
+          code: 'printconfig-unavailable',
+          severity: 'info',
+          scope: 'printer',
+          printerName: target.name,
+          evidence:
+            segError !== undefined
+              ? `errors.printConfig='${segError}'`
+              : `system.printConfigs['${target.name}'].widthMicrons=null (source='${printConfigSource(config) ?? 'none'}')`,
+          suggestedActions: [],
+          status: 'pending',
+          description: `「${target.name}」的驱动纸张配置不可读（宽度/高度链终值为空——v4 打印驱动或自定义表单机型的常见情况，fallback 链已逐层尝试仍未取到），页宽比对类诊断（驱动忽略页宽/可打印区域裁切）本轮不可用，其余诊断不受影响。可参考真机验证清单的 printConfig fallback 验证项确认该机可读的配置层。`
+        })
       }
     }
   }
