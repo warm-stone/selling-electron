@@ -53,6 +53,19 @@ const HEIGHT_SAFETY_PAD_MICRONS = 2_000
 const DRIVER_PRINT_TIMEOUT_MS = 30_000
 
 /**
+ * logo decode 等待脚本（测量前执行一次——v2 症状 2「加 logo 后内容消失」修复）：
+ * 根因是测量竞态——scrollHeight 在 img.receipt-logo 解码完成前偏小，页高被低估
+ * → 驱动按矮页打印裁掉内容。测量前等 decode 安定即消除竞态（render-check 的
+ * 两次测量正是该竞态的证据采集器，真机 fixture symptom2 Δ265px）。
+ * - decode 成功/失败都 resolve（坏图不阻塞打印——render-check SECOND_MEASURE_SCRIPT
+ *   同款惯用式 `i.decode().then(() => r(), () => r())`）；
+ * - 无 logo / 无 decode API 立即 resolve（零成本通过）；
+ * - decode 永不定局由外层 30s settle 兜底（不加 decode 专属超时）。
+ */
+const LOGO_DECODE_WAIT_SCRIPT =
+  "new Promise(r => { const i = document.querySelector('img.receipt-logo'); if (i && i.decode) { i.decode().then(() => r(), () => r()); } else { r(); } })"
+
+/**
  * 默认窗口工厂：懒 require('electron')（T2 模式——本模块可在 vitest 纯
  * Node 环境导入；仅生产 send 路径真正触达 Electron）。BrowserWindow 按
  * DriverPrintWindow 结构适配包装（隐藏窗口 + webContents 三方法 + destroy）。
@@ -78,16 +91,32 @@ function errorDetail(err: unknown): string {
 }
 
 /**
+ * driver 通道实验打印选项（v2——消费 AppSettings 两实验键 driver_dpi /
+ * driver_use_default_page_size，Electron GDI 静默打印已知问题群（#31705/
+ * #50481/#39179）的 workaround 开关；生产由 print.service 装配 settings 闭包
+ * 注入，vitest 直传免依赖）。
+ */
+export interface DriverPrintOptions {
+  /** 显式 DPI（null/缺省 = 不设置走驱动缺省）；正整数才进 print options */
+  driverDpi?: number | null
+  /** 使用驱动默认页尺寸（Electron 44：usePrinterDefaultPageSize 与 pageSize 互斥） */
+  useDefaultPageSize?: boolean
+}
+
+/**
  * 收据 HTML → 隐藏窗口 → webContents.print（核心流程，可注入窗口工厂单测）：
  *  1. UTF-8 解码载荷（HTML 文档）→ data: URL 加载（不触应用路由）；
+ *  1.5 logo decode 等待（测量竞态修复——见 LOGO_DECODE_WAIT_SCRIPT；best-effort，
+ *      基础设施级执行失败不阻塞，照常进入测量）；
  *  2. executeJavaScript 测量内容高度 + 读 data-paper-width（页宽微米）；
- *  3. print(silent + deviceName + 按内容高度定页高 + 无边距)；
+ *  3. print(silent + deviceName + 按内容高度定页高 + 无边距 + 实验选项条件组装)；
  *  4. 任一环节失败/30s 超时 → reject 可诊断中文错误，finally destroy 窗口。
  */
 export function printHtmlViaDriver(
   html: string,
   printerName: string,
-  createWindowFn: DriverCreateWindowFn = defaultCreateWindowFn
+  createWindowFn: DriverCreateWindowFn = defaultCreateWindowFn,
+  options: DriverPrintOptions = {}
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const win = createWindowFn(html)
@@ -126,6 +155,15 @@ export function printHtmlViaDriver(
         return
       }
 
+      // 1.5 logo decode 等待（测量前——症状 2 修复）：best-effort，执行失败不阻塞
+      // （decode 的坏图 reject 已被脚本内吞掉；此处仅覆盖 executeJavaScript 基础
+      // 设施级失败——窗口已死时后续测量自会给出可诊断错误，30s settle 仍兜底）
+      try {
+        await win.webContents.executeJavaScript(LOGO_DECODE_WAIT_SCRIPT)
+      } catch {
+        // 等待失败 ≠ 打印失败——照常进入测量
+      }
+
       // 2. 测量：scrollHeight（px）+ data-paper-width（页宽）——单次 JS 调用取齐
       let measured: unknown
       try {
@@ -161,25 +199,39 @@ export function printHtmlViaDriver(
       // px → μm 向上取整 + 安全垫（倍高 transform 不占布局高度的补偿）
       const heightMicrons = Math.ceil(pxHeight * PX_TO_MICRONS) + HEIGHT_SAFETY_PAD_MICRONS
 
-      // 3. 静默打印：设备名 + 按内容高度定页高（连续纸不自分页）+ 无边距（纸宽即内容宽）
-      win.webContents.print(
-        {
-          silent: true,
-          printBackground: true,
-          deviceName: printerName,
-          pageSize: { width: paperMicrons, height: heightMicrons },
-          margins: { marginType: 'none' }
-        },
-        (success, reason) => {
-          if (success) settle()
-          else
-            settle(
-              new Error(
-                `driver channel 驱动打印失败（打印机：${printerName || '未指定'}）：${reason}`
-              )
+      // 3. 静默打印选项条件组装（v2 实验键——Electron 44 文档实证）：
+      //  - useDefaultPageSize=true → 无 pageSize 键（与自定义页尺寸互斥——
+      //    Cannot be combined）+ usePrinterDefaultPageSize:true；
+      //  - 否则维持 v1 自定义 pageSize（测量数学零改动）；
+      //  - driverDpi 正整数 → dpi Record 形状（标量同值填横竖）；
+      //  条件 spread 保证未启用的实验键物理不存在（deepEqual/键集断言的前提）。
+      const dpi =
+        typeof options.driverDpi === 'number' &&
+        Number.isInteger(options.driverDpi) &&
+        options.driverDpi > 0
+          ? { dpi: { horizontal: options.driverDpi, vertical: options.driverDpi } }
+          : {}
+      const printOptions: Record<string, unknown> = {
+        silent: true,
+        printBackground: true,
+        deviceName: printerName,
+        ...(options.useDefaultPageSize === true
+          ? { usePrinterDefaultPageSize: true }
+          : { pageSize: { width: paperMicrons, height: heightMicrons } }),
+        ...dpi,
+        margins: { marginType: 'none' }
+      }
+
+      // 静默打印：设备名 + 上述条件组装选项 + 无边距（纸宽即内容宽）
+      win.webContents.print(printOptions, (success, reason) => {
+        if (success) settle()
+        else
+          settle(
+            new Error(
+              `driver channel 驱动打印失败（打印机：${printerName || '未指定'}）：${reason}`
             )
-        }
-      )
+          )
+      })
     })()
   })
 }
@@ -190,6 +242,8 @@ export interface DriverChannelOptions {
   printerName: string
   /** 窗口工厂注入点（单测 fake 用；生产默认懒 require Electron 的隐藏 BrowserWindow） */
   createWindowFn?: DriverCreateWindowFn
+  /** 实验打印选项注入（每次 send 时调用——生产由 print.service 装配 settings 闭包，测试 fake 注入免依赖） */
+  getDriverOptions?: () => DriverPrintOptions
 }
 
 /** driver 兜底通道（PrintChannel 实现）：收据 HTML（UTF-8 字节）→ 驱动渲染打印 */
@@ -197,10 +251,12 @@ export class DriverChannel implements PrintChannel {
   readonly name = 'driver' as const
   readonly printerName: string
   private readonly createWindowFn: DriverCreateWindowFn
+  private readonly getDriverOptions: () => DriverPrintOptions
 
   constructor(options: DriverChannelOptions) {
     this.printerName = options.printerName
     this.createWindowFn = options.createWindowFn ?? defaultCreateWindowFn
+    this.getDriverOptions = options.getDriverOptions ?? (() => ({}))
   }
 
   send(bytes: Uint8Array): Promise<void> {
@@ -211,6 +267,6 @@ export class DriverChannel implements PrintChannel {
     }
     // 载荷语义：bytes = 收据 HTML 的 UTF-8 编码（不是 ESC/POS 指令）
     const html = Buffer.from(bytes).toString('utf8')
-    return printHtmlViaDriver(html, this.printerName, this.createWindowFn)
+    return printHtmlViaDriver(html, this.printerName, this.createWindowFn, this.getDriverOptions())
   }
 }

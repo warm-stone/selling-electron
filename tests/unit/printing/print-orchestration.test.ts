@@ -132,7 +132,9 @@ describe('appSettingsToPrintSettings（T7 getChannel 参数归一）', () => {
       printer_name: '',
       tcp_host: '',
       tcp_port: undefined,
-      com_port: undefined
+      com_port: undefined,
+      driver_dpi: null,
+      driver_use_default_page_size: false
     })
   })
 })
@@ -401,7 +403,9 @@ describe('printSale（生成字节 → enqueuePrintJob）', () => {
       printer_name: '',
       tcp_host: '127.0.0.1',
       tcp_port: 19910,
-      com_port: undefined
+      com_port: undefined,
+      driver_dpi: null,
+      driver_use_default_page_size: false
     })
   })
 
@@ -490,7 +494,9 @@ describe('printSale driver 通道（HTML 即字节——云热敏机驱动渲染
       printer_name: '前台驱动打印机',
       tcp_host: '127.0.0.1',
       tcp_port: 19910,
-      com_port: undefined
+      com_port: undefined,
+      driver_dpi: null,
+      driver_use_default_page_size: false
     })
 
     // 入队载荷 = HTML 文档的 UTF-8 编码（HTML 即字节——队列/重试语义不变）

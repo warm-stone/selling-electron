@@ -258,8 +258,10 @@ describe('L4 引导与 needs-dev', () => {
     const report = reportFrom(cloneSnapshot('symptom2-driver-layout'))
     const w = await mountDialog(report)
 
+    // v2：真实 analyzeSnapshot 下 symptom2 现产 3 条 needs-dev（driver-page-size-ignored
+    // + logo-measurement-race + 新增 R16 driver-print-combo-known-issue）
     const badges = w.findAll('[data-testid="finding-badge-needs-dev"]')
-    expect(badges).toHaveLength(2)
+    expect(badges).toHaveLength(3)
     expect(badges[0]!.text()).toBe('需开发介入')
     expect(w.find('[data-testid^="repair-btn-"]').exists()).toBe(false)
     expect(w.find('.diagnosis-guide').text()).toContain('重装打印机驱动')

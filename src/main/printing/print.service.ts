@@ -37,6 +37,10 @@ export interface PrintSettings {
   tcp_port?: number
   /** serial 通道：串口设备路径（默认 \\.\COM1） */
   com_port?: string
+  /** driver 通道实验：显式 DPI（printer-diagnostics v2；null=未设置走驱动缺省） */
+  driver_dpi?: number | null
+  /** driver 通道实验：使用驱动默认页尺寸（与自定义 pageSize 互斥；缺省 false） */
+  driver_use_default_page_size?: boolean
 }
 
 /**
@@ -56,7 +60,14 @@ export function getChannel(settings: PrintSettings): PrintChannel {
     case 'serial':
       return new SerialChannel({ port: settings.com_port ?? DEFAULT_SERIAL_PORT })
     case 'driver':
-      return new DriverChannel({ printerName: settings.printer_name ?? '' })
+      return new DriverChannel({
+        printerName: settings.printer_name ?? '',
+        // v2 实验键闭包（settingsBoundChannel 每次 send 重建通道 → 读到当前值）
+        getDriverOptions: () => ({
+          driverDpi: settings.driver_dpi ?? null,
+          useDefaultPageSize: settings.driver_use_default_page_size ?? false
+        })
+      })
   }
 }
 
@@ -164,7 +175,9 @@ export function appSettingsToPrintSettings(s: AppSettings): PrintSettings {
     printer_name: s.printer_name ?? '',
     tcp_host: s.tcp_host ?? '',
     tcp_port: s.tcp_port ?? undefined,
-    com_port: s.com_port ?? undefined
+    com_port: s.com_port ?? undefined,
+    driver_dpi: s.driver_dpi ?? null,
+    driver_use_default_page_size: s.driver_use_default_page_size ?? false
   }
 }
 

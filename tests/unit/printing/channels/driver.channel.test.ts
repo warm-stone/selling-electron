@@ -1,17 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
+import { runInNewContext } from 'node:vm'
 import {
   DriverChannel,
   printHtmlViaDriver,
+  type DriverChannelOptions,
   type DriverPrintWindow
 } from '../../../../src/main/printing/channels/driver.channel'
 
 /**
  * driver 兜底通道单元测试（DI 注入 fake 窗口，**免 Electron、不弹真窗口**——
  * 与 spooler.channel.test 注入 fake execFile 同款模式）。
- * 验证：HTML 即字节的载荷契约、data: URL 加载、高度/纸宽测量 → pageSize 微米
- * 换算（58mm→58000 / 80mm→80000，px→μm 向上取整 + 2000μm 安全垫）、
- * silent/printBackground/deviceName/无边距选项、失败/缺属性/超时可诊断中文错误、
- * 窗口必被销毁（finally 语义）。
+ * 验证：HTML 即字节的载荷契约、data: URL 加载、logo decode 等待（测量前——v2
+ * 症状 2 修复）、高度/纸宽测量 → pageSize 微米换算（58mm→58000 / 80mm→80000，
+ * px→μm 向上取整 + 2000μm 安全垫）、silent/printBackground/deviceName/无边距选项、
+ * 实验选项条件组装（v2：dpi Record 形状 / useDefaultPageSize 互斥 / 缺省 v1 形状
+ * deepEqual 硬锁）、失败/缺属性/超时可诊断中文错误、窗口必被销毁（finally 语义）。
  */
 
 /** webContents.print 捕获选项（DriverPrintWindow.options 为 unknown，此处结构化断言用） */
@@ -36,7 +39,11 @@ interface FakeCalls {
 
 /**
  * 可编排假窗口：measureJson 控制 executeJavaScript 返回（默认 800px/58mm）；
- * printResult 'ok' 立即回调成功、'fail' 回调失败、'hang' 永不回调（超时路径）。
+ * printResult 'ok' 立即回调成功、'fail' 回调失败、'hang' 永不回调（超时路径）；
+ * decodeBehavior 控制 logo decode 等待脚本（按 code 含 receipt-logo 识别）——
+ * 'resolve' 立即通过（默认：无 logo/解码完成的 fake 等价）、'reject' 模拟
+ * executeJavaScript 基础设施级失败、'pending' 挂起等待 releaseDecode() 放行
+ * （验证 decode 等待在测量之前——decode 未定局时测量不得发生）。
  */
 function makeFakeWindow(
   o: {
@@ -44,9 +51,17 @@ function makeFakeWindow(
     printResult?: 'ok' | 'fail' | 'hang'
     loadUrlError?: Error
     execError?: Error
+    decodeBehavior?: 'resolve' | 'reject' | 'pending'
   } = {}
-): { win: DriverPrintWindow; calls: FakeCalls } {
+): { win: DriverPrintWindow; calls: FakeCalls; releaseDecode: () => void } {
   const calls: FakeCalls = { loadedUrl: '', executed: [], printOptions: [], destroyed: 0 }
+  let decodeGate: Promise<void> | undefined
+  let releaseDecode: () => void = () => {}
+  if (o.decodeBehavior === 'pending') {
+    decodeGate = new Promise<void>((r) => {
+      releaseDecode = r
+    })
+  }
   const win: DriverPrintWindow = {
     webContents: {
       loadURL: vi.fn(async (url: string) => {
@@ -56,6 +71,11 @@ function makeFakeWindow(
       executeJavaScript: vi.fn(async (code: string) => {
         calls.executed.push(code)
         if (o.execError) throw o.execError
+        if (code.includes('receipt-logo')) {
+          if (o.decodeBehavior === 'reject') throw new Error('decode 等待脚本执行失败（fake）')
+          if (decodeGate) await decodeGate
+          return null
+        }
         return o.measureJson ?? JSON.stringify({ h: 800, paper: '58mm' })
       }),
       print: vi.fn((options: unknown, callback: (success: boolean, reason: string) => void) => {
@@ -69,7 +89,7 @@ function makeFakeWindow(
       calls.destroyed += 1
     })
   }
-  return { win, calls }
+  return { win, calls, releaseDecode }
 }
 
 /** 收据 HTML（含 data-paper-width——通道测量契约的载荷前提） */
@@ -100,10 +120,11 @@ describe('DriverChannel', () => {
     expect(createWindowFn).toHaveBeenCalledWith(RECEIPT_HTML)
     // data: URL 加载（中文安全编码，round-trip 还原）
     expect(calls.loadedUrl).toBe(`data:text/html;charset=utf-8,${encodeURIComponent(RECEIPT_HTML)}`)
-    // 测量脚本：scrollHeight + data-paper-width 一次取齐
-    expect(calls.executed).toHaveLength(1)
-    expect(calls.executed[0]).toContain('scrollHeight')
-    expect(calls.executed[0]).toContain('paperWidth')
+    // 调用序（v2）：logo decode 等待脚本 → 测量脚本（各一次）
+    expect(calls.executed).toHaveLength(2)
+    expect(calls.executed[0]).toContain('receipt-logo')
+    expect(calls.executed[1]).toContain('scrollHeight')
+    expect(calls.executed[1]).toContain('paperWidth')
     // 打印选项全要素：静默 + 背景 + 设备名 + 无边距 + 58mm 页宽微米 + 测量页高
     expect(calls.printOptions).toHaveLength(1)
     expect(calls.printOptions[0]).toEqual({
@@ -195,5 +216,162 @@ describe('DriverChannel', () => {
     await printHtmlViaDriver(RECEIPT_HTML, 'POS-58', () => win)
     expect(calls.printOptions[0]?.deviceName).toBe('POS-58')
     expect(calls.destroyed).toBe(1)
+  })
+})
+
+// ═══════════ v2：实验打印选项条件组装（dpi Record 形状 / useDefaultPageSize 互斥） ═══════════
+
+describe('DriverChannel 实验打印选项条件组装（v2 driver 通道实验键）', () => {
+  it('两新键缺省/null/false → options 与 v1 形状逐字段 deepEqual（无 dpi/usePrinterDefaultPageSize 键）', async () => {
+    // 三种「未启用」形态：闭包缺省（生产缺省路径）/ 闭包返回空对象 / 显式 null+false
+    const notEnabled: Array<DriverChannelOptions['getDriverOptions']> = [
+      undefined,
+      () => ({}),
+      () => ({ driverDpi: null, useDefaultPageSize: false })
+    ]
+    for (const getDriverOptions of notEnabled) {
+      const { win, calls } = makeFakeWindow()
+      const ch = new DriverChannel({ printerName: 'POS-58', createWindowFn: () => win, getDriverOptions })
+
+      await ch.send(htmlBytes(RECEIPT_HTML))
+
+      expect(calls.printOptions).toHaveLength(1)
+      // 硬锁 v1 五键形状：多余键（dpi/usePrinterDefaultPageSize）或缺键都会 fail
+      expect(calls.printOptions[0]).toEqual({
+        silent: true,
+        printBackground: true,
+        deviceName: 'POS-58',
+        pageSize: { width: 58_000, height: expectedHeightMicrons(800) },
+        margins: { marginType: 'none' }
+      })
+      expect(Object.keys(calls.printOptions[0])).not.toContain('dpi')
+      expect(Object.keys(calls.printOptions[0])).not.toContain('usePrinterDefaultPageSize')
+    }
+  })
+
+  it('useDefaultPageSize=true → 不含 pageSize 键（互斥——Cannot be combined）+ usePrinterDefaultPageSize:true', async () => {
+    const { win, calls } = makeFakeWindow()
+    const ch = new DriverChannel({
+      printerName: 'POS-58',
+      createWindowFn: () => win,
+      getDriverOptions: () => ({ useDefaultPageSize: true })
+    })
+
+    await ch.send(htmlBytes(RECEIPT_HTML))
+
+    const opts = calls.printOptions[0] as unknown as Record<string, unknown>
+    expect(Object.keys(opts)).not.toContain('pageSize')
+    expect(opts.usePrinterDefaultPageSize).toBe(true)
+    // 非实验键零改动（silent/printBackground/deviceName/margins 四键仍在）
+    expect(opts.silent).toBe(true)
+    expect(opts.printBackground).toBe(true)
+    expect(opts.deviceName).toBe('POS-58')
+    expect(opts.margins).toEqual({ marginType: 'none' })
+  })
+
+  it('driverDpi=203 → dpi Record 形状（horizontal/vertical 同值）；null/0/缺省 → 无 dpi 键', async () => {
+    // 203：dpi 深比较（横竖同值——Electron dpi 是 Record 不是标量）
+    {
+      const { win, calls } = makeFakeWindow()
+      const ch = new DriverChannel({
+        printerName: 'POS-58',
+        createWindowFn: () => win,
+        getDriverOptions: () => ({ driverDpi: 203 })
+      })
+      await ch.send(htmlBytes(RECEIPT_HTML))
+      expect(calls.printOptions[0]).toEqual({
+        silent: true,
+        printBackground: true,
+        deviceName: 'POS-58',
+        pageSize: { width: 58_000, height: expectedHeightMicrons(800) },
+        dpi: { horizontal: 203, vertical: 203 },
+        margins: { marginType: 'none' }
+      })
+    }
+    // null / 0（非正整数组装侧防御）/ 缺省 → dpi 键物理不存在
+    for (const driverDpi of [null, 0] as Array<number | null>) {
+      const { win, calls } = makeFakeWindow()
+      const ch = new DriverChannel({
+        printerName: 'POS-58',
+        createWindowFn: () => win,
+        getDriverOptions: () => ({ driverDpi })
+      })
+      await ch.send(htmlBytes(RECEIPT_HTML))
+      expect(Object.keys(calls.printOptions[0])).not.toContain('dpi')
+    }
+  })
+
+  it('useDefaultPageSize=true + driverDpi=203 组合 → usePrinterDefaultPageSize + dpi 并存，pageSize 仍缺席', async () => {
+    const { win, calls } = makeFakeWindow()
+    const ch = new DriverChannel({
+      printerName: 'POS-58',
+      createWindowFn: () => win,
+      getDriverOptions: () => ({ driverDpi: 203, useDefaultPageSize: true })
+    })
+
+    await ch.send(htmlBytes(RECEIPT_HTML))
+
+    const opts = calls.printOptions[0] as unknown as Record<string, unknown>
+    expect(Object.keys(opts)).not.toContain('pageSize')
+    expect(opts.usePrinterDefaultPageSize).toBe(true)
+    expect(opts.dpi).toEqual({ horizontal: 203, vertical: 203 })
+  })
+})
+
+// ═══════════ v2 症状 2：logo decode 等待（测量前——「加 logo 后内容消失」竞态修复） ═══════════
+
+describe('DriverChannel logo decode 等待（v2 症状 2——测量竞态修复）', () => {
+  it('调用序：decode 等待 JS 在测量 JS 之前——decode 挂起时测量/打印未发生，放行后测量+打印完成', async () => {
+    const { win, calls, releaseDecode } = makeFakeWindow({ decodeBehavior: 'pending' })
+
+    const pending = printHtmlViaDriver(RECEIPT_HTML, 'POS-58', () => win)
+    // 排空微任务：decode gate 挂起期间 executeJavaScript 只收到 decode 等待脚本
+    await new Promise((r) => setTimeout(r, 0))
+    expect(calls.executed).toHaveLength(1)
+    expect(calls.executed[0]).toContain('receipt-logo')
+    expect(calls.printOptions).toHaveLength(0)
+    expect(calls.destroyed).toBe(0)
+
+    releaseDecode()
+    await pending
+
+    // 放行后：测量 → 打印 → 销毁，全链路照常完成
+    expect(calls.executed).toHaveLength(2)
+    expect(calls.executed[1]).toContain('scrollHeight')
+    expect(calls.printOptions).toHaveLength(1)
+    expect(calls.destroyed).toBe(1)
+  })
+
+  it('decode 等待执行失败（基础设施级 reject）→ 照常测量+打印（等待失败≠打印失败）', async () => {
+    const { win, calls } = makeFakeWindow({ decodeBehavior: 'reject' })
+
+    await printHtmlViaDriver(RECEIPT_HTML, 'POS-58', () => win)
+
+    expect(calls.executed).toHaveLength(2)
+    expect(calls.printOptions).toHaveLength(1)
+    expect(calls.destroyed).toBe(1)
+  })
+
+  it('decode 等待脚本 JS 语义（vm 沙箱直跑）：无 logo 立即 resolve / decode 成功 resolve / decode 失败仍 resolve', async () => {
+    // fake 窗口不执行真实 JS——脚本语义在 Node vm 沙箱硬锁（坏图 reject 若未被
+    // 脚本吞掉，此 await 会 throw——这正是症状 2 修复的失败模式）
+    const { win, calls } = makeFakeWindow()
+    await printHtmlViaDriver(RECEIPT_HTML, 'POS-58', () => win)
+    const script = calls.executed.find((code) => code.includes('receipt-logo'))
+    expect(script).toBeDefined()
+
+    const runScript = (document: unknown): Promise<unknown> =>
+      runInNewContext(script as string, { document })
+
+    // 无 logo（querySelector → null）：else 分支立即 resolve
+    await runScript({ querySelector: () => null })
+    // 有 logo、decode 成功
+    await runScript({ querySelector: () => ({ decode: () => Promise.resolve() }) })
+    // 有 logo、decode reject → 脚本仍 resolve（() => r() 吞 reject——render-check 惯用式）
+    await runScript({
+      querySelector: () => ({ decode: () => Promise.reject(new Error('坏图')) })
+    })
+    // 无 decode API 的老元素（i.decode 缺席）：立即 resolve
+    await runScript({ querySelector: () => ({}) })
   })
 })

@@ -77,6 +77,23 @@ describe('getChannel（按 settings.printer_channel 分发）', () => {
     expect(ch.printerName).toBe('前台驱动打印机')
   })
 
+  it('printer_channel=driver → 装配实验选项闭包（driver_dpi/driver_use_default_page_size 透传）', () => {
+    // 实验键设置值 → 闭包产出（getDriverOptions 为 private——按契约形状 unknown cast 断言）
+    const ch = getChannel({
+      printer_channel: 'driver',
+      printer_name: 'POS-58',
+      driver_dpi: 203,
+      driver_use_default_page_size: true
+    })
+    const getDriverOptions = (ch as unknown as { getDriverOptions: () => unknown }).getDriverOptions
+    expect(getDriverOptions()).toEqual({ driverDpi: 203, useDefaultPageSize: true })
+
+    // 缺省归一：两键缺席 → null/false（appSettingsToPrintSettings 透传的缺省形态）
+    const chDefault = getChannel({ printer_channel: 'driver', printer_name: 'POS-58' })
+    const getDefault = (chDefault as unknown as { getDriverOptions: () => unknown }).getDriverOptions
+    expect(getDefault()).toEqual({ driverDpi: null, useDefaultPageSize: false })
+  })
+
   it('printer_channel 缺省 → 默认 spooler（D5 主通道）', () => {
     const ch = getChannel({})
     expect(ch).toBeInstanceOf(SpoolerChannel)
