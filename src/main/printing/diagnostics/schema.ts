@@ -119,13 +119,19 @@ export interface PrintDiagnosticSnapshot {
       /** Microsoft-Windows-PrintService/Operational 日志是否启用 */
       operationalEnabled: boolean
     }
-    /** 每台打印机 DEVMODE 打印配置（printConfig 段） */
+    /** 每台打印机 DEVMODE 打印配置（printConfig 段；v2 四层 fallback 链采集） */
     printConfigs: Array<{
       printerName: string
       paperSize: string
       widthMicrons: number | null
       heightMicrons: number | null
       orientation: string
+      /**
+       * fallback 链层级来源（v2）：'printconfiguration' | 'printticketxml' |
+       * 'win32printerconfig' | 'devmode'。可选——v1 形状快照（旧 fixture/历史
+       * 报告）无此键，消费方按「无标注」容错读。
+       */
+      source?: string
     }>
   }
   /** app 侧合成段（T4：设置 + Electron 版本 + driver 通道实际选项 + 模板事实） */
@@ -140,11 +146,15 @@ export interface PrintDiagnosticSnapshot {
       templatePaperWidth: string
     }
     electronVersion: string
-    /** driver 通道实际使用的打印选项快照（页宽微米 / 零边距 / 打印背景） */
+    /** driver 通道实际使用的打印选项快照（页宽微米 / 零边距 / 打印背景 + v2 实验开关） */
     printOptions: {
       pageSizeMode: string
       marginsMode: string
       printBackground: boolean
+      /** v2 driver 实验：显式 DPI（Electron print options dpi 的标量来源；缺省=不发送） */
+      dpi?: number
+      /** v2 driver 实验：使用驱动默认页尺寸（与自定义 pageSize 互斥；缺省=false） */
+      usePrinterDefaultPageSize?: boolean
     }
     /** 默认模板事实（logo-measurement-race 等规则的比对输入） */
     templateFacts: {
@@ -163,7 +173,7 @@ export interface PrintDiagnosticSnapshot {
 
 // ══════════════ 发现（规则引擎输出） ══════════════
 
-/** 发现编码（15 个——一次定准，T5 按名实现规则） */
+/** 发现编码（17 个——一次定准，T5 按名实现规则；v2 增补末两码） */
 export type FindingCode =
   | 'spooler-stopped' // spooler 服务停止
   | 'jobs-stuck-error' // 队列错误任务滞留
@@ -180,6 +190,8 @@ export type FindingCode =
   | 'printer-offline-flag' // 打印机脱机标志被置位
   | 'queue-paused' // 队列暂停
   | 'printer-name-mismatch' // 设置的打印机名与系统实际不符
+  | 'driver-print-combo-known-issue' // v2：driver 通道已知坏组合（custom-microns + margins-none 命中 Electron GDI 静默打印问题群）
+  | 'printconfig-unavailable' // v2：printConfig fallback 链终值无宽高或段采集失败（缺数据≠健康，info 级降级）
 
 /** 严重度（critical 阻断打印 / high 高概率根因 / medium 辅助证据 / info 提示） */
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'info'
@@ -275,7 +287,7 @@ export type DiagnosticSectionName =
 
 /**
  * VERIFY 依赖映射（编译期保证——每条规则依赖的采集段）。
- * Record<FindingCode, ...> 强制 15 键齐全；DiagnosticSectionName[] 锁段名值域。
+ * Record<FindingCode, ...> 强制 17 键齐全；DiagnosticSectionName[] 锁段名值域。
  * T5 规则执行前按此校验快照段完备性；T3 某段采集失败时按此决定哪些规则降级。
  */
 export const RULE_DEPENDS_ON: Record<FindingCode, DiagnosticSectionName[]> = {
@@ -294,5 +306,11 @@ export const RULE_DEPENDS_ON: Record<FindingCode, DiagnosticSectionName[]> = {
   'logo-measurement-race': [],
   'printer-offline-flag': ['printers'],
   'queue-paused': ['printers'],
-  'printer-name-mismatch': ['printers']
+  'printer-name-mismatch': ['printers'],
+  // v2：组合前提全在 app 合成段（channel/pageSizeMode/marginsMode——非 PS 采集段，
+  // 空依赖合法，沿 logo-measurement-race 先例）
+  'driver-print-combo-known-issue': [],
+  // v2：自检双路径（errors.printConfig 存在 OR fallback 链终值无宽高）——段失败守卫
+  // 会抑制依赖段规则，故空依赖自检（缺数据≠健康）
+  'printconfig-unavailable': []
 }

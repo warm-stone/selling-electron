@@ -317,6 +317,19 @@ export interface AppSettings {
   tcp_port: number | null
   com_port: string | null
   auto_cut: boolean
+  /**
+   * driver 通道实验：显式 DPI（printer-diagnostics v2——Electron print options
+   * dpi Record 的标量来源，GDI 静默打印已知问题群 #31705/#50481/#39179 的
+   * workaround 之一）。KV 键 driver_dpi；null ≡ '' = 未设置走驱动缺省。
+   * 可选字段——DB 无行时 settings:get 不产出该键（旧消费方零感知）。
+   */
+  driver_dpi?: number | null
+  /**
+   * driver 通道实验：使用驱动默认页尺寸（Electron 44 usePrinterDefaultPageSize，
+   * 与自定义 pageSize 互斥——启用后不下发测量页宽高）。KV 键
+   * driver_use_default_page_size；缺省 false。可选字段语义同 driver_dpi。
+   */
+  driver_use_default_page_size?: boolean
 }
 
 // ══════════════ Logo（多 Logo 架构） ══════════════
