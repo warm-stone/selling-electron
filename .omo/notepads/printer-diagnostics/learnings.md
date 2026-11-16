@@ -368,3 +368,30 @@ ConvertTo-Json 序列化数字、控制台显示 Normal（CDXML 标签映射）�
 - fallback 链（PS 5.1 无提权）：Get-PrintConfiguration → PrintTicketXML 解析（MediaSizeWidth/Height μm）→ **Win32_PrinterConfiguration（PaperWidth/PaperLength 0.1mm——v3/热敏首选基本必中）** → HKCU\Printers\DevModes2\<打印机> / DevModePerUser（blob 可能是「打印机名」值名或同名子键默认值，两处都查）→ HKLM\…\Print\Printers\<name>\DefaultDevMode → PrinterPaperNames（仅名单）
 - Get-PrinterProperty 排除（文档明示需管理员）；Get-PrinterForm 未验证存在勿用
 - 现场待验证两点：① Win32_PrinterConfiguration 对 v4 虚拟机是否非空；② HKLM Print 键标准用户可读性
+
+## ★ opencode task 生命周期 bug 事故记录（2026-11-16，v2 全面暂停的根因）
+
+### Bug 定性（证据链闭合）
+opencode 本版本 `task()` 工具的生命周期管理缺陷：**返回状态与 subagent 实际执行脱钩**。
+- 假中止：返回 "Task aborted" 但执行继续（T4 第3次委派 17:49 返回 aborted，会话活跃至 17:58 并写盘）
+- 假完成：返回 "completed" 但会话仍在跑（T4 第2次会话活跃至 18:05:59 log exiting loop）
+- gate 报 "promptAsync skipped by gate: active" 是**正确判断**（会话真在跑）——错在 task() 此前的假状态导致我误判重派
+- v1 阶段同模式已现 4 次（T5×2/T3×1/Metis×1），当时误归因为"会话卡死"
+
+### 实际损害
+双会话竞写同一文件（17:49-17:58 重叠窗口）：17:57 schema+runner、18:00 test 43KB、18:03 runner 修复跳变（我实测 5 failed→37/37 之间被外部修改）。产物碰巧全绿但不可信。
+
+### 用户处置（已执行）
+- 全量回退：main reset --hard 到 8ec1820（v2 前基线）；9 个 v2 提交隔离在 v2-quarantine-backup 分支
+- 基线健康：typecheck 双绿 + 966/966（tcp flake 既有环境问题，第 6 次）
+- boulder 状态 paused + pause_reason 记录；计划 13 个 checkbox 全标 [~]
+- v2 计划文件保留（.omo/plans/printer-diagnostics-v2.md 未跟踪文件）
+
+### 污染面评估（供重启决策）
+仅 T4（adc58e2）是双会话竞写产物；T1/T2/T3/T5/T6/T7/T8 七个提交均为单会话完成且逐个验证过——quarantine 分支中它们可被单独 cherry-pick 恢复（git log v2-quarantine-backup 按任务对账）。但用户选择全量回退=不信任批次，重启时尊重该决定：从零重跑或在 opencode 修复后经用户批准再从隔离分支恢复。
+
+### 后续纪律（若继续用当前版本）
+1. task() 返回后不信任状态——session_info 确认活跃窗口停止再验证产物
+2. gate 拒绝=会话活着——等待而非换新会话重派
+3. 产物验证前 mtime 采样检测第二写手
+4. 大任务拆小、避免长会话撞超时假状态
