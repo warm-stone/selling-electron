@@ -328,6 +328,28 @@ describe('createDefaultDeps（生产装配）', () => {
     expect(typeof view.currentUserName).toBe('string')
   })
 
+  it('settingsGetter：v2 driver 实验键归一（dpi 十进制字符串→数字、空/脏→null；页尺寸开关 "1"→true）', () => {
+    const db = openDb()
+    const settingsRepo = createSettingsRepo(db)
+    const deps = createDefaultDeps(db, dir)
+
+    // 无行：缺省语义（null / false）
+    expect(deps.settingsGetter().driverDpi).toBeNull()
+    expect(deps.settingsGetter().useDefaultPageSize).toBe(false)
+
+    // 有效值
+    settingsRepo.setMany({ driver_dpi: '203', driver_use_default_page_size: '1' })
+    expect(deps.settingsGetter().driverDpi).toBe(203)
+    expect(deps.settingsGetter().useDefaultPageSize).toBe(true)
+
+    // 空串/脏值 → null（与 settings.ipc parseDriverDpi 同款语义）；'0' → false
+    settingsRepo.setMany({ driver_dpi: '', driver_use_default_page_size: '0' })
+    expect(deps.settingsGetter().driverDpi).toBeNull()
+    expect(deps.settingsGetter().useDefaultPageSize).toBe(false)
+    settingsRepo.setMany({ driver_dpi: 'abc' })
+    expect(deps.settingsGetter().driverDpi).toBeNull()
+  })
+
   it('printQueueBusy：第三参接线透传（生产由 main/index.ts 接 printing ipc 编排器），缺省恒 false + platform 为真实平台', () => {
     const db = openDb()
     // 未接线（测试/旁路装配）：缺省 false

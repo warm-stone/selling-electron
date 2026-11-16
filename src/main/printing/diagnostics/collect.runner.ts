@@ -98,11 +98,15 @@ export interface AppInfoSnapshotProvider {
   settings?: { printer_channel?: string | null; printer_name?: string | null } | null
   /** 默认模板纸宽（'58mm' / '80mm'；取不到为 null → ''） */
   templatePaperWidth?: string | null
-  /** driver 通道实际打印选项（缺省字段归一为默认值） */
+  /** driver 通道实际打印选项（缺省字段归一为默认值；v2 实验键条件透传） */
   printOptions?: {
     pageSizeMode?: string | null
     marginsMode?: string | null
     printBackground?: boolean | null
+    /** v2 driver 实验：显式 DPI（null/缺省 = 未设置——输出不携带 dpi 键） */
+    dpi?: number | null
+    /** v2 driver 实验：使用驱动默认页尺寸（true 时才携带键） */
+    usePrinterDefaultPageSize?: boolean | null
   } | null
   /** 默认模板事实（logo-measurement-race 等规则的比对输入） */
   templateFacts?: {
@@ -952,6 +956,9 @@ function composeAppSection(appInfo: AppInfoSnapshotProvider | undefined): PrintD
   const settings = asRecord(appInfo?.settings)
   const printOptions = asRecord(appInfo?.printOptions)
   const templateFacts = asRecord(appInfo?.templateFacts)
+  // v2 实验键观测（条件携带——未启用时物理不存在，报告可区分「未设置」与「设为缺省值」）
+  const dpi = asNumber(printOptions?.['dpi'])
+  const useDefaultPageSize = printOptions?.['usePrinterDefaultPageSize'] === true
   return {
     // settings 的 nullable 归一为 string（T1 learnings：归一责任在本任务）
     settings: {
@@ -963,7 +970,9 @@ function composeAppSection(appInfo: AppInfoSnapshotProvider | undefined): PrintD
     printOptions: {
       pageSizeMode: asString(printOptions?.['pageSizeMode']) ?? '',
       marginsMode: asString(printOptions?.['marginsMode']) ?? '',
-      printBackground: printOptions?.['printBackground'] === true
+      printBackground: printOptions?.['printBackground'] === true,
+      ...(dpi !== null ? { dpi } : {}),
+      ...(useDefaultPageSize ? { usePrinterDefaultPageSize: true } : {})
     },
     templateFacts: {
       hasLogo: templateFacts?.['hasLogo'] === true,

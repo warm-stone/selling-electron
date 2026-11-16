@@ -14,6 +14,14 @@ import type { RenderSnapshot } from './schema'
  * 纯只读测量：不 print、不改 driver.channel 生产路径、不干扰打印串行队列——
  * 与生产打印共享同一测量手法（scrollHeight/data: URL/懒 require 工厂），互不影响。
  *
+ * v2 修复（真机 Bug3 视口假阳性）：测量源 = **`.receipt-paper` 元素本身**
+ * （receipt-html.ts 的收据容器类名，inline style 锁定纸宽）——
+ * documentElement.scrollWidth 是 max(视口, 内容)：窄收据（内容 221px < 默认
+ * 800px 视口）时报视口地板值（真机 786 = 800 − 14 滚动条 @DPR1.25），被误判
+ * 「内容宽 786px vs 纸宽 221px 溢出」。元素级测量消除此类假阳性；无
+ * `.receipt-paper` 的 HTML（非收据文档）回退 documentElement 语义。隐藏窗口
+ * 显式 400×600（测量源已是元素本身，窗口尺寸只为行为稳定可复现）。
+ *
  * DI 模式（同 driver.channel 的 createWindowFn）：fake 窗口注入，单测免 Electron
  * （G11/Linux 可测）。
  */
@@ -48,7 +56,8 @@ const RENDER_CHECK_TIMEOUT_MS = 15_000
  */
 const defaultCreateWindowFn = (): RenderCheckWindow => {
   const { BrowserWindow } = require('electron') as typeof import('electron')
-  const win = new BrowserWindow({ show: false })
+  // v2（Bug3）：显式尺寸——默认 800 宽视口曾致 documentElement 地板值 786 假溢出（详见模块头）
+  const win = new BrowserWindow({ show: false, width: 400, height: 600 })
   return {
     webContents: {
       loadURL: (url: string) => win.webContents.loadURL(url),
@@ -66,23 +75,28 @@ function errorDetail(err: unknown): string {
 /**
  * 第一次测量脚本（立即——不等待任何图片解码，捕捉测量竞态的「早」侧）。
  * 单次 JS 调用取齐四值（driver.channel 同款「一次取齐」模式）：
- * - h/w：documentElement 的 scrollHeight/scrollWidth（布局值，非 transform 后视觉值）
+ * - h/w：**`.receipt-paper` 元素**的 scrollHeight(+offsetTop 补容器顶偏移)/
+ *   scrollWidth（v2 Bug3 修复——元素 overflow:hidden 下 scrollHeight 仍报内部
+ *   内容尺寸；documentElement 是 max(视口,内容)，窄收据下报视口地板值造成
+ *   786 假溢出）；无该元素（非收据 HTML）回退 documentElement 语义；
  * - dpr：devicePixelRatio
  * - img：img.receipt-logo 存在且带 src（决定是否做第二次测量）
  * 返回值必须 JSON.stringify 后由调用方手动 parse（executeJavaScript 结构化传递的
  * 仓库惯例——driver.channel:132-141 同款）。
  */
 const FIRST_MEASURE_SCRIPT =
-  "JSON.stringify({h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth, dpr: window.devicePixelRatio, img: (()=>{const i=document.querySelector('img.receipt-logo'); return i ? i.getAttribute('src') !== null : false})()})"
+  "JSON.stringify((() => { const el = document.querySelector('.receipt-paper'); const r = el ? { h: el.scrollHeight + el.offsetTop, w: el.scrollWidth } : { h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth }; r.dpr = window.devicePixelRatio; r.img = (()=>{ const i=document.querySelector('img.receipt-logo'); return i ? i.getAttribute('src') !== null : false })(); return r; })())"
 
 /**
  * 第二次测量脚本（仅当第一次测得 img 存在时执行）：等 logo decode 完成后复测高度。
+ * - 高度测量源同第一次（v2）：`.receipt-paper` 元素 scrollHeight+offsetTop，
+ *   无该元素回退 documentElement——仅测 h；
  * - decode 成功/失败都 resolve（竞态证据关心的是「解码安定后」的布局，不是图片本身好坏）；
  * - 5s 兜底 setTimeout（decode 永不定局时仍能拿到一个「晚」侧值，resolve(false) 不影响高度读取）；
  * - Promise.then 后才 stringify 高度（保证测量发生在 decode 定局之后）。
  */
 const SECOND_MEASURE_SCRIPT =
-  "new Promise(resolve => { const i = document.querySelector('img.receipt-logo'); if (i && i.decode) { i.decode().then(() => resolve(true), () => resolve(true)); setTimeout(() => resolve(false), 5000); } else { resolve(false); } }).then(() => JSON.stringify({h: document.documentElement.scrollHeight}))"
+  "new Promise(resolve => { const i = document.querySelector('img.receipt-logo'); if (i && i.decode) { i.decode().then(() => resolve(true), () => resolve(true)); setTimeout(() => resolve(false), 5000); } else { resolve(false); } }).then(() => JSON.stringify({h: (() => { const el = document.querySelector('.receipt-paper'); return el ? el.scrollHeight + el.offsetTop : document.documentElement.scrollHeight })()}))"
 
 /**
  * 收据 HTML → 隐藏窗口两次测量 → RenderSnapshot（核心流程，可注入窗口工厂单测）：

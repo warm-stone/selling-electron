@@ -77,7 +77,7 @@ describe('报告导出器（printer-diagnostics T8）', () => {
       内容宽 307px vs 纸宽 307px · DPR 1
 
       【事件日志摘录】
-      Admin 通道 0 条（近 7 天）· Application 1000 崩溃 0 条
+      Admin 通道 0 条（近 7 天）· WER 崩溃（Application Error 1000）0 条
       最近: （无）
 
       ════════ 附录：机器可读数据 ════════

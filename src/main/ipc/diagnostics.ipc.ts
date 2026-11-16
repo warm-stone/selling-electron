@@ -165,11 +165,19 @@ export function createDefaultDeps(
   /** 当前打印设置视图（settingsGetter dep 与 collect appInfo 的共同原料，每次现读） */
   const currentSettingsView = () => {
     const kv = settingsRepo.getAll()
+    // v2 driver 实验键（settings.ipc 同款 KV 归一语义：''/脏值 → null，'1' → true）
+    const dpiRaw = kv['driver_dpi']
+    const driverDpi =
+      dpiRaw !== undefined && dpiRaw !== '' && /^\d+$/.test(dpiRaw)
+        ? Number.parseInt(dpiRaw, 10)
+        : null
     return {
       channel: kv['printer_channel'] ?? '',
       printerName: kv['printer_name'] ?? '',
       templatePaperWidth: templateRepo.getDefault().paper_width,
-      currentUserName: process.env['USERNAME'] ?? process.env['USER'] ?? ''
+      currentUserName: process.env['USERNAME'] ?? process.env['USER'] ?? '',
+      driverDpi,
+      useDefaultPageSize: kv['driver_use_default_page_size'] === '1'
     }
   }
 
@@ -204,9 +212,17 @@ export function createDefaultDeps(
             printer_name: view.printerName !== '' ? view.printerName : null
           },
           templatePaperWidth: view.templatePaperWidth,
-          // driver 通道实际打印选项（driver.channel print 调用的事实快照：自定义
-          // 微米页宽 + 无边距 + 打印背景——R10/R11 语义输入）
-          printOptions: { pageSizeMode: 'custom-microns', marginsMode: 'none', printBackground: true },
+          // driver 通道实际打印选项（driver.channel print 调用的事实快照——R10/R11/R16
+          // 语义输入）：v2 实验键启用时如实观测——usePrinterDefaultPageSize=true 则
+          // pageSizeMode 报 'printer-default'（driver.channel 此时物理不发 pageSize，
+          // R16 坏组合前提随之消失）；dpi 设置值随报告留档（spike C 实验对照）
+          printOptions: {
+            pageSizeMode: view.useDefaultPageSize ? 'printer-default' : 'custom-microns',
+            marginsMode: 'none',
+            printBackground: true,
+            ...(view.driverDpi !== null ? { dpi: view.driverDpi } : {}),
+            ...(view.useDefaultPageSize ? { usePrinterDefaultPageSize: true } : {})
+          },
           templateFacts: {
             hasLogo: collectSectionLogoIds(template).length > 0,
             // 实际像素需解码 PNG 方可知——无规则消费（R12 只用 renderSnapshot.heightDelta），

@@ -15,6 +15,11 @@ import {
  *  4. 水平溢出：scrollWidth 超纸宽 +1px 容差 → horizontalOverflow=true；
  *  附：destroy 幂等/抛异常被吞、loadURL/executeJavaScript 基础设施失败
  *  才 reject（测量差异永远是数据不是错误）。
+ * v2 追加（Bug3 视口假阳性修复的测量源回归——documentElement → .receipt-paper 元素）：
+ *  5. 真机假阳性对照：元素级 w=221（真机收据实宽）→ 不误报溢出（旧
+ *     documentElement 语义同场景报 786=800 视口−14 滚动条@DPR1.25 地板值 → 假阳性）；
+ *  6. 真阳性防回归：w=330 > 307+1 → 换测量源后溢出判定照常命中；
+ *  7. 第二次测量脚本同步换源 + 元素缺失回退 documentElement，不 crash。
  */
 
 interface FakeCalls {
@@ -158,6 +163,77 @@ describe('runRenderCheck', () => {
     })
     const edge = await runRenderCheck(RECEIPT_HTML_NO_LOGO, 307, { createWindowFn: () => winEdge })
     expect(edge.horizontalOverflow).toBe(false)
+  })
+
+  // ── v2 Bug3（视口假阳性）：测量源 documentElement → .receipt-paper 元素 ──
+
+  it('v2 Bug3 假阳性对照：真机数据（元素级 w=221 = 纸宽 221）→ 不误报水平溢出', async () => {
+    const { win, calls } = makeFakeWindow({
+      firstJson: JSON.stringify({ h: 538, w: 221, dpr: 1.25, img: false })
+    })
+
+    const snap = await runRenderCheck(RECEIPT_HTML_NO_LOGO, 221, { createWindowFn: () => win })
+
+    // 真机 2026-11-15 诊断报告：收据实宽 221px、内容高 538px、Δ0——修复后元素级
+    // 测量语义 w=221 = 纸宽 → 不溢出。对照：修复前 documentElement.scrollWidth
+    // 报 786（max(视口,内容) 的视口地板值：默认 800px 视口 − 14px 滚动条 @DPR1.25），
+    // 786 > 221+1 → 「内容宽 786px vs 纸宽 221px（溢出!）」假阳性。
+    expect(snap).toEqual({
+      immediatelyMeasured: 538,
+      afterImgDecode: 538,
+      heightDelta: 0,
+      scrollWidth: 221,
+      paperWidthPx: 221,
+      horizontalOverflow: false,
+      dpr: 1.25
+    })
+    // 测量脚本文本锚点：元素选择器优先 + documentElement 回退双路径并存于同一段 JS
+    expect(calls.executed[0]).toContain(".receipt-paper")
+    expect(calls.executed[0]).toContain('documentElement')
+    expect(calls.executed[0]).toContain('offsetTop')
+  })
+
+  it('v2 真阳性防回归：元素级 w=330 仍超纸宽 307+1 容差 → horizontalOverflow=true 照常命中（换测量源不放宽判定）', async () => {
+    const { win } = makeFakeWindow({
+      firstJson: JSON.stringify({ h: 800, w: 330, dpr: 1, img: false })
+    })
+
+    const snap = await runRenderCheck(RECEIPT_HTML_NO_LOGO, 307, { createWindowFn: () => win })
+
+    expect(snap.horizontalOverflow).toBe(true)
+    expect(snap.scrollWidth).toBe(330)
+    expect(snap.paperWidthPx).toBe(307)
+  })
+
+  it('v2 第二次测量脚本同步换源：decode 后复测的 h 也取 .receipt-paper（含 documentElement 回退）', async () => {
+    const { win, calls } = makeFakeWindow({
+      firstJson: JSON.stringify({ h: 1842, w: 307, dpr: 1, img: true }),
+      secondJson: JSON.stringify({ h: 2107 })
+    })
+
+    const snap = await runRenderCheck(RECEIPT_HTML_WITH_LOGO, 307, { createWindowFn: () => win })
+
+    expect(snap.heightDelta).toBe(265)
+    expect(calls.executed).toHaveLength(2)
+    expect(calls.executed[1]).toContain('.receipt-paper')
+    expect(calls.executed[1]).toContain('documentElement')
+  })
+
+  it('v2 元素缺失回退：无 .receipt-paper 的 HTML → 回退 documentElement 语义值照常流经校验/组装，不 crash', async () => {
+    // fake 单测不执行真 JS——回退分支以「fake 返回 documentElement 语义产物」模拟
+    const { win } = makeFakeWindow({
+      firstJson: JSON.stringify({ h: 600, w: 300, dpr: 1, img: false })
+    })
+
+    const snap = await runRenderCheck(
+      '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>no receipt here</body></html>',
+      307,
+      { createWindowFn: () => win }
+    )
+
+    expect(snap.immediatelyMeasured).toBe(600)
+    expect(snap.scrollWidth).toBe(300)
+    expect(snap.horizontalOverflow).toBe(false)
   })
 
   it('destroy 抛异常（窗口已销毁类错误）→ settle 吞掉、结果照常上报；destroy 恰调用一次', async () => {

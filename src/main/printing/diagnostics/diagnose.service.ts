@@ -56,6 +56,10 @@ export interface DiagnoseServiceDeps {
     printerName: string
     templatePaperWidth: string
     currentUserName: string
+    /** v2 driver 实验键观测（collect appInfo.printOptions 的原料；fake 可缺省） */
+    driverDpi?: number | null
+    /** v2 driver 实验键观测（同上） */
+    useDefaultPageSize?: boolean
   }
   /** 打印串行队列 busy 查询（true 时 L1 跳过 / repair 拒绝） */
   printQueueBusy: () => boolean

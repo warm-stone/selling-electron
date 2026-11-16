@@ -151,7 +151,7 @@ export function buildReportTxt(report: DiagnosticReport): string {
   // ── 事件日志摘录 ──
   const { adminEvents, app1000Events } = snapshot.system.eventLog
   lines.push('【事件日志摘录】')
-  lines.push(`Admin 通道 ${adminEvents.length} 条（近 7 天）· Application 1000 崩溃 ${app1000Events.length} 条`)
+  lines.push(`Admin 通道 ${adminEvents.length} 条（近 7 天）· WER 崩溃（Application Error 1000）${app1000Events.length} 条`)
   const recent = adminEvents.slice(0, 3).map((e) => `${e.time} #${e.id}`)
   lines.push(`最近: ${recent.length > 0 ? recent.join(' · ') : '（无）'}`)
   lines.push('')

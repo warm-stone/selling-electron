@@ -521,6 +521,56 @@ describe('runCollect（打印诊断采集执行器）', () => {
       expect(snapshot.app.printOptions).toEqual({ pageSizeMode: '', marginsMode: '', printBackground: false })
       expect(snapshot.app.templateFacts).toEqual({ hasLogo: false, logoPx: null, cssPadding: '' })
     })
+
+    it('v2 实验键观测：dpi/usePrinterDefaultPageSize 条件透传（未启用时物理不存在键）', async () => {
+      // 启用态：dpi=203 + usePrinterDefaultPageSize=true（pageSizeMode 由装配层如实报 printer-default）
+      const on = await collect(
+        { kind: 'ok', stdout: buildStdout() },
+        {
+          appInfo: {
+            ...APP_INFO,
+            printOptions: {
+              pageSizeMode: 'printer-default',
+              marginsMode: 'none',
+              printBackground: true,
+              dpi: 203,
+              usePrinterDefaultPageSize: true
+            }
+          }
+        }
+      )
+      expect(on.snapshot.app.printOptions).toEqual({
+        pageSizeMode: 'printer-default',
+        marginsMode: 'none',
+        printBackground: true,
+        dpi: 203,
+        usePrinterDefaultPageSize: true
+      })
+
+      // 缺省态：null/false/缺省 → 键物理不存在（报告可区分「未设置」；v1 快照形状不变）
+      const off = await collect(
+        { kind: 'ok', stdout: buildStdout() },
+        {
+          appInfo: {
+            ...APP_INFO,
+            printOptions: {
+              pageSizeMode: 'custom-microns',
+              marginsMode: 'none',
+              printBackground: true,
+              dpi: null,
+              usePrinterDefaultPageSize: false
+            }
+          }
+        }
+      )
+      expect(off.snapshot.app.printOptions).toEqual({
+        pageSizeMode: 'custom-microns',
+        marginsMode: 'none',
+        printBackground: true
+      })
+      expect('dpi' in off.snapshot.app.printOptions).toBe(false)
+      expect('usePrinterDefaultPageSize' in off.snapshot.app.printOptions).toBe(false)
+    })
   })
 
   // ══════════════ v2：状态映射（Bug1 位掩码 + WMI 兜底链 + 错误标签） ══════════════
