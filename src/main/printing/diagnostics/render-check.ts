@@ -1,3 +1,4 @@
+import { FIT_TO_WIDTH_BODY } from '../driver/receipt-html'
 import type { RenderSnapshot } from './schema'
 
 /**
@@ -21,6 +22,13 @@ import type { RenderSnapshot } from './schema'
  * 「内容宽 786px vs 纸宽 221px 溢出」。元素级测量消除此类假阳性；无
  * `.receipt-paper` 的 HTML（非收据文档）回退 documentElement 语义。隐藏窗口
  * 显式 400×600（测量源已是元素本身，窗口尺寸只为行为稳定可复现）。
+ *
+ * **测量前先跑生产同款版面自适应**（FIT_TO_WIDTH_BODY，与 driver.channel 共用同一段
+ * 脚本）：诊断必须量「真机会打出来的那个版面」，否则报的溢出与真机裁切对不上。
+ * 自适应后 horizontalOverflow 仍有意义——它从「常态误报」变成「回缩 8 轮都救不回来」
+ * 的告警。同时量一組字体度量（fontProbe）：右截断的第二层根因是字体回退（半角
+ * 推进量从 0.5em 漂移到 0.594em），光看 scrollWidth 只能知道溢出了，这四个数才能
+ * 证明为什么溢出。
  *
  * DI 模式（同 driver.channel 的 createWindowFn）：fake 窗口注入，单测免 Electron
  * （G11/Linux 可测）。
@@ -73,19 +81,49 @@ function errorDetail(err: unknown): string {
 }
 
 /**
+ * 字体度量探针（页面脚本片段——返回对象字面量的表达式，供 FIRST_MEASURE_SCRIPT 内联）。
+ * 在 .receipt-paper 内挂一个 position:absolute 的隐藏 span 量三类字符的推进量，量完即摘
+ * （absolute + 摘除 → 不污染 h/w 测量，也不留在 DOM 里影响第二次测量）。
+ * 用重复串取均值而不是量单字符：单字宽会被亚像素取整放大误差。
+ */
+const FONT_PROBE_BODY = `(() => {
+  const host = document.querySelector('.receipt-paper');
+  if (!host) return null;
+  const measure = (text) => {
+    const s = document.createElement('span');
+    s.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;white-space:pre';
+    s.textContent = text;
+    host.appendChild(s);
+    const w = s.getBoundingClientRect().width;
+    s.remove();
+    return w;
+  };
+  const api = document.fonts;
+  return {
+    digitPx: measure('0'.repeat(48)) / 48,
+    spacePx: measure(' '.repeat(48)) / 48,
+    cjkPx: measure('国'.repeat(24)) / 24,
+    fontSizePx: parseFloat(getComputedStyle(host).fontSize),
+    availableFonts: ['NSimSun', 'SimSun'].filter((f) => !!(api && api.check && api.check('1em "' + f + '"')))
+  };
+})()`
+
+/**
  * 第一次测量脚本（立即——不等待任何图片解码，捕捉测量竞态的「早」侧）。
- * 单次 JS 调用取齐四值（driver.channel 同款「一次取齐」模式）：
+ * 单次 JS 调用取齐五值（driver.channel 同款「一次取齐」模式），执行顺序有意义：
+ * - **先跑 FIT_TO_WIDTH_BODY**（与生产打印同一段）——后面的 h/w 必须是回缩后的值；
  * - h/w：**`.receipt-paper` 元素**的 scrollHeight(+offsetTop 补容器顶偏移)/
  *   scrollWidth（v2 Bug3 修复——元素 overflow:hidden 下 scrollHeight 仍报内部
  *   内容尺寸；documentElement 是 max(视口,内容)，窄收据下报视口地板值造成
  *   786 假溢出）；无该元素（非收据 HTML）回退 documentElement 语义；
  * - dpr：devicePixelRatio
  * - img：img.receipt-logo 存在且带 src（决定是否做第二次测量）
+ * - font：字体度量探针（FONT_PROBE_BODY）——**必须在 h/w 取值之后跑**（它会临时
+ *   插入 span；虽然是 absolute 且量完即摘，但不得参与高度测量）
  * 返回值必须 JSON.stringify 后由调用方手动 parse（executeJavaScript 结构化传递的
- * 仓库惯例——driver.channel:132-141 同款）。
+ * 仓库惯例——driver.channel 同款）。
  */
-const FIRST_MEASURE_SCRIPT =
-  "JSON.stringify((() => { const el = document.querySelector('.receipt-paper'); const r = el ? { h: el.scrollHeight + el.offsetTop, w: el.scrollWidth } : { h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth }; r.dpr = window.devicePixelRatio; r.img = (()=>{ const i=document.querySelector('img.receipt-logo'); return i ? i.getAttribute('src') !== null : false })(); return r; })())"
+const FIRST_MEASURE_SCRIPT = `JSON.stringify((() => { ${FIT_TO_WIDTH_BODY} const el = document.querySelector('.receipt-paper'); const r = el ? { h: el.scrollHeight + el.offsetTop, w: el.scrollWidth } : { h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth }; r.dpr = window.devicePixelRatio; r.img = (()=>{ const i=document.querySelector('img.receipt-logo'); return i ? i.getAttribute('src') !== null : false })(); r.font = ${FONT_PROBE_BODY}; return r; })())`
 
 /**
  * 第二次测量脚本（仅当第一次测得 img 存在时执行）：等 logo decode 完成后复测高度。
@@ -97,6 +135,26 @@ const FIRST_MEASURE_SCRIPT =
  */
 const SECOND_MEASURE_SCRIPT =
   "new Promise(resolve => { const i = document.querySelector('img.receipt-logo'); if (i && i.decode) { i.decode().then(() => resolve(true), () => resolve(true)); setTimeout(() => resolve(false), 5000); } else { resolve(false); } }).then(() => JSON.stringify({h: (() => { const el = document.querySelector('.receipt-paper'); return el ? el.scrollHeight + el.offsetTop : document.documentElement.scrollHeight })()}))"
+
+/**
+ * fontProbe 字段收窄（页面脚本产物不可信——形状不合即 null，不让脏值流进报告）。
+ * 探针本身是取证字段，拿不到就当没拿到：不报错、不猜测、不填默认值。
+ */
+function asFontProbe(v: unknown): RenderSnapshot['fontProbe'] {
+  if (typeof v !== 'object' || v === null) return null
+  const o = v as Record<string, unknown>
+  const num = (x: unknown): number | null =>
+    typeof x === 'number' && Number.isFinite(x) ? x : null
+  const digitPx = num(o.digitPx)
+  const spacePx = num(o.spacePx)
+  const cjkPx = num(o.cjkPx)
+  const fontSizePx = num(o.fontSizePx)
+  if (digitPx === null || spacePx === null || cjkPx === null || fontSizePx === null) return null
+  const availableFonts = Array.isArray(o.availableFonts)
+    ? o.availableFonts.filter((f): f is string => typeof f === 'string')
+    : []
+  return { digitPx, spacePx, cjkPx, fontSizePx, availableFonts }
+}
 
 /**
  * 收据 HTML → 隐藏窗口两次测量 → RenderSnapshot（核心流程，可注入窗口工厂单测）：
@@ -156,9 +214,15 @@ export function runRenderCheck(
         settle(new Error(`render-check 第一次测量脚本执行失败：${errorDetail(err)}`))
         return
       }
-      let first: { h?: unknown; w?: unknown; dpr?: unknown; img?: unknown }
+      let first: { h?: unknown; w?: unknown; dpr?: unknown; img?: unknown; font?: unknown }
       try {
-        first = JSON.parse(String(firstRaw)) as { h?: unknown; w?: unknown; dpr?: unknown; img?: unknown }
+        first = JSON.parse(String(firstRaw)) as {
+          h?: unknown
+          w?: unknown
+          dpr?: unknown
+          img?: unknown
+          font?: unknown
+        }
       } catch {
         settle(new Error('render-check 第一次测量结果不可解析（非 JSON）'))
         return
@@ -213,7 +277,8 @@ export function runRenderCheck(
         paperWidthPx,
         // 1px 容差：舍入/边框亚像素不误报水平溢出
         horizontalOverflow: scrollWidth > paperWidthPx + 1,
-        dpr
+        dpr,
+        fontProbe: asFontProbe(first.font)
       })
     })()
   })

@@ -175,7 +175,11 @@ describe('analyzeSnapshot 表驱动（8 组黄金样本 → 命中/不命中矩�
     expect(combo.evidence).toContain('dpr=1.25')
     expect(combo.description).toContain('203')
     expect(combo.description).toContain('A4')
-    expect(combo.description).toContain('spooler')
+    // DL-5801PW 命中云固件名单 → workaround ③「反向切回 spooler」此路不通：
+    // RAW 通道连中文都打不出（R9 结论），写在建议里会把用户推回更糟的状态
+    expect(combo.description).not.toContain('spooler')
+    expect(combo.description).toContain('云固件名单（DL-5801PW）')
+    expect(combo.description).toContain('此路不通')
     // R17 细节：info / pending / 空动作 + evidence 指向链终值
     const unavailable = findFinding(findings, 'printconfig-unavailable')
     expect(unavailable.severity).toBe('info')
@@ -436,6 +440,87 @@ describe('规则专项（合成样本锁定 fixture 未覆盖的规则分支）'
     expect(f.suggestedActions).toEqual([])
     // 纸宽偏差同时超容差 → driver-page-size-ignored 也命中
     expect(codesOf(analyzeSnapshot(snap))).toContain('driver-page-size-ignored')
+  })
+
+  // ── v3 R10/R11 命中基准换轨（真机 20261117 假阳性修复） ──
+
+  it('基准换轨：真机 20261117（DL-5801PW 驱动页宽 48000 = 58mm 纸可打印宽）→ R10/R11 均不误报', () => {
+    // 旧基准（纸张物理宽 58000）下这两条永远命中：|48000-58000|=10000 > 1000 容差、
+    // 48000 < 58000-4000。新基准是**应用下发页宽**（RECEIPT_PRINT_GEOMETRY['58mm'] =
+    // 48000）——我们下发的正是 48000，版面也正是 48mm，无偏差可言。
+    const snap: PrintDiagnosticSnapshot = {
+      ...realMachine20261115,
+      system: {
+        ...realMachine20261115.system,
+        printConfigs: realMachine20261115.system.printConfigs.map((c) =>
+          c.printerName === 'DL-5801PW'
+            ? {
+                ...c,
+                paperSize: 'DL58Paper',
+                widthMicrons: 48000,
+                heightMicrons: 297000,
+                source: 'win32printerconfig'
+              }
+            : c
+        )
+      }
+    }
+    const codes = codesOf(analyzeSnapshot(snap))
+    expect(codes).not.toContain('driver-page-size-ignored')
+    expect(codes).not.toContain('printable-area-clip')
+    // 页宽可读 → R17 缺数据降级提示同时消失（不是拿 R17 换 R10/R11 的沉默）
+    expect(codes).not.toContain('printconfig-unavailable')
+    // 也不是把 driver 通道整体静音：R16 坑组合规则照常命中
+    expect(codes).toContain('driver-print-combo-known-issue')
+  })
+
+  it('三个宽度全部点名：R10/R11 的 evidence 与 description 同时标注驱动实际页宽、应用下发页宽、纸张规格', () => {
+    // 80mm 模板（应用下发页宽 72000 = 可打印宽）+ 驱动实际 58000 + 纸张规格 80mm
+    const snap: PrintDiagnosticSnapshot = {
+      ...symptom2DriverLayout,
+      system: {
+        ...symptom2DriverLayout.system,
+        printConfigs: [
+          {
+            printerName: 'POS-80 Printer',
+            paperSize: 'XP58Paper',
+            widthMicrons: 58000,
+            heightMicrons: null,
+            orientation: 'Portrait'
+          }
+        ]
+      }
+    }
+    const findings = analyzeSnapshot(snap)
+    for (const code of ['driver-page-size-ignored', 'printable-area-clip'] as const) {
+      const f = findFinding(findings, code)
+      // 旧文案只写「模板宽」，用户分不清哪个是纸、哪个是驱动、哪个是我们下发的
+      for (const text of [f.evidence, f.description]) {
+        expect(text).toContain('58.0mm')
+        expect(text).toContain('72.0mm')
+      }
+      expect(f.evidence).toContain('80mm=80.0mm')
+      expect(f.description).toContain('80mm=80.0mm')
+    }
+  })
+
+  it('云固件机型不给「切回 spooler」建议：R10 只剩重装驱动引导 + 文案点名不要切回系统打印机', () => {
+    const snap: PrintDiagnosticSnapshot = {
+      ...realMachine20261115,
+      system: {
+        ...realMachine20261115.system,
+        // 驱动实际页宽 72000 ≠ 58mm 纸的应用下发页宽 48000（偏差 24000 > 1000 容差）
+        printConfigs: realMachine20261115.system.printConfigs.map((c) =>
+          c.printerName === 'DL-5801PW'
+            ? { ...c, paperSize: 'A4', widthMicrons: 72000, heightMicrons: 297000, source: 'devmode' }
+            : c
+        )
+      }
+    }
+    const f = findFinding(analyzeSnapshot(snap), 'driver-page-size-ignored')
+    expect(f.suggestedActions).toEqual(['REINSTALL_DRIVER_GUIDE'])
+    expect(f.description).toContain('不要切回系统打印机')
+    expect(f.description).toContain('云固件名单（DL-5801PW）')
   })
 
   // ── v2 R16 driver-print-combo-known-issue 专项 ──

@@ -17,7 +17,7 @@ import { buildRepairActionCatalog } from '../printing/diagnostics/repair-script'
 import { runRepairAction } from '../printing/diagnostics/repair.runner'
 import { runRenderCheck } from '../printing/diagnostics/render-check'
 import type { DiagnosticReport, RepairActionId } from '../printing/diagnostics/schema'
-import { generateReceiptHtml } from '../printing/driver/receipt-html'
+import { generateReceiptHtml, RECEIPT_PRINT_GEOMETRY } from '../printing/driver/receipt-html'
 import { collectSectionLogoIds, parseTemplateRow } from '../printing/print.service'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
 import type { ReceiptVars } from '../../shared/receipt/template-schema'
@@ -124,9 +124,6 @@ export function parseExportRequest(raw: unknown): DiagnosticReport {
 
 // ══════════════ 生产装配（createDefaultDeps） ══════════════
 
-/** 纸宽 → px（96dpi 圆整；与 receipt-html / ReceiptPreview 几何同源——PAPER_WIDTH_PX 未导出，本地同值） */
-const PAPER_WIDTH_PX: Record<string, number> = { '58mm': 221, '80mm': 307 }
-
 /** render-check 样本数据（1 个样例商品行——内容只服务布局测量，不落任何业务数据） */
 const SAMPLE_RECEIPT_DATA: SaleReceiptData = {
   items: [{ name: '诊断样本商品', quantity: '1', unitPrice: '1.00', subtotal: '1.00' }]
@@ -228,8 +225,8 @@ export function createDefaultDeps(
             // 实际像素需解码 PNG 方可知——无规则消费（R12 只用 renderSnapshot.heightDelta），
             // 诚实置 null（真机报告由 render-check 提供实测布局）
             logoPx: null,
-            // receipt-html RECEIPT_CSS .receipt-paper 的 padding（同源未导出，本地同值）
-            cssPadding: '12px 9px'
+            // receipt-html 的 .receipt-paper padding（同一几何对象取值，不再本地复制常量）
+            cssPadding: RECEIPT_PRINT_GEOMETRY[template.paperWidth].cssPadding
           },
           currentUserName: view.currentUserName
         }
@@ -277,7 +274,7 @@ export function createDefaultDeps(
         }
         return {
           html: generateReceiptHtml(template, SAMPLE_RECEIPT_DATA, vars, logoBuffers),
-          paperWidthPx: PAPER_WIDTH_PX[template.paperWidth] ?? PAPER_WIDTH_PX['80mm']
+          paperWidthPx: RECEIPT_PRINT_GEOMETRY[template.paperWidth].pageWidthPx
         }
       } catch {
         return null

@@ -143,8 +143,15 @@ export function buildReportTxt(report: DiagnosticReport): string {
     lines.push('【渲染快照】')
     lines.push(`立即测量 ${rs.immediatelyMeasured}px · 解码后 ${rs.afterImgDecode}px · Δ${rs.heightDelta}px`)
     lines.push(
-      `内容宽 ${rs.scrollWidth}px vs 纸宽 ${rs.paperWidthPx}px${rs.horizontalOverflow ? '（溢出!）' : ''} · DPR ${rs.dpr}`
+      `内容宽 ${rs.scrollWidth}px vs 页面宽 ${rs.paperWidthPx}px${rs.horizontalOverflow ? '（溢出!）' : ''} · DPR ${rs.dpr}`
     )
+    // 字体度量探针（取证字段——右截断的第二层根因是字体回退，光看溢出不知道为何溢出）
+    const fp = rs.fontProbe
+    if (fp) {
+      lines.push(
+        `字体度量 半角数字 ${fp.digitPx.toFixed(3)}px / 半角空格 ${fp.spacePx.toFixed(3)}px / 全角汉字 ${fp.cjkPx.toFixed(3)}px · 字号 ${fp.fontSizePx.toFixed(3)}px（等宽 CJK 字体下应满足 全角=2×半角=字号） · 可用字体 ${fp.availableFonts.length > 0 ? fp.availableFonts.join('+') : '无（NSimSun/SimSun 都不在，已回退 monospace）'}`
+      )
+    }
     lines.push('')
   }
 

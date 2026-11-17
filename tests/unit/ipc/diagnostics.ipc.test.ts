@@ -428,14 +428,15 @@ describe('createDefaultDeps（生产装配）', () => {
     expect(repairCalls).toEqual(['CANCEL_ERROR_JOBS'])
   })
 
-  it('buildHtml：默认模板（seed 80mm）+ 样本数据 → 完整收据 HTML + paperWidthPx=307', () => {
+  it('buildHtml：默认模板（seed 80mm）+ 样本数据 → 完整收据 HTML + paperWidthPx=272（可打印宽 72mm）', () => {
     const db = openDb()
     const deps = createDefaultDeps(db, dir)
     const built = deps.buildHtml()
     expect(built).not.toBeNull()
-    expect(built!.paperWidthPx).toBe(307)
+    expect(built!.paperWidthPx).toBe(272)
     expect(built!.html).toContain('<!DOCTYPE html>')
     expect(built!.html).toContain('data-paper-width="80mm"')
+    expect(built!.html).toContain('data-page-width-microns="72000"')
     expect(built!.html).toContain('诊断样本商品')
     expect(built!.html).not.toContain('base64,') // 无 logo → 无 dataURL 图片（CSS 类定义本身不算）
   })

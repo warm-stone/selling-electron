@@ -73,7 +73,8 @@ const RENDER_SNAPSHOT: RenderSnapshot = {
   scrollWidth: 307,
   paperWidthPx: 307,
   horizontalOverflow: false,
-  dpr: 1
+  dpr: 1,
+  fontProbe: null
 }
 
 interface HarnessOptions {

@@ -149,7 +149,9 @@ describe('printer-diagnostics fixtures（黄金样本）', () => {
       scrollWidth: 221,
       paperWidthPx: 221,
       horizontalOverflow: false,
-      dpr: 1.25
+      dpr: 1.25,
+      // 该报告早于字体度量探针（v3），取证字段诚实置 null——不回填推测值
+      fontProbe: null
     })
     // 症状 2 现场（R16 坏组合证据源）：driver + custom-microns + margins-none + DPR 1.25
     expect(snap.app.settings).toEqual({ channel: 'driver', printerName: 'DL-5801PW', templatePaperWidth: '58mm' })

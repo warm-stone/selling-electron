@@ -42,6 +42,24 @@ export interface RenderSnapshot {
   paperWidthPx: number
   horizontalOverflow: boolean
   dpr: number
+  /**
+   * 字体度量探针（真机 20261117 右截断第二层根因的取证字段）：把「半角推进量
+   * = 0.5em」从假设变成实测。scrollWidth/paperWidthPx 只能告诟你「溢出了」，
+   * 这四个数才能告诟你「为什么」——digitPx ≠ fontSizePx/2 即字体回退实锤。
+   * null = 页面里没 .receipt-paper（非收据文档）或探针形状不合法。
+   */
+  fontProbe: {
+    /** 半角数字 '0' 的推进量 px（网格列宽基准；等宽 CJK 字体下应 = fontSizePx / 2） */
+    digitPx: number
+    /** 半角空格推进量 px（padLine 的填充字符） */
+    spacePx: number
+    /** 全角汉字推进量 px（等宽 CJK 字体下应 = 2 × digitPx） */
+    cjkPx: number
+    /** .receipt-paper 自适应回缩后的实际字号 px（未回缩时 = 3mm ≈ 11.34px） */
+    fontSizePx: number
+    /** document.fonts.check 判定可用的等宽 CJK 字体（空数组 = NSimSun/SimSun 都不在） */
+    availableFonts: string[]
+  } | null
 }
 
 /**

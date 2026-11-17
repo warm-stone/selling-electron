@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { FIT_TO_WIDTH_BODY } from '../../../../src/main/printing/driver/receipt-html'
 import {
   runRenderCheck,
   type RenderCheckWindow
@@ -20,6 +21,11 @@ import {
  *     documentElement 语义同场景报 786=800 视口−14 滚动条@DPR1.25 地板值 → 假阳性）；
  *  6. 真阳性防回归：w=330 > 307+1 → 换测量源后溢出判定照常命中；
  *  7. 第二次测量脚本同步换源 + 元素缺失回退 documentElement，不 crash。
+ * v3 追加（右截断修复后的取证）：
+ *  8. 测量前先内联生产同款 FIT_TO_WIDTH_BODY（与 driver.channel 共用同一段），
+ *     且字体探针在 h/w 取值之后（临时 span 不得参与高度测量）；
+ *  9. fontProbe 四值 + availableFonts 原样流入；缺字段/脏值 → null（取证字段
+ *     拿不到就当没拿到，不报错、不猜测、不填默认值）。
  */
 
 interface FakeCalls {
@@ -90,7 +96,8 @@ describe('runRenderCheck', () => {
       scrollWidth: 307,
       paperWidthPx: 307,
       horizontalOverflow: false,
-      dpr: 1
+      dpr: 1,
+      fontProbe: null
     })
     // data: URL 加载（encodeURIComponent 中文安全，round-trip 还原）
     expect(calls.loadedUrl).toBe(
@@ -185,7 +192,8 @@ describe('runRenderCheck', () => {
       scrollWidth: 221,
       paperWidthPx: 221,
       horizontalOverflow: false,
-      dpr: 1.25
+      dpr: 1.25,
+      fontProbe: null
     })
     // 测量脚本文本锚点：元素选择器优先 + documentElement 回退双路径并存于同一段 JS
     expect(calls.executed[0]).toContain(".receipt-paper")
@@ -234,6 +242,96 @@ describe('runRenderCheck', () => {
     expect(snap.immediatelyMeasured).toBe(600)
     expect(snap.scrollWidth).toBe(300)
     expect(snap.horizontalOverflow).toBe(false)
+  })
+
+  // ── v3：测量前先跑生产同款版面自适应 + 字体度量探针 ──
+
+  it('v3 测量脚本内联生产同款 FIT_TO_WIDTH_BODY，且字体探针排在 h/w 取值之后', async () => {
+    const { win, calls } = makeFakeWindow({})
+
+    await runRenderCheck(RECEIPT_HTML_NO_LOGO, 307, { createWindowFn: () => win })
+
+    const script = calls.executed[0]
+    // 与 driver.channel 共用同一段脚本——诊断量的必须是真机会打出来的那个版面
+    expect(script).toContain(FIT_TO_WIDTH_BODY)
+    // 执行顺序有意义：先回缩（fit）→ 再取 h/w → 最后挂探针（临时 span 不得参与高度测量）
+    expect(script.indexOf('fitEl')).toBeLessThan(script.indexOf('scrollHeight'))
+    expect(script.indexOf('scrollHeight')).toBeLessThan(script.indexOf('r.font'))
+  })
+
+  it('v3 字体度量探针：四值 + availableFonts 原样流入 fontProbe（右截断的第二层根因取证）', async () => {
+    const { win } = makeFakeWindow({
+      // 真机 20261117 数据：228px/32 列 = 7.125px = 0.594em（应 0.5em）——
+      // ASCII 逐字回退到 monospace，每行宽 18.75% → overflow:hidden 吃掉合计行末位
+      firstJson: JSON.stringify({
+        h: 538,
+        w: 221,
+        dpr: 1.25,
+        img: false,
+        font: {
+          digitPx: 7.125,
+          spacePx: 7.125,
+          cjkPx: 11.34,
+          fontSizePx: 11.34,
+          availableFonts: []
+        }
+      })
+    })
+
+    const snap = await runRenderCheck(RECEIPT_HTML_NO_LOGO, 221, { createWindowFn: () => win })
+
+    expect(snap.fontProbe).toEqual({
+      digitPx: 7.125,
+      spacePx: 7.125,
+      cjkPx: 11.34,
+      fontSizePx: 11.34,
+      availableFonts: []
+    })
+  })
+
+  it('v3 探针缺字段/脏值 → fontProbe=null（拿不到就当拿不到，不拖垮其余测量）', async () => {
+    const badFonts: unknown[] = [
+      undefined,
+      null,
+      'not-an-object',
+      { digitPx: 7, spacePx: 7, cjkPx: 11 }, // 缺 fontSizePx
+      { digitPx: '7', spacePx: 7, cjkPx: 11, fontSizePx: 11 }, // digitPx 非数字
+      { digitPx: 7, spacePx: 7, cjkPx: 11, fontSizePx: Number.NaN }, // 非有限数
+      { digitPx: 7, spacePx: 7, cjkPx: 11, fontSizePx: 11, availableFonts: 'NSimSun' } // 非数组
+    ]
+    for (const font of badFonts) {
+      const { win } = makeFakeWindow({
+        firstJson: JSON.stringify({ h: 538, w: 221, dpr: 1.25, img: false, font })
+      })
+      const snap = await runRenderCheck(RECEIPT_HTML_NO_LOGO, 221, { createWindowFn: () => win })
+      // 前六项 → null；末项（仅 availableFonts 形状不对）四值仍合法 → 收窄为 []
+      expect(
+        snap.fontProbe === null ||
+          (snap.fontProbe.digitPx === 7 &&
+            snap.fontProbe.fontSizePx === 11 &&
+            Array.isArray(snap.fontProbe.availableFonts) &&
+            snap.fontProbe.availableFonts.length === 0)
+      ).toBe(true)
+      expect(snap.immediatelyMeasured).toBe(538)
+    }
+    // 末项单独钉住：availableFonts 非数组时收窄为空数组而不是整体作废
+    const { win: last } = makeFakeWindow({
+      firstJson: JSON.stringify({
+        h: 538,
+        w: 221,
+        dpr: 1.25,
+        img: false,
+        font: { digitPx: 7, spacePx: 7, cjkPx: 11, fontSizePx: 11, availableFonts: 'NSimSun' }
+      })
+    })
+    const lastSnap = await runRenderCheck(RECEIPT_HTML_NO_LOGO, 221, { createWindowFn: () => last })
+    expect(lastSnap.fontProbe).toEqual({
+      digitPx: 7,
+      spacePx: 7,
+      cjkPx: 11,
+      fontSizePx: 11,
+      availableFonts: []
+    })
   })
 
   it('destroy 抛异常（窗口已销毁类错误）→ settle 吞掉、结果照常上报；destroy 恰调用一次', async () => {

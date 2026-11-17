@@ -200,7 +200,8 @@
     "scrollWidth": 221,
     "paperWidthPx": 221,
     "horizontalOverflow": false,
-    "dpr": 1.25
+    "dpr": 1.25,
+    "fontProbe": null
   },
   "errors": {},
   "raw": {}

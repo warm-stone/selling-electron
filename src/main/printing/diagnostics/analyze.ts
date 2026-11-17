@@ -24,6 +24,7 @@
  *   报告导出（T8）与人审按 evidence 直接定位数据源；
  * - 未命中的规则不产出（不产 pass 占位 Finding——status:'pass' 契约上不出现）。
  */
+import { RECEIPT_PRINT_GEOMETRY } from '../driver/receipt-html'
 import { RULE_DEPENDS_ON } from './schema'
 import type {
   Finding,
@@ -39,10 +40,24 @@ export const CLOUD_PRINTER_MODELS: readonly string[] = ['DL-5801PW']
 /** 崩溃环关注的打印子系统进程名（faultingApp 小写前缀匹配，如 spoolsv.exe） */
 const CRASHING_PRINT_APPS: readonly string[] = ['spoolsv', 'printisolationhost', 'splwow64']
 
-/** 模板纸宽规格 → 微米（app.settings.templatePaperWidth 的比对基准） */
-const TEMPLATE_WIDTH_MICRONS: Readonly<Record<string, number>> = {
+/** 模板纸宽规格 → 纸张物理宽（μm）。**仅用于 evidence/描述标注**，不作命中基准 */
+const PAPER_WIDTH_MICRONS: Readonly<Record<string, number>> = {
   '80mm': 80000,
   '58mm': 58000
+}
+
+/**
+ * 模板纸宽规格 → **应用实际下发页宽**（μm）——R10/R11 的命中基准。
+ *
+ * 基准为何从「纸张物理宽」换成「应用下发页宽」（真机 20261117）：driver 通道现在
+ * 按**可打印宽**排版并下发同宽页面（58mm 纸 → 48000、80mm 纸 → 72000，见
+ * receipt-html 的 RECEIPT_PRINT_GEOMETRY）。若仍拿 58000 当基准，DL-5801PW 上报的
+ * 48000 会永远命中 R10「驱动忽略了应用下发的页宽」与 R11「实际纸宽比模板窄
+ * 10mm，右侧会被裁切」——两条都是假阳性（我们下发的正是 48000，版面也正是 48mm）。
+ */
+const APP_PAGE_WIDTH_MICRONS: Readonly<Record<string, number>> = {
+  '80mm': RECEIPT_PRINT_GEOMETRY['80mm'].pageWidthMicrons,
+  '58mm': RECEIPT_PRINT_GEOMETRY['58mm'].pageWidthMicrons
 }
 
 /** 打印任务 statusMask 位定义（Windows JOB_STATUS：2=Error，4=Deleting） */
@@ -85,9 +100,19 @@ function printConfigSource(
   return typeof src === 'string' && src !== '' ? src : null
 }
 
-/** 模板宽（μm）；规格外纸宽（如 'A4'）返回 undefined——调用方按缺数据跳过 */
-function templateWidthMicrons(s: PrintDiagnosticSnapshot): number | undefined {
-  return TEMPLATE_WIDTH_MICRONS[s.app.settings.templatePaperWidth]
+/** 应用下发页宽（μm）；规格外纸宽（如 'A4'）返回 undefined——调用方按缺数据跳过 */
+function appPageWidthMicrons(s: PrintDiagnosticSnapshot): number | undefined {
+  return APP_PAGE_WIDTH_MICRONS[s.app.settings.templatePaperWidth]
+}
+
+/** 纸张物理宽（μm）；仅用于文案标注，规格外返回 undefined */
+function paperWidthMicrons(s: PrintDiagnosticSnapshot): number | undefined {
+  return PAPER_WIDTH_MICRONS[s.app.settings.templatePaperWidth]
+}
+
+/** μm → mm（一位小数）——文案里三个宽度全部带 mm 标注，不让用户自己换算 */
+function umLabel(v: number | undefined): string {
+  return v === undefined ? '?' : (v / 1000).toFixed(1)
 }
 
 /** 两字符串最长公共前缀长度（大小写不敏感——Windows 打印机名不区分大小写） */
@@ -328,38 +353,52 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
       }
     }
 
-    // R10/R11 driver 通道页宽比对（前提：printConfig 存在 + 模板宽已知）
+    // R10/R11 driver 通道页宽比对（前提：printConfig 存在 + 应用下发页宽已知）
     if (!depsFailed('driver-page-size-ignored') || !depsFailed('printable-area-clip')) {
       const config = findPrintConfig(s, target.name)
-      const templateWidth = templateWidthMicrons(s)
-      if (settings.channel === 'driver' && config && config.widthMicrons !== null && templateWidth !== undefined) {
-        const diff = Math.abs(config.widthMicrons - templateWidth)
+      const appPageWidth = appPageWidthMicrons(s)
+      if (settings.channel === 'driver' && config && config.widthMicrons !== null && appPageWidth !== undefined) {
+        const diff = Math.abs(config.widthMicrons - appPageWidth)
         // v2 微调：条目携带 fallback 层标注（source 字段）时随行进 evidence——
         // 无标注保持 v1 evidence 形状不变（非破坏性）
         const srcNote = printConfigSource(config)
-        // R10 driver-page-size-ignored：DEVMODE 纸宽 ≠ 模板宽（驱动忽略页宽设置）
+        // 三个宽度全部点名（驱动实际页宽 / 应用下发页宽 / 纸张规格）：旧文案只写
+        // 「模板宽」，用户分不清哪个是纸、哪个是驱动、哪个是我们下发的
+        const paperSpec = `${settings.templatePaperWidth}=${umLabel(paperWidthMicrons(s))}mm`
+        // R10 driver-page-size-ignored：驱动实际页宽 ≠ 应用下发页宽（驱动忽略页宽设置）
         if (!depsFailed('driver-page-size-ignored') && diff > WIDTH_TOLERANCE) {
+          // 云固件机型不给「切回 spooler」建议：那条通道在这类机器上连中文都打不出
+          //（R9 cloud-printer-raw-utf8 的结论）——两条建议同时出现会自相矛盾，
+          // 并把用户推回更糟的状态。
+          const cloudModel = matchCloudModel(target)
           findings.push({
             code: 'driver-page-size-ignored',
             severity: 'high',
             scope: 'printer',
             printerName: target.name,
-            evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons}（模板 '${settings.templatePaperWidth}'=${templateWidth}）${srcNote !== null ? `, source='${srcNote}'` : ''}`,
-            suggestedActions: ['SWITCH_TO_SPOOLER_CHANNEL', 'REINSTALL_DRIVER_GUIDE'],
+            evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons}（驱动实际页宽 ${umLabel(config.widthMicrons)}mm） vs 应用下发页宽 ${appPageWidth}（${umLabel(appPageWidth)}mm），纸张规格 ${paperSpec}${srcNote !== null ? `, source='${srcNote}'` : ''}`,
+            suggestedActions:
+              cloudModel === null
+                ? ['SWITCH_TO_SPOOLER_CHANNEL', 'REINSTALL_DRIVER_GUIDE']
+                : ['REINSTALL_DRIVER_GUIDE'],
             status: 'needs-dev',
-            description: `driver 通道下「${target.name}」的实际纸张宽度为 ${config.widthMicrons}μm，与模板 ${settings.templatePaperWidth}（${templateWidth}μm）偏差 ${diff}μm——驱动忽略了应用下发的自定义页宽，版面按错误纸宽排布。可切回 spooler 通道规避，根治需排查驱动页宽协商（需开发介入）。`
+            description: `driver 通道下「${target.name}」的驱动实际页宽为 ${config.widthMicrons}μm（${umLabel(config.widthMicrons)}mm），与应用下发页宽 ${appPageWidth}μm（${umLabel(appPageWidth)}mm）偏差 ${diff}μm（纸张规格 ${paperSpec}）——驱动忽略了应用下发的自定义页宽，版面按错误纸宽排布。${
+              cloudModel === null
+                ? '可切回 spooler 通道规避，'
+                : `本机命中云固件名单（${cloudModel}）：RAW 通道打不出中文与图片，不要切回系统打印机，`
+            }根治需排查驱动页宽协商（需开发介入）。`
           })
-          // R11 printable-area-clip：实际纸宽比模板窄超 4mm → 内容被裁切
-          if (!depsFailed('printable-area-clip') && config.widthMicrons < templateWidth - CLIP_DEFICIT) {
+          // R11 printable-area-clip：驱动实际页宽比应用下发页宽窄超 4mm → 内容被裁切
+          if (!depsFailed('printable-area-clip') && config.widthMicrons < appPageWidth - CLIP_DEFICIT) {
             findings.push({
               code: 'printable-area-clip',
               severity: 'medium',
               scope: 'printer',
               printerName: target.name,
-              evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons} < 模板宽 ${templateWidth} - ${CLIP_DEFICIT}${srcNote !== null ? `, source='${srcNote}'` : ''}`,
+              evidence: `system.printConfigs['${target.name}'].widthMicrons=${config.widthMicrons}（驱动实际页宽 ${umLabel(config.widthMicrons)}mm） < 应用下发页宽 ${appPageWidth}（${umLabel(appPageWidth)}mm） - ${CLIP_DEFICIT}，纸张规格 ${paperSpec}${srcNote !== null ? `, source='${srcNote}'` : ''}`,
               suggestedActions: [],
               status: 'needs-dev',
-              description: `「${target.name}」的实际纸宽（${config.widthMicrons}μm）比模板（${templateWidth}μm）窄超过 4mm——内容超出可打印区域会被裁切（右侧缺失）。需按实际纸宽调整模板（需开发介入）。`
+              description: `「${target.name}」的驱动实际页宽（${config.widthMicrons}μm = ${umLabel(config.widthMicrons)}mm）比应用下发页宽（${appPageWidth}μm = ${umLabel(appPageWidth)}mm）窄超过 4mm（纸张规格 ${paperSpec}）——内容超出可打印区域会被裁切（右侧缺失）。需按实际纸宽调整模板（需开发介入）。`
             })
           }
         }
@@ -378,6 +417,9 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
       s.app.printOptions.marginsMode === 'none'
     ) {
       const dpr = s.renderSnapshot?.dpr
+      // 云固件机型的 workaround ③（反向切回 spooler）不成立——RAW 通道连中文都打不出，
+      // 写在建议里会把用户推进坑；命中名单时改说「此路不通」并给出替代项。
+      const r16Cloud = matchCloudModel(target)
       findings.push({
         code: 'driver-print-combo-known-issue',
         severity: 'high',
@@ -388,7 +430,11 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
           (dpr !== undefined && dpr !== 1 ? ` dpr=${dpr}(非整数缩放渲染)` : ''),
         suggestedActions: [],
         status: 'needs-dev',
-        description: `当前 driver 渲染通道组合为「自定义页宽（custom-microns）+ 零边距（none）」——该组合命中 Electron Windows GDI 静默打印的已知问题群：驱动可能忽略应用下发的自定义页宽、边距处理回归导致内容右侧截断、显示缩放（DPR≠1）下渲染尺寸偏差。可依次尝试三条实验性规避：① 在设置页「打印高级选项（实验）」将打印 DPI 显式设为 203（热敏打印机常见值）；② 启用「使用驱动默认页尺寸」——注意：驱动取不到默认页尺寸时会回退 A4 纸（58/80mm 连续纸会被按 A4 高度分页切断），实验时请观察出纸分页位置；③ 若该机 RAW 通道可用，反向切换回 spooler 通道绕开 driver 渲染链。以上均为规避手段，根治需开发介入定位。`
+        description: `当前 driver 渲染通道组合为「自定义页宽（custom-microns）+ 零边距（none）」——该组合命中 Electron Windows GDI 静默打印的已知问题群：驱动可能忽略应用下发的自定义页宽、边距处理回归导致内容右侧截断、显示缩放（DPR≠1）下渲染尺寸偏差。可依次尝试三条实验性规避：① 在设置页「打印高级选项（实验）」将打印 DPI 显式设为 203（热敏打印机常见值）；② 启用「使用驱动默认页尺寸」——注意：驱动取不到默认页尺寸时会回退 A4 纸（58/80mm 连续纸会被按 A4 高度分页切断），实验时请观察出纸分页位置；③ ${
+          r16Cloud === null
+            ? '若该机 RAW 通道可用，反向切换回 spooler 通道绕开 driver 渲染链'
+            : `本机命中云固件名单（${r16Cloud}），RAW 通道打不出中文与图片，③ 此路不通——只能走 ①② 或升级 Electron`
+        }。以上均为规避手段，根治需开发介入定位。`
       })
     }
 
