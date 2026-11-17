@@ -36,6 +36,60 @@ function makeFakeExecFile(
   return impl as unknown as ExecFileFn
 }
 
+/**
+ * 大载荷路径的 fake：返回可读写的 stdin（makeFakeExecFile 返回 null，永不进
+ * `child.stdin.end()` 分支），并记录写入载荷 / end 调用 / error 处理器。
+ */
+function makeStdinFakeExecFile(behavior: 'ok' | 'fail'): {
+  fn: ExecFileFn
+  written: string[]
+  ended: () => boolean
+  emitStdinError: (err: Error) => void
+} {
+  const written: string[] = []
+  let ended = false
+  let errorHandler: ((err: Error) => void) | null = null
+  type StdinFake = {
+    on: (event: string, handler: (err: Error) => void) => StdinFake
+    end: (payload: string) => StdinFake
+  }
+  const stdin: StdinFake = {
+    on: (event, handler) => {
+      if (event === 'error') errorHandler = handler
+      return stdin
+    },
+    end: (payload) => {
+      written.push(payload)
+      ended = true
+      return stdin
+    }
+  }
+  const impl = (
+    _file: string,
+    _args: readonly string[],
+    _options: never,
+    callback: never
+  ): unknown => {
+    // 与真实 execFile 一致：回调异步触发（stdin 写入发生在 execFileFn 同步返回之后）
+    setTimeout(() => {
+      const cb = callback as (e: Error | null, out: string, err: string) => void
+      if (behavior === 'ok') {
+        cb(null, '', '')
+      } else {
+        const err = Object.assign(new Error('exit code 2'), { code: 2 })
+        cb(err, '', 'RAW send failed, win32=1801')
+      }
+    }, 0)
+    return { stdin }
+  }
+  return {
+    fn: impl as unknown as ExecFileFn,
+    written,
+    ended: () => ended,
+    emitStdinError: (err) => errorHandler?.(err)
+  }
+}
+
 describe('escapePowerShellSingleQuoted', () => {
   it('PS 单引号字符串内的单引号翻倍转义', () => {
     expect(escapePowerShellSingleQuoted("O'Brien's")).toBe("O''Brien''s")
@@ -163,6 +217,33 @@ describe('sendRawToPrinter', () => {
         execFileFn: makeFakeExecFile('never-called', [])
       })
     ).rejects.toThrow('printer_name')
+  })
+
+  it('大载荷（走 stdin）→ base64 原样写入 child.stdin 并 end，字节零改写', async () => {
+    const bigBytes = new Uint8Array(18001).map((_, i) => i % 251)
+    const spec = buildSpoolerPrintCommand('POS-80', bigBytes)
+    expect(spec.stdinPayload).toBeDefined()
+    const fake = makeStdinFakeExecFile('ok')
+
+    await sendRawToPrinter('POS-80', bigBytes, { platform: 'win32', execFileFn: fake.fn })
+
+    expect(fake.ended()).toBe(true)
+    expect(fake.written).toHaveLength(1)
+    expect(fake.written[0]).toBe(spec.stdinPayload)
+    // round-trip：PS 侧 [Convert]::FromBase64String 拿到的就是原字节（传输层不经字符串编码）
+    expect(Array.from(Buffer.from(fake.written[0] ?? '', 'base64'))).toEqual(Array.from(bigBytes))
+  })
+
+  it('stdin 写入报 EPIPE + 进程 exit 2 → 仍按 exit code 兜底拒绝并携带 stderr（不因 stdin error 未处理而崩）', async () => {
+    const fake = makeStdinFakeExecFile('fail')
+
+    const pending = sendRawToPrinter('POS-80', new Uint8Array(18001).fill(0x41), {
+      platform: 'win32',
+      execFileFn: fake.fn
+    })
+    fake.emitStdinError(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+
+    await expect(pending).rejects.toThrow(/POS-80.*RAW send failed, win32=1801/s)
   })
 })
 
