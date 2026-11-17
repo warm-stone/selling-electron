@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { generateReceiptHtml } from '../../../../src/main/printing/driver/receipt-html'
+import {
+  FIT_TO_WIDTH_BODY,
+  generateReceiptHtml,
+  RECEIPT_PRINT_GEOMETRY
+} from '../../../../src/main/printing/driver/receipt-html'
 import { DEFAULT_TEMPLATES } from '../../../../src/shared/receipt/default-template'
 import { buildItemLines, buildSnLines } from '../../../../src/shared/receipt/item-columns'
 import type { SaleReceiptData } from '../../../../src/shared/receipt/item-columns'
@@ -8,7 +12,10 @@ import type { ReceiptTemplate, ReceiptVars } from '../../../../src/shared/receip
 
 /**
  * 收据 HTML 生成器单元测试（纯函数，零 Electron/IO）：
- *  - 完整独立文档骨架（doctype/charset/data-paper-width/纸宽 px/零外部资源）
+ *  - 完整独立文档骨架（doctype/charset/data-paper-width + data-page-width-microns/
+ *    可打印页宽 mm/零外部资源）
+ *  - 打印版面几何（RECEIPT_PRINT_GEOMETRY）：页宽 = 可打印宽、半角推进量恰 0.5em
+ *  - 纯黑版面（无屏幕灰阶——1 位色深驱动会把灰阶抖动成网点小白点）
  *  - 58mm/80mm 双默认模板全结构（店名/明细/分隔线/合计/页脚/剪切示意）
  *  - HTML 转义（店名/商品名注入 <script> → 实体化，不得注入标记）
  *  - Logo dataURL（logoBuffers → <img>；缺 Buffer 静默跳过）
@@ -44,24 +51,68 @@ const DATA: SaleReceiptData = {
 }
 
 describe('generateReceiptHtml（文档骨架：完整独立 HTML）', () => {
-  it('58mm：doctype + charset + data-paper-width="58mm" + 221px 纸宽 + 零外部资源', () => {
+  it('58mm：doctype + charset + data-paper-width/data-page-width-microns + 48mm 可打印页宽 + 零外部资源', () => {
     const html = generateReceiptHtml(DEFAULT_TEMPLATES['58mm'], DATA, VARS, new Map())
 
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
     expect(html).toContain('<meta charset="utf-8">')
-    expect(html).toContain('<body data-paper-width="58mm">')
-    expect(html).toContain('width: 221px') // 与 ReceiptPreview 同值（几何同源）
+    // data-page-width-microns 是 driver 通道的页宽来源（= 可打印宽，与驱动 DEVMODE 同基准）
+    expect(html).toContain('<body data-paper-width="58mm" data-page-width-microns="48000">')
+    // 容器宽 = 可打印宽 48mm，**不是纸宽 58mm**（纸两侧各有物理不可打印边，
+    // 旧版 221px≈58.5mm 的网格最右两列半落在打印头之外 → 合计行末位被吃）
+    expect(html).toContain('width: 48mm')
+    expect(html).not.toContain('width: 221px')
     // 独立文档：无外链样式/脚本/图片（离线可渲染，driver 通道 data: URL 加载）
     expect(html).not.toMatch(/<link\b/)
     expect(html).not.toMatch(/<script\b/)
     expect(html).not.toMatch(/(?:src|href)="https?:/)
   })
 
-  it('80mm：data-paper-width="80mm" + 307px 纸宽', () => {
+  it('80mm：data-page-width-microns="72000" + 72mm 可打印页宽', () => {
     const html = generateReceiptHtml(DEFAULT_TEMPLATES['80mm'], DATA, VARS, new Map())
 
-    expect(html).toContain('<body data-paper-width="80mm">')
-    expect(html).toContain('width: 307px')
+    expect(html).toContain('<body data-paper-width="80mm" data-page-width-microns="72000">')
+    expect(html).toContain('width: 72mm')
+    expect(html).not.toContain('width: 307px')
+  })
+
+  it('纯黑版面：无屏幕灰阶色（正文/分隔线/剪切线），并声明 print-color-adjust: exact', () => {
+    // 真机 20261117 症状「HTML 打印内容中间有很多小白点」的直接根因：
+    // 屏幕灰（#14161a/#5a5f66/#9aa0a8）被 1 位色深驱动抖动成网点
+    for (const paper of ['58mm', '80mm'] as const) {
+      const html = generateReceiptHtml(DEFAULT_TEMPLATES[paper], DATA, VARS, new Map())
+      expect(html).not.toMatch(/#14161a|#5a5f66|#9aa0a8/i)
+      expect(html).toContain('color: #000000')
+      expect(html).toContain('print-color-adjust: exact')
+      expect(html).toContain('-webkit-print-color-adjust: exact')
+    }
+  })
+})
+
+describe('RECEIPT_PRINT_GEOMETRY（打印版面几何唯一事实源）', () => {
+  it('58mm/80mm：页宽 = 可打印宽，且半角推进量恰 0.5em（网格数学的前提）', () => {
+    // 58mm 纸 32 列 / 80mm 纸 48 列（char-grid PAPER_COLUMNS）
+    for (const [paper, cols] of [
+      ['58mm', 32],
+      ['80mm', 48]
+    ] as const) {
+      const g = RECEIPT_PRINT_GEOMETRY[paper]
+      expect(g.pageWidthMicrons).toBe(g.pageWidthMm * 1000)
+      expect(g.pageWidthPx).toBe(Math.round((g.pageWidthMm * 96) / 25.4))
+      // 半角列宽 = 字号/2 → cols 列恰铺满页宽，全角汉字恰占 2 列
+      expect(g.fontSizeMm / 2).toBeCloseTo(g.pageWidthMm / cols, 6)
+    }
+    expect(RECEIPT_PRINT_GEOMETRY['58mm']).toMatchObject({ pageWidthMm: 48, fontSizeMm: 3 })
+    expect(RECEIPT_PRINT_GEOMETRY['80mm']).toMatchObject({ pageWidthMm: 72, fontSizeMm: 3 })
+  })
+
+  it('FIT_TO_WIDTH_BODY 自带块级作用域（可安全内联进任何宿主 IIFE，不与其标识符冲突）', () => {
+    expect(FIT_TO_WIDTH_BODY.startsWith('{ ')).toBe(true)
+    expect(FIT_TO_WIDTH_BODY.endsWith(' }')).toBe(true)
+    expect(FIT_TO_WIDTH_BODY).toContain(".receipt-paper")
+    // 回缩基准必须是实测值对（scrollWidth / clientWidth）——写死比例救不了未知字体
+    expect(FIT_TO_WIDTH_BODY).toContain('fitEl.scrollWidth > fitEl.clientWidth + 1')
+    expect(FIT_TO_WIDTH_BODY).toContain('fitEl.clientWidth / fitEl.scrollWidth')
   })
 })
 
@@ -74,7 +125,7 @@ describe('generateReceiptHtml（58mm 默认模板全结构）', () => {
     expect(html).toContain('receipt-line--double-height')
     expect(html).toContain('text-align: center')
     expect(html).toContain('transform-origin: center top')
-    expect(html).toContain('margin-bottom: 1.35em')
+    expect(html).toContain('margin-bottom: 1.25em')
     expect(html).toContain('测试便利店')
   })
 
@@ -141,7 +192,7 @@ describe('generateReceiptHtml（Logo dataURL）', () => {
     expect(html).toContain(
       `<img class="receipt-logo" src="data:image/png;base64,${PNG_1PX_BASE64}"`
     )
-    expect(html).toContain('style="max-width: 288px"') // 80mm 48 列 × 6px（同预览 logoMaxWidth）
+    expect(html).toContain('style="max-width: 72mm"') // logo 不超可打印页宽（与容器同基准）
   })
 
   it('logoBuffers 无对应 Buffer → image 段落静默跳过（同 ESC/POS/预览语义）', () => {

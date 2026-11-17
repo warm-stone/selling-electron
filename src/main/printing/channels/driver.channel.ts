@@ -1,4 +1,5 @@
 import type { WebContentsPrintOptions } from 'electron'
+import { FIT_TO_WIDTH_BODY } from '../driver/receipt-html'
 import type { PrintChannel } from './print-channel'
 
 /**
@@ -37,12 +38,6 @@ export interface DriverPrintWindow {
 /** 窗口工厂注入点（html 参数供自定义工厂消费；默认工厂仅开隐藏窗、稍后由 send 流程加载） */
 export type DriverCreateWindowFn = (html: string) => DriverPrintWindow
 
-/** 纸宽 → 页宽微米（body[data-paper-width] 读取值；1mm = 1000μm） */
-const PAPER_WIDTH_MICRONS: Record<string, number> = {
-  '58mm': 58_000,
-  '80mm': 80_000
-}
-
 /** px → 微米换算（Chromium 96dpi：1px = 25400/96 μm） */
 const PX_TO_MICRONS = 25_400 / 96
 
@@ -64,6 +59,21 @@ const DRIVER_PRINT_TIMEOUT_MS = 30_000
  */
 const LOGO_DECODE_WAIT_SCRIPT =
   "new Promise(r => { const i = document.querySelector('img.receipt-logo'); if (i && i.decode) { i.decode().then(() => r(), () => r()); } else { r(); } })"
+
+/**
+ * 版面自适应 + 测量（单次 JS 往返，在 logo decode 安定之后执行）：
+ *  1. FIT_TO_WIDTH_BODY 按实测 scrollWidth/clientWidth 比例回缩字号，直到网格不溢出
+ *     容器（真机 20261117：该机 ASCII 逐字回退到 0.594em 的 monospace，每行比设计
+ *     宽 18.75%，右对齐的合计行金额尾数被 overflow:hidden 吃掉）；
+ *  2. 再量页高（必须在回缩**之后**——字号变了行高就变了，先量会高估页高），
+ *     且取 **`.receipt-paper` 元素级** scrollHeight（+offsetTop 补容器顶偏移），
+ *     不用 documentElement：后者是 max(视口,内容)，隐藏窗默认 600px 高会把短
+ *     小票的页高抬到地板值（≈159mm 走纸）——render-check v2 Bug3 同源修复，非收据
+ *     HTML（无该元素）回退 documentElement 语义；
+ *  3. 页宽改读 data-page-width-microns（= 可打印宽，与驱动 DEVMODE 同基准），不再由
+ *     data-paper-width 查表换算成纸张物理宽。
+ */
+const FIT_AND_MEASURE_SCRIPT = `JSON.stringify((() => { ${FIT_TO_WIDTH_BODY} const el = document.querySelector('.receipt-paper'); return { h: el ? el.scrollHeight + el.offsetTop : document.documentElement.scrollHeight, pageWidthMicrons: document.body.dataset.pageWidthMicrons }; })())`
 
 /**
  * 默认窗口工厂：懒 require('electron')（T2 模式——本模块可在 vitest 纯
@@ -108,7 +118,8 @@ export interface DriverPrintOptions {
  *  1. UTF-8 解码载荷（HTML 文档）→ data: URL 加载（不触应用路由）；
  *  1.5 logo decode 等待（测量竞态修复——见 LOGO_DECODE_WAIT_SCRIPT；best-effort，
  *      基础设施级执行失败不阻塞，照常进入测量）；
- *  2. executeJavaScript 测量内容高度 + 读 data-paper-width（页宽微米）；
+ *  2. executeJavaScript 版面自适应（FIT_TO_WIDTH_BODY）+ 量元素级页高 + 读
+ *     data-page-width-microns（页宽微米 = 可打印宽）；
  *  3. print(silent + deviceName + 按内容高度定页高 + 无边距 + 实验选项条件组装)；
  *  4. 任一环节失败/30s 超时 → reject 可诊断中文错误，finally destroy 窗口。
  */
@@ -164,34 +175,37 @@ export function printHtmlViaDriver(
         // 等待失败 ≠ 打印失败——照常进入测量
       }
 
-      // 2. 测量：scrollHeight（px）+ data-paper-width（页宽）——单次 JS 调用取齐
+      // 2. 版面自适应 + 测量：元素级页高（px）+ data-page-width-microns（页宽）——单次 JS 调用取齐
       let measured: unknown
       try {
-        measured = await win.webContents.executeJavaScript(
-          'JSON.stringify({h: document.documentElement.scrollHeight, paper: document.body.dataset.paperWidth})'
-        )
+        measured = await win.webContents.executeJavaScript(FIT_AND_MEASURE_SCRIPT)
       } catch (err) {
         settle(new Error(`driver channel 收据页面测量失败：${errorDetail(err)}`))
         return
       }
-      let parsed: { h?: unknown; paper?: unknown }
+      let parsed: { h?: unknown; pageWidthMicrons?: unknown }
       try {
-        parsed = JSON.parse(String(measured)) as { h?: unknown; paper?: unknown }
+        parsed = JSON.parse(String(measured)) as { h?: unknown; pageWidthMicrons?: unknown }
       } catch {
         settle(new Error('driver channel 收据页面测量结果不可解析（非 JSON）'))
         return
       }
       const pxHeight = parsed.h
-      const paper = parsed.paper
+      const rawMicrons = parsed.pageWidthMicrons
       if (typeof pxHeight !== 'number' || !Number.isFinite(pxHeight) || pxHeight <= 0) {
         settle(new Error(`driver channel 收据页面高度非法（scrollHeight=${String(pxHeight)}）`))
         return
       }
-      const paperMicrons = typeof paper === 'string' ? PAPER_WIDTH_MICRONS[paper] : undefined
-      if (paperMicrons === undefined) {
+      const pageMicrons =
+        typeof rawMicrons === 'string' && /^\d+$/.test(rawMicrons)
+          ? Number.parseInt(rawMicrons, 10)
+          : 0
+      if (pageMicrons <= 0) {
         settle(
           new Error(
-            `driver channel 页宽属性缺失或非法（data-paper-width=${String(paper)}，应为 58mm/80mm）`
+            `driver channel 页宽属性缺失或非法（data-page-width-microns=${String(
+              rawMicrons
+            )}，应为正整数微米）`
           )
         )
         return
@@ -217,12 +231,12 @@ export function printHtmlViaDriver(
         deviceName: printerName,
         ...(options.useDefaultPageSize === true
           ? { usePrinterDefaultPageSize: true }
-          : { pageSize: { width: paperMicrons, height: heightMicrons } }),
+          : { pageSize: { width: pageMicrons, height: heightMicrons } }),
         ...dpi,
         margins: { marginType: 'none' }
       }
 
-      // 静默打印：设备名 + 上述条件组装选项 + 无边距（纸宽即内容宽）
+      // 静默打印：设备名 + 上述条件组装选项 + 无边距（页宽即可打印宽，内容恰好铺满）
       win.webContents.print(printOptions, (success, reason) => {
         if (success) settle()
         else

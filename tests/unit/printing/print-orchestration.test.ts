@@ -503,7 +503,7 @@ describe('printSale driver 通道（HTML 即字节——云热敏机驱动渲染
     expect(sent).toHaveLength(1)
     const html = Buffer.from(sent[0]!).toString('utf8')
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
-    expect(html).toContain('<body data-paper-width="80mm">')
+    expect(html).toContain('<body data-paper-width="80mm" data-page-width-microns="72000">')
     // UTF-8 店名原样进入（driver 渲染不做 GBK 降级——驱动光栅化兼容 Unicode）
     expect(html).toContain('测试便利店')
     expect(html).toContain('可口可乐 330ml')

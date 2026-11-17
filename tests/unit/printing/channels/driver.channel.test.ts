@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runInNewContext } from 'node:vm'
+import { FIT_TO_WIDTH_BODY } from '../../../../src/main/printing/driver/receipt-html'
 import {
   DriverChannel,
   printHtmlViaDriver,
@@ -11,7 +12,8 @@ import {
  * driver 兜底通道单元测试（DI 注入 fake 窗口，**免 Electron、不弹真窗口**——
  * 与 spooler.channel.test 注入 fake execFile 同款模式）。
  * 验证：HTML 即字节的载荷契约、data: URL 加载、logo decode 等待（测量前——v2
- * 症状 2 修复）、高度/纸宽测量 → pageSize 微米换算（58mm→58000 / 80mm→80000，
+ * 症状 2 修复）、版面自适应 + 元素级页高/页宽测量 → pageSize 微米换算（v3：页宽
+ * 直读 data-page-width-microns = **可打印宽**，58mm 纸→48000 / 80mm 纸→72000；
  * px→μm 向上取整 + 2000μm 安全垫）、silent/printBackground/deviceName/无边距选项、
  * 实验选项条件组装（v2：dpi Record 形状 / useDefaultPageSize 互斥 / 缺省 v1 形状
  * deepEqual 硬锁）、失败/缺属性/超时可诊断中文错误、窗口必被销毁（finally 语义）。
@@ -76,7 +78,7 @@ function makeFakeWindow(
           if (decodeGate) await decodeGate
           return null
         }
-        return o.measureJson ?? JSON.stringify({ h: 800, paper: '58mm' })
+        return o.measureJson ?? JSON.stringify({ h: 800, pageWidthMicrons: '48000' })
       }),
       print: vi.fn((options: unknown, callback: (success: boolean, reason: string) => void) => {
         calls.printOptions.push(options as CapturedPrintOptions)
@@ -92,8 +94,8 @@ function makeFakeWindow(
   return { win, calls, releaseDecode }
 }
 
-/** 收据 HTML（含 data-paper-width——通道测量契约的载荷前提） */
-const RECEIPT_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body data-paper-width="58mm"><div class="receipt-paper">测试便利店</div></body></html>`
+/** 收据 HTML（含 data-page-width-microns——通道页宽测量契约的载荷前提） */
+const RECEIPT_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body data-paper-width="58mm" data-page-width-microns="48000"><div class="receipt-paper">测试便利店</div></body></html>`
 
 const htmlBytes = (html: string): Uint8Array => Buffer.from(html, 'utf8')
 
@@ -110,7 +112,9 @@ describe('DriverChannel', () => {
   })
 
   it('send 成功链路：data: URL 加载（encodeURIComponent）→ 测量 → 静默打印 → 销毁窗口', async () => {
-    const { win, calls } = makeFakeWindow({ measureJson: JSON.stringify({ h: 800, paper: '58mm' }) })
+    const { win, calls } = makeFakeWindow({
+      measureJson: JSON.stringify({ h: 800, pageWidthMicrons: '48000' })
+    })
     const createWindowFn = vi.fn(() => win)
     const ch = new DriverChannel({ printerName: '前台驱动打印机', createWindowFn })
 
@@ -124,30 +128,37 @@ describe('DriverChannel', () => {
     expect(calls.executed).toHaveLength(2)
     expect(calls.executed[0]).toContain('receipt-logo')
     expect(calls.executed[1]).toContain('scrollHeight')
-    expect(calls.executed[1]).toContain('paperWidth')
-    // 打印选项全要素：静默 + 背景 + 设备名 + 无边距 + 58mm 页宽微米 + 测量页高
+    expect(calls.executed[1]).toContain('pageWidthMicrons')
+    // 测量源是元素级（.receipt-paper）+ documentElement 回退：隐藏窗默认 600px 高，
+    // documentElement.scrollHeight 是 max(视口,内容)，短小票会被抬到地板值 ≈159mm 走纸
+    expect(calls.executed[1]).toContain('.receipt-paper')
+    expect(calls.executed[1]).toContain('documentElement')
+    expect(calls.executed[1]).toContain('offsetTop')
+    // v3：测量前先跑生产同款版面自适应（与 render-check 共用同一段 FIT_TO_WIDTH_BODY）
+    expect(calls.executed[1]).toContain(FIT_TO_WIDTH_BODY)
+    // 打印选项全要素：静默 + 背景 + 设备名 + 无边距 + 48mm 可打印页宽微米 + 测量页高
     expect(calls.printOptions).toHaveLength(1)
     expect(calls.printOptions[0]).toEqual({
       silent: true,
       printBackground: true,
       deviceName: '前台驱动打印机',
-      pageSize: { width: 58_000, height: expectedHeightMicrons(800) },
+      pageSize: { width: 48_000, height: expectedHeightMicrons(800) },
       margins: { marginType: 'none' }
     })
     // 窗口最终销毁（成功路径）
     expect(calls.destroyed).toBe(1)
   })
 
-  it('80mm 纸宽 → 页宽 80000μm；页高按测量值换算（h=1000px）', async () => {
+  it('80mm 纸 → 页宽 72000μm（可打印宽）；页高按测量值换算（h=1000px）', async () => {
     const { win, calls } = makeFakeWindow({
-      measureJson: JSON.stringify({ h: 1000, paper: '80mm' })
+      measureJson: JSON.stringify({ h: 1000, pageWidthMicrons: '72000' })
     })
     const ch = new DriverChannel({ printerName: 'POS-80', createWindowFn: () => win })
 
     await ch.send(htmlBytes(RECEIPT_HTML))
 
     expect(calls.printOptions[0]?.pageSize).toEqual({
-      width: 80_000,
+      width: 72_000,
       height: expectedHeightMicrons(1000)
     })
     expect(calls.destroyed).toBe(1)
@@ -178,19 +189,22 @@ describe('DriverChannel', () => {
     await expect(ch.send(htmlBytes(RECEIPT_HTML))).rejects.toThrow(/测量失败.*script timeout/)
   })
 
-  it('测量结果非 JSON / 高度非法 / 纸宽属性缺失或非法 → 拒绝并提示 data-paper-width', async () => {
+  it('测量结果非 JSON / 高度非法 / 页宽属性缺失或非法 → 拒绝并提示 data-page-width-microns', async () => {
     const bad: string[] = [
       'not-json{{',
-      JSON.stringify({ h: 'x-large', paper: '58mm' }),
-      JSON.stringify({ h: 0 }),
-      JSON.stringify({ h: 800 }),
-      JSON.stringify({ h: 800, paper: '88mm' })
+      JSON.stringify({ h: 'x-large', pageWidthMicrons: '48000' }),
+      JSON.stringify({ h: 0, pageWidthMicrons: '48000' }),
+      JSON.stringify({ h: 800 }), // 页宽键缺失
+      JSON.stringify({ h: 800, pageWidthMicrons: '58mm' }), // 非微米数值
+      JSON.stringify({ h: 800, pageWidthMicrons: '0' }), // 零宽
+      JSON.stringify({ h: 800, pageWidthMicrons: '-48000' }), // 负宽
+      JSON.stringify({ h: 800, pageWidthMicrons: 48000 }) // dataset 永远是字符串，数字形状也拒
     ]
     for (const measureJson of bad) {
       const { win } = makeFakeWindow({ measureJson })
       const ch = new DriverChannel({ printerName: 'POS-80', createWindowFn: () => win })
       await expect(ch.send(htmlBytes(RECEIPT_HTML))).rejects.toThrow(
-        /driver channel.*(不可解析|非法|data-paper-width)/
+        /driver channel.*(不可解析|非法|data-page-width-microns)/
       )
     }
   })
@@ -241,7 +255,7 @@ describe('DriverChannel 实验打印选项条件组装（v2 driver 通道实验�
         silent: true,
         printBackground: true,
         deviceName: 'POS-58',
-        pageSize: { width: 58_000, height: expectedHeightMicrons(800) },
+        pageSize: { width: 48_000, height: expectedHeightMicrons(800) },
         margins: { marginType: 'none' }
       })
       expect(Object.keys(calls.printOptions[0])).not.toContain('dpi')
@@ -283,7 +297,7 @@ describe('DriverChannel 实验打印选项条件组装（v2 driver 通道实验�
         silent: true,
         printBackground: true,
         deviceName: 'POS-58',
-        pageSize: { width: 58_000, height: expectedHeightMicrons(800) },
+        pageSize: { width: 48_000, height: expectedHeightMicrons(800) },
         dpi: { horizontal: 203, vertical: 203 },
         margins: { marginType: 'none' }
       })
@@ -373,5 +387,108 @@ describe('DriverChannel logo decode 等待（v2 症状 2——测量竞态修复
     })
     // 无 decode API 的老元素（i.decode 缺席）：立即 resolve
     await runScript({ querySelector: () => ({}) })
+  })
+})
+
+// ═════════ v3 症状 1：版面自适应（右截断修复）+ 元素级测量脚本语义 ═════════
+
+describe('DriverChannel 版面自适应与测量脚本（v3 右截断修复）', () => {
+  /** 取测量脚本（区分于 decode 等待脚本：后者含 receipt-logo） */
+  async function measureScript(): Promise<string> {
+    const { win, calls } = makeFakeWindow()
+    await printHtmlViaDriver(RECEIPT_HTML, 'POS-58', () => win)
+    const script = calls.executed.find((code) => code.includes('pageWidthMicrons'))
+    expect(script).toBeDefined()
+    return script as string
+  }
+
+  it('vm 沙箱直跑：字体回退导致每行超宽时按实测比例回缩字号直到不溢出，再返回元素级页高 + 页宽微米', async () => {
+    const script = await measureScript()
+
+    // 真机 20261117 现场：容器 clientWidth=192px（32 列网格），字体逐字回退到
+    // monospace → 每字 0.594em（应 0.5em），32 字一行实测 216px 超宽 24px。
+    // scrollWidth 做成 getter：每轮回缩后重新按当前字号算，模拟真实重排。
+    const BASE_FS = 11.34
+    let fs = BASE_FS
+    const style: Record<string, string> = {}
+    const fitEl = {
+      clientWidth: 192,
+      scrollHeight: 538,
+      offsetTop: 0,
+      get scrollWidth(): number {
+        return Math.round(32 * fs * 0.594)
+      },
+      style
+    }
+    Object.defineProperty(style, 'fontSize', {
+      get: () => `${fs}px`,
+      set: (v: string) => {
+        fs = parseFloat(v)
+      }
+    })
+    const document = {
+      querySelector: (sel: string) => (sel === '.receipt-paper' ? fitEl : null),
+      // 地板值故意与元素级不同：若脚本回退到 documentElement，h 会是 999 而不是 538
+      documentElement: { scrollHeight: 999 },
+      body: { dataset: { pageWidthMicrons: '48000' } }
+    }
+
+    const raw = runInNewContext(script, {
+      document,
+      getComputedStyle: () => ({ fontSize: `${fs}px` })
+    }) as string
+
+    expect(JSON.parse(raw)).toEqual({ h: 538, pageWidthMicrons: '48000' })
+    // 回缩到不再溢出，且是**按实测比例**回缩（216→92 → 11.34→10.08），不是一刀切常数
+    expect(fitEl.scrollWidth).toBeLessThanOrEqual(fitEl.clientWidth + 1)
+    expect(fs).toBeLessThan(BASE_FS)
+    expect(fs).toBeCloseTo((BASE_FS * 192) / 216, 3)
+  })
+
+  it('vm 沙箱直跑：网格不超宽时字号原封不动（自适应不无故缩小版面）', async () => {
+    const script = await measureScript()
+
+    const BASE_FS = 11.34
+    let fs = BASE_FS
+    let writes = 0
+    const style: Record<string, string> = {}
+    const fitEl = { clientWidth: 192, scrollWidth: 192, scrollHeight: 400, offsetTop: 0, style }
+    Object.defineProperty(style, 'fontSize', {
+      get: () => `${fs}px`,
+      set: (v: string) => {
+        writes += 1
+        fs = parseFloat(v)
+      }
+    })
+    const document = {
+      querySelector: (sel: string) => (sel === '.receipt-paper' ? fitEl : null),
+      documentElement: { scrollHeight: 999 },
+      body: { dataset: { pageWidthMicrons: '48000' } }
+    }
+
+    const raw = runInNewContext(script, {
+      document,
+      getComputedStyle: () => ({ fontSize: `${fs}px` })
+    }) as string
+
+    expect(JSON.parse(raw)).toEqual({ h: 400, pageWidthMicrons: '48000' })
+    expect(fs).toBe(BASE_FS)
+    expect(writes).toBe(0) // 不超宽 → 一行内联样式都不写（不无故缩小版面）
+  })
+
+  it('vm 沙箱直跑：非收据 HTML（无 .receipt-paper）→ 回退 documentElement 页高，不 crash', async () => {
+    const script = await measureScript()
+
+    const document = {
+      querySelector: () => null,
+      documentElement: { scrollHeight: 700 },
+      body: { dataset: { pageWidthMicrons: '72000' } }
+    }
+    const raw = runInNewContext(script, {
+      document,
+      getComputedStyle: () => ({ fontSize: '11.34px' })
+    }) as string
+
+    expect(JSON.parse(raw)).toEqual({ h: 700, pageWidthMicrons: '72000' })
   })
 })

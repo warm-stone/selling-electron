@@ -14,14 +14,20 @@
  * interpolate → wrapToGrid → padLine（char-grid 冻结顺序），items 行
  * wrapToGrid/padLine 逐格组合（与 buildItemLines 同一数学，恒等降级），
  * SN 副行 buildSnLines；段落语义镜像 escpos-generator（header → items →
- * totals → footer；text/image/divider；size/bold/align），视觉样式镜像
- * ReceiptPreview（mono-cjk 12px 字格、221/307px 纸宽、scaleY/scaleX 放大、
- * 虚线分隔线、dataURL Logo）。模板 JSON 仍是唯一事实源。
+ * totals → footer；text/image/divider；size/bold/align）。模板 JSON 仍是唯一事实源。
+ *
+ * **版面几何不镜像 ReceiptPreview**（真机 20261117 结论）：预览是屏幕仿真，按纸宽
+ * 221/307px + 12px 字格排版；打印必须按**物理可打印宽**排版，否则最右几列落在
+ * 打印头之外（详见 RECEIPT_PRINT_GEOMETRY 头注）。G7 同源冻结的是网格数学
+ * （列数/折行/pad 组合顺序），不是 CSS 像素——两侧行集逐字一致的契约不受影响。
+ *
+ * **纯黑单色**（真机 20261117 结论）：热敏机是 1 位色深，任何非纯黑都会被驱动
+ * 抖动成灰阶网点，纸面表现就是「字里行间很多小白点」。打印侧一律 #000。
  *
  * 产物为完整独立文档（doctype + charset + 内联 style，零外部资源——离线
- * 可渲染）；body 带 data-paper-width="58mm|80mm"（driver 通道 executeJavaScript
- * 读取该属性定页宽微米）。所有插值文本经 HTML 转义（& < > " '——收据
- * 内容不得注入标记）。
+ * 可渲染）；body 带 data-paper-width="58mm|80mm"（纸张规格留档）与
+ * data-page-width-microns（driver 通道 executeJavaScript 读取该属性定页宽微米）。
+ * 所有插值文本经 HTML 转义（& < > " '——收据内容不得注入标记）。
  */
 
 import {
@@ -46,11 +52,77 @@ import {
   type SectionSize
 } from '../../../shared/receipt/template-schema'
 
-/** 纸张物理宽度（px，96dpi 圆整）：80mm≈307px、58mm≈221px——与 ReceiptPreview 同值（几何同源） */
-const PAPER_WIDTH_PX: Record<PaperWidth, number> = { '58mm': 221, '80mm': 307 }
+/** mm → CSS px（Chromium 96dpi：1mm = 96/25.4 px） */
+const MM_TO_PX = 96 / 25.4
 
-/** 12px 字号下半角字符宽（全角 12px/半角 6px）——Logo 最大宽换算基准（同 ReceiptPreview） */
-const HALF_CHAR_PX = 6
+/**
+ * 热敏纸**可打印**宽度（mm）：58mm 纸 → 48mm（384 点）、80mm 纸 → 72mm（576 点）
+ * ——@203dpi 的行业通用值，纸张两侧各有约 5mm/4mm 的物理不可打印边。
+ *
+ * 为什么按可打印宽而不是纸宽排版（真机 20261117 右截断根因之一）：旧版把
+ * .receipt-paper 定成纸宽 221px（≈58.5mm）、网格 32 列 × 6px = 192px（≈50.8mm），
+ * 比 48mm 可打印区宽出近 3mm——最右两列半落在打印头之外，右对齐的合计行
+ * 最后一个数字首当其冲。得力 DL-5801PW 的驱动 DEVMODE 也印证了这一点：它上报
+ * 的页宽正是 48000μm，而不是模板声称的 58000μm。
+ */
+const PRINTABLE_WIDTH_MM: Record<PaperWidth, number> = { '58mm': 48, '80mm': 72 }
+
+/** 行高倍数：3mm 字号 × 1.25 = 3.75mm = 30 点 @203dpi，与 ESC/POS 默认行距逐点同值 */
+const LINE_HEIGHT = 1.25
+
+/** driver 通道打印版面几何（唯一事实源——driver.channel / diagnostics / 测试共用） */
+export interface ReceiptPrintGeometry {
+  /** 页面宽（= 可打印宽），mm：.receipt-paper 容器宽 */
+  pageWidthMm: number
+  /** 页面宽，μm：driver 通道 pageSize.width（与驱动 DEVMODE 同基准，不再被驱动忽略） */
+  pageWidthMicrons: number
+  /** 页面宽，CSS px（96dpi 圆整）：render-check 水平溢出比对基准 */
+  pageWidthPx: number
+  /** 正文字号，mm：半角列宽 = pageWidthMm / PAPER_COLUMNS，全角恰占 2 列 */
+  fontSizeMm: number
+  /** .receipt-paper 的 padding（诊断 templateFacts.cssPadding 同源上报） */
+  cssPadding: string
+}
+
+/**
+ * 按纸宽派生几何。fontSizeMm 由「半角推进量 = 0.5em」反推（2 × 列宽）：
+ * 58mm/80mm 都得 3mm ≈ 24 点 @203dpi，恰是 ESC/POS 标准 24×24 点阵字、每列 12 点
+ * ——字形边界落在打印头点阵上，抗锯齿灰阶最少（灰阶越少，驱动抖动出的小白点越少）。
+ */
+function buildGeometry(paper: PaperWidth): ReceiptPrintGeometry {
+  const pageWidthMm = PRINTABLE_WIDTH_MM[paper]
+  return {
+    pageWidthMm,
+    pageWidthMicrons: Math.round(pageWidthMm * 1000),
+    pageWidthPx: Math.round(pageWidthMm * MM_TO_PX),
+    fontSizeMm: (2 * pageWidthMm) / PAPER_COLUMNS[paper],
+    // 可打印区就是物理边界：左右不留白（留白等于白扔可用点数），上下给 1mm 呼吸位
+    cssPadding: '1mm 0'
+  }
+}
+
+/** 各纸宽的打印版面几何（driver 通道页宽/字号、诊断溢出比对基准的共同来源） */
+export const RECEIPT_PRINT_GEOMETRY: Record<PaperWidth, ReceiptPrintGeometry> = {
+  '58mm': buildGeometry('58mm'),
+  '80mm': buildGeometry('80mm')
+}
+
+/**
+ * 版面自适应脚本体（driver.channel 与 render-check 共用——生产打印与诊断测量必须
+ * 走同一条「先适配、再测量」路径，否则诊断报的溢出与真机裁切对不上）。
+ *
+ * 为什么需要（真机 20261117 右截断根因之二）：网格数学假设半角推进量 = 0.5em，
+ * 只有 NSimSun 这类等宽 CJK 字体成立。实测反推：诊断样本内容宽 228px / 32 列 =
+ * 7.125px = **0.594em**，比假设宽 18.75%——说明该机 ASCII/数字逐字回退到了
+ * monospace（Courier New 一类 0.6em）而汉字仍走 NSimSun：版面看着正常，但每行都偏宽，
+ * 顶在最右端的合计行金额尾数就被 overflow:hidden 吃掉。字体回退、合成粗体加宽、
+ * 逐字亚像素取整都无法在生成期预知，此处按实测比例回缩字号直到不溢出
+ * （最多 8 轮，线性收敛通常 1-2 轮），把「字体度量假设」从前提降级为兜底。
+ *
+ * 自带块级作用域（`{ ... }`）：可安全内联进任何 IIFE，不与宿主的 `el` 等标识符冲突。
+ */
+export const FIT_TO_WIDTH_BODY =
+  "{ const fitEl = document.querySelector('.receipt-paper'); if (fitEl) { for (let i = 0; i < 8 && fitEl.scrollWidth > fitEl.clientWidth + 1; i++) { const fs = parseFloat(getComputedStyle(fitEl).fontSize); if (!(fs > 0)) break; fitEl.style.fontSize = (fs * fitEl.clientWidth / fitEl.scrollWidth).toFixed(4) + 'px'; } } }"
 
 /** HTML 转义：& < > " '（全部插值文本必经——店名/商品名/变量值不得注入标记） */
 function escapeHtml(s: string): string {
@@ -76,13 +148,13 @@ function lineClasses(line: { bold?: boolean; size?: SectionSize }): string {
  * 行内联样式（同 ReceiptPreview.lineStyle）：align → text-align（pad 已做
  * 字符级对齐，text-align 为 CSS 层同语义映射）；放大尺寸的 transform-origin
  * 按对齐方向锚定；倍高/quad 的 scaleY 视觉翻倍但不占布局——margin-bottom
- * 1.35em 补偿防行叠压（打印侧高度测量 scrollHeight 同此布局高度）。
+ * 补一个行高防行叠压（打印侧高度测量 scrollHeight 同此布局高度）。
  */
 function lineStyle(line: { align?: LineAlign; size?: SectionSize }): string {
   const align = line.align ?? 'left'
   const decls = [`text-align: ${align}`]
   if (line.size === 'doubleHeight' || line.size === 'quad') {
-    decls.push(`transform-origin: ${align} top`, 'margin-bottom: 1.35em')
+    decls.push(`transform-origin: ${align} top`, `margin-bottom: ${LINE_HEIGHT}em`)
   } else if (line.size === 'doubleWidth') {
     decls.push(`transform-origin: ${align} center`)
   }
@@ -117,7 +189,8 @@ function sectionHtml(
   section: Section,
   vars: ReceiptVars,
   cols: number,
-  logoBuffers: Map<number, Buffer>
+  logoBuffers: Map<number, Buffer>,
+  geom: ReceiptPrintGeometry
 ): string {
   switch (section.type) {
     case 'text':
@@ -125,11 +198,12 @@ function sectionHtml(
     case 'image': {
       const logo = section.logoId !== undefined ? logoBuffers.get(section.logoId) : undefined
       if (!logo) return ''
-      // base64 字符集不含 & < > " '，src 无需转义；max-width 与 ReceiptPreview
-      // 同基准（cols × 6px），CSS 侧另有 max-width:100% 兜底
+      // base64 字符集不含 & < > " '，src 无需转义；max-width 用物理可打印宽
+      // （mm 单位——与容器同基准，字号被自适应回缩时不受 px 假设影响），
+      // CSS 侧另有 max-width:100% 兜底
       return `<img class="receipt-logo" src="data:image/png;base64,${logo.toString(
         'base64'
-      )}" style="max-width: ${cols * HALF_CHAR_PX}px" alt="店铺 Logo">`
+      )}" style="max-width: ${geom.pageWidthMm}mm" alt="店铺 Logo">`
     }
     case 'divider':
       return '<div class="receipt-divider"></div>'
@@ -230,22 +304,32 @@ function itemsTableHtml(template: ReceiptTemplate, data: SaleReceiptData): strin
 // ─────────────────────── 文档骨架（完整独立 HTML） ───────────────────────
 
 /**
- * 内联样式（ReceiptPreview scoped 样式的独立文档版）：mono-cjk 字体栈
- * （NSimSun/SimSun——全角恰 2× 半角的等宽 CJK，网格 pad 对齐的前提）、
- * 12px 字格、1.35 行高、221/307px 纸宽容器、scaleY/scaleX 放大、虚线分隔线。
+ * 内联样式（打印文档专用，**不是** ReceiptPreview scoped 样式的拷贝）：
+ * - 字体栈 NSimSun/SimSun——全角恰 2× 半角的等宽 CJK，网格 pad 对齐的前提；
+ *   该假设在目标机不成立时由 FIT_TO_WIDTH_BODY 实测回缩兜底（见其头注）。
+ * - 尺寸一律 mm 而不用 px：热敏机是点阵设备（203dpi → 1 点 = 0.125mm），用 mm
+ *   排版才能让「1 列 = 12 点、字高 = 24 点、行距 = 30 点」落在整数点上；px 排版
+ *   会被 96dpi→203dpi 的 2.1146 倍非整数缩放重采样，字形边缘出灰阶（再被
+ *   1 位色深抖动成小白点）。
+ * - 一律纯黑：旧版正文 #14161a、分隔线 #5a5f66、剪切线 #9aa0a8 全是屏幕灰，
+ *   到热敏机上全部变成抖动网点。
  * 打印路径零外部资源（无字体/图片外链）——data: URL 载入 + 离线渲染。
  */
-const RECEIPT_CSS = `
+function receiptCss(g: ReceiptPrintGeometry): string {
+  return `
 html, body { margin: 0; padding: 0; background: #ffffff; }
 .receipt-paper {
   box-sizing: border-box;
-  padding: 12px 9px;
+  width: ${g.pageWidthMm}mm;
+  padding: ${g.cssPadding};
   background: #ffffff;
-  color: #14161a;
+  color: #000000;
   font-family: "NSimSun", "SimSun", monospace;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: ${g.fontSizeMm}mm;
+  line-height: ${LINE_HEIGHT};
   overflow: hidden;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 .receipt-line { white-space: pre; font-weight: 400; }
 .receipt-items { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -255,20 +339,21 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
 .receipt-line--double-height { display: inline-block; transform: scaleY(2); }
 .receipt-line--double-width { display: inline-block; transform: scaleX(2); }
 .receipt-line--quad { display: inline-block; transform: scale(2); }
-.receipt-divider { margin: 6px 0; border-top: 1px dashed #5a5f66; }
-.receipt-logo { display: block; margin: 2px auto; max-width: 100%; }
-.receipt-cut { margin: 10px 0 2px; border-top: 1px dashed #9aa0a8; position: relative; }
+.receipt-divider { margin: 1.5mm 0; border-top: 1px dashed #000000; }
+.receipt-logo { display: block; margin: 0.5mm auto; max-width: 100%; }
+.receipt-cut { margin: 2.5mm 0 0.5mm; border-top: 1px dashed #000000; position: relative; }
 .receipt-cut::after {
   content: '✂';
   position: absolute;
   right: 0;
-  top: -9px;
-  font-size: 12px;
-  color: #9aa0a8;
+  top: -0.75em;
+  font-size: 1em;
+  color: #000000;
   background: #ffffff;
-  padding: 0 2px;
+  padding: 0 0.17em;
 }
 `.trim()
+}
 
 /**
  * 纯函数：模板 + 明细 + 变量 + Logo → 完整收据 HTML 文档。
@@ -283,17 +368,17 @@ export function generateReceiptHtml(
   logoBuffers: Map<number, Buffer>
 ): string {
   const cols = PAPER_COLUMNS[template.paperWidth]
-  const paperWidthPx = PAPER_WIDTH_PX[template.paperWidth]
+  const geom = RECEIPT_PRINT_GEOMETRY[template.paperWidth]
 
   const header = template.header
-    .map((s) => sectionHtml(s, vars, cols, logoBuffers))
+    .map((s) => sectionHtml(s, vars, cols, logoBuffers, geom))
     .join('')
   const items = itemsTableHtml(template, data)
   const totals = template.totals
     .map((t) => textLinesHtml(interpolateVariables(t.label, vars), t, cols))
     .join('')
   const footer = template.footer
-    .map((s) => sectionHtml(s, vars, cols, logoBuffers))
+    .map((s) => sectionHtml(s, vars, cols, logoBuffers, geom))
     .join('')
   // cutPaper：剪切示意线（HTML 不切纸——驱动渲染路径无 GS V 指令，仅视觉对齐预览）
   const cut = template.cutPaper ? '<div class="receipt-cut" aria-hidden="true"></div>' : ''
@@ -306,11 +391,13 @@ export function generateReceiptHtml(
     '<head>',
     '<meta charset="utf-8">',
     '<title>小票</title>',
-    `<style>${RECEIPT_CSS}</style>`,
+    `<style>${receiptCss(geom)}</style>`,
     '</head>',
-    // data-paper-width：driver 通道读取该属性定页宽微米（58mm→58000 / 80mm→80000）
-    `<body data-paper-width="${template.paperWidth}">`,
-    `<div class="receipt-paper" style="width: ${paperWidthPx}px">`,
+    // data-paper-width：纸张规格留档（诊断报告可读）；data-page-width-microns：
+    // driver 通道据此定 pageSize.width = 可打印宽（与驱动 DEVMODE 同基准——旧版
+    // 下发纸宽 58000 而驱动实际用 48000，是右截断的根）
+    `<body data-paper-width="${template.paperWidth}" data-page-width-microns="${geom.pageWidthMicrons}">`,
+    '<div class="receipt-paper">',
     body,
     '</div>',
     '</body>',
