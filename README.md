@@ -12,7 +12,7 @@ Windows 桌面销存系统（POS / 进销存）：Electron + Vue 3 + TypeScript 
 - **销售记录**：按日期/状态/客户姓名/电话/是否国补筛选，列表含国补/销售人员/订单备注/客户列，双击查看明细（可修改国补/订单备注/销售人员/客户关联），随时重打小票（使用当前模板）
 - **报表**：日报 / 月报（按日分桶，日报含国补销售额小计与明细两列），导出 `.txt` / `.xlsx` / `.docx`
 - **小票打印**：模板体系（表单式编辑 + 实时预览 + 可用变量说明区，58mm/80mm 双纸宽）、ESC/POS 指令直发（粗体/倍高倍宽/居中/自动切纸/Logo 光栅钳制纸宽）、四种通道（Windows spooler RAW 主通道 / tcp 辅 / 串口备 / driver 驱动渲染兜底——「云」打印机兼容）、打印串行队列（连续结账不交叠）
-- **设置**：店铺信息、打印机通道配置、Logo 上传；打印机诊断面板（一键采集 → 17 条规则判定 → L1/L2 修复建议与执行 → 三层报告导出）；打印高级选项（实验）——driver 通道显式 DPI / 驱动默认页尺寸两条 workaround 开关（值域校验 + 诊断报告观测留档）
+- **设置**：店铺信息、打印机通道配置、Logo 上传；打印机诊断面板（一键采集 → 17 条规则判定 → L1/L2 修复建议与执行 → 三层报告导出）；打印高级选项（实验）——driver 通道显式 DPI / 驱动默认页尺寸两条 workaround 开关（值域校验 + 诊断报告观测留档）；编码探针——RAW 通道一张纸打四段编码假设（ASCII / UTF-8 / GBK+FS& / GS v 0 光栅），纸上结果直接定位系统打印通道的中文修法
 
 ## 架构（文字版）
 
@@ -50,7 +50,7 @@ main (Electron 主进程)
 | 存储 | better-sqlite3 v13（N-API prebuilds，免 rebuild；WAL 模式；`PRAGMA user_version` 迁移） |
 | 打印 | node-thermal-printer（ESC/POS 指令生成，纯函数零 I/O） |
 | 导出 | exceljs（xlsx）/ docx（.docx）/ 原生 txt（UTF-8 BOM + CRLF） |
-| 测试 | vitest（单元 + golden 字节矩阵，1026 用例）+ Playwright `_electron`（E2E 103 场景，含打印机诊断 11 场景） |
+| 测试 | vitest（单元 + golden 字节矩阵，1048 用例）+ Playwright `_electron`（E2E 103 场景，含打印机诊断 11 场景） |
 | 打包 | electron-builder 26（NSIS） |
 
 ## 开发
@@ -61,7 +61,7 @@ main (Electron 主进程)
 npm install        # postinstall 自动补齐 Electron 二进制（install-electron）
 npm run dev        # 启动开发（HMR）
 npm run typecheck  # 类型检查（node + web 两侧）
-npm test           # vitest 单元测试（1026 用例）
+npm test           # vitest 单元测试（1048 用例）
 npm run test:e2e   # Playwright E2E（globalSetup 自动先构建 out/）
 npm run build      # 构建 out/（main/preload/renderer）
 ```
@@ -104,7 +104,7 @@ WAL 说明：`.db` 是主数据库文件；`.db-wal` 是预写日志（应用运
 
 ## 真机验证
 
-安装包与打印/扫码等真机环节的逐项验证指引：**[docs/windows-manual-checklist.md](docs/windows-manual-checklist.md)**（10 项：安装建库、打印机列表、spooler 测试打印、结账打印全要素、tcp 通道、扫码枪（含中文输入法状态）、连续结账串行、生僻字降级、数据备份、打印机诊断（含 spike 验证））。
+安装包与打印/扫码等真机环节的逐项验证指引：**[docs/windows-manual-checklist.md](docs/windows-manual-checklist.md)**（12 项：安装建库、打印机列表、spooler 测试打印、结账打印全要素、tcp 通道、扫码枪（含中文输入法状态）、连续结账串行、生僻字降级、数据备份、打印机诊断（含 spike 验证）、v2 真机闭环（已回填）、v3 复测与编码探针）。
 
 ## 已知设计边界
 
