@@ -51,6 +51,7 @@ import {
   type SectionSize,
   type TotalLine
 } from '../../../shared/receipt/template-schema'
+import { FS_HANZI_MODE, FULL_CUT, GS_MAGNIFICATION_RESET, HW_INIT } from './commands'
 import { degradeToGbk } from './gb2312-encoder'
 import { buildLogoRaster } from './raster'
 
@@ -82,30 +83,10 @@ export interface ReceiptPrintVars {
 export { ITEM_COLUMN_WIDTHS }
 export type { ItemColumnWidths, ReceiptItemLine, SaleReceiptData }
 
-// ═════════════════════ 指令常量（规范字节直发） ═════════════════════
-
-/** `ESC @`：初始化/清除模式（库 initHardware 未暴露在 .d.ts，add 字节等价直发） */
-const HW_INIT = Buffer.from([0x1b, 0x40])
-
-/**
- * `FS &`（1c 26）：进入汉字模式（ESC/POS 标准汉字指令，官方 issue #75
- * 验证方案）。国产打印机大多忽略 `ESC R 15`（国际字符集指令），只有
- * `FS &` 能让固件接受后续 GBK 双字节流；在 setCharacterSet(CHINA)
- * 之后追加，与其发出的 `ESC R 15` 共存无害。
- */
-const FS_HANZI_MODE = Buffer.from([0x1c, 0x26])
-
-/**
- * `GS ! 0x00`（倍宽/倍高放大归一）。按规范字节直发的原因：
- * 库的 setTextSize 把十进制数字当十六进制拼装（(1,1)→0x11 = 2×2），
- * 语义错误，不能用于尺寸控制。
- */
-const GS_MAGNIFICATION_RESET = Buffer.from([0x1d, 0x21, 0x00])
-
-/** `GS V 66 0`：走纸 0 单位后全切（任务契约的切纸字节序列；库 cut() 发 1d 56 00） */
-const FULL_CUT = Buffer.from([0x1d, 0x56, 0x42, 0x00])
-
 // ═════════════════════ 生成器主体 ═════════════════════
+//
+// 指令常量（ESC @ / FS & / GS ! / GS V 66 0）统一在 ./commands——编码探针
+// （raw-probe）必须发同一串字节，否则探针测的不是生产链路。
 
 /**
  * 纯函数：模板 + 销售 + 变量 → ESC/POS 字节流。

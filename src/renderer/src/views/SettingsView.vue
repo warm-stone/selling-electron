@@ -5,6 +5,11 @@ import { Delete, Picture, Printer, Refresh, Search } from '@element-plus/icons-v
 import DiagnosisDialog from '@renderer/components/settings/DiagnosisDialog.vue'
 import { usePrintingStore } from '@renderer/stores/printing.store'
 import type { AppSettings, PrinterChannel } from '../../../shared/types'
+import {
+  RAW_PROBE_READINGS,
+  RAW_PROBE_SEGMENT_LABELS,
+  RAW_PROBE_VERDICTS
+} from '../../../shared/printing/raw-probe'
 
 interface PrinterEntry {
   name: string
@@ -22,6 +27,7 @@ const uploadingLogo = ref(false)
 const savingShop = ref(false)
 const savingPrint = ref(false)
 const testing = ref(false)
+const probing = ref(false)
 
 const shopForm = reactive({ shop_name: '', shop_phone: '', receipt_note: '' })
 
@@ -57,7 +63,8 @@ const CHANNEL_OPTIONS: Array<{ value: PrinterChannel; title: string; desc: strin
   { value: 'spooler', title: '系统打印机', desc: 'Windows 打印后台 RAW 直发（推荐）' },
   { value: 'tcp', title: '网络打印机', desc: '打印机网口直连 host:9100' },
   { value: 'serial', title: '串口打印机', desc: 'COM 口直连（备用通道）' },
-  // driver 兜底：得力 DL-5801PW 等「云」热敏机 RAW 模式丢 GBK 中文/光栅图，
+  // driver 兜底：得力 DL-5801PW 等「云」热敏机走 spooler 时中文/Logo 不出（固件丢在哪一层
+  // 尚未定证——用设置页「编码探针」分辨，见 docs/windows-manual-checklist.md §11.3），
   // 走打印机驱动渲染 HTML（同 Word 打印路径）则全兼容——详见 driver.channel.ts
   { value: 'driver', title: '驱动渲染', desc: '经打印机驱动渲染 HTML（云打印机/中文图片打不出时用，同 Word 打印路径）' }
 ]
@@ -146,16 +153,21 @@ async function savePrint(): Promise<void> {
   }
 }
 
+/** 打印表单 → IPC 请求（测试打印与编码探针共用：空字符串 → null） */
+function printRequestFromForm() {
+  return {
+    printer_channel: printForm.printer_channel,
+    printer_name: printForm.printer_name === '' ? null : printForm.printer_name,
+    tcp_host: printForm.tcp_host === '' ? null : printForm.tcp_host,
+    tcp_port: printForm.tcp_port === '' ? null : Number.parseInt(printForm.tcp_port, 10),
+    com_port: printForm.com_port === '' ? null : printForm.com_port
+  }
+}
+
 async function testPrint(): Promise<void> {
   testing.value = true
   try {
-    const result = await window.api.printing.testPrint({
-      printer_channel: printForm.printer_channel,
-      printer_name: printForm.printer_name === '' ? null : printForm.printer_name,
-      tcp_host: printForm.tcp_host === '' ? null : printForm.tcp_host,
-      tcp_port: printForm.tcp_port === '' ? null : Number.parseInt(printForm.tcp_port, 10),
-      com_port: printForm.com_port === '' ? null : printForm.com_port
-    })
+    const result = await window.api.printing.testPrint(printRequestFromForm())
     if (result.ok) {
       ElMessage.success('测试打印已发送')
     } else {
@@ -167,6 +179,60 @@ async function testPrint(): Promise<void> {
   } finally {
     testing.value = false
   }
+}
+
+/**
+ * RAW 编码探针（F1）：先把探针页发出去，再弹判读表——用户是拿着纸对照看的，
+ * 先弹表会把「发送中」的等待和「看纸」的步骤混在一起。关闭弹框（含右上角 X）
+ * 不算失败，吹掉 reject。
+ */
+async function rawProbe(): Promise<void> {
+  probing.value = true
+  try {
+    const result = await window.api.printing.rawProbe(printRequestFromForm())
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '编码探针打印失败')
+      return
+    }
+    await ElMessageBox.alert(probeGuideHtml(), '编码探针已发送——照着纸判读', {
+      dangerouslyUseHTMLString: true,
+      confirmButtonText: '我已看过纸',
+      customStyle: { width: '900px', maxWidth: '94vw' }
+    }).catch(() => undefined)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    ElMessage.error(`编码探针打印失败：${detail}`)
+  } finally {
+    probing.value = false
+  }
+}
+
+/** 探针判读表 HTML（ElMessageBox 内容在 scoped CSS 之外，样式一律内联） */
+function probeGuideHtml(): string {
+  const th =
+    'style="text-align:left;padding:4px 8px;border-bottom:1px solid #dcdfe6;white-space:nowrap"'
+  const td = 'style="padding:6px 8px;border-bottom:1px solid #ebeef5;vertical-align:top"'
+  const rows = RAW_PROBE_READINGS.map((r) => {
+    const label = RAW_PROBE_SEGMENT_LABELS[r.id]
+    return (
+      `<tr><td ${td}><b>${label}</b>` +
+      `<div style="color:#909399;font-size:12px">纸上：${r.prints}</div></td>` +
+      `<td ${td}>${r.bytes}</td>` +
+      `<td ${td}>出字/出图 → ${r.ifWorks}</td>` +
+      `<td ${td}>空白/乱码 → ${r.ifFails}</td></tr>`
+    )
+  }).join('')
+  const verdicts = RAW_PROBE_VERDICTS.map(
+    (v) => `<li style="margin-bottom:4px"><b>${v.when}</b> → ${v.then}</li>`
+  ).join('')
+  return (
+    '<div style="font-size:13px;line-height:1.6">' +
+    '<table style="border-collapse:collapse;width:100%"><thead><tr>' +
+    `<th ${th}>段</th><th ${th}>发的字节</th><th ${th}>通过说明</th><th ${th}>失败说明</th>` +
+    `</tr></thead><tbody>${rows}</tbody></table>` +
+    '<p style="margin:12px 0 4px"><b>结论速查</b></p>' +
+    `<ul style="margin:0;padding-left:18px">${verdicts}</ul></div>`
+  )
 }
 
 async function onUploadLogo(): Promise<void> {
@@ -425,8 +491,13 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
       </el-form>
 
       <footer class="card-foot">
-        <span class="card-foot__hint">测试打印发送最小样张：初始化 + 居中 test + 切纸。</span>
+        <span class="card-foot__hint">
+          测试打印发一张完整样张小票（中文店名 + 商品明细）；编码探针打一张四段判读页，用于定位系统打印通道的中文编码（仅 RAW 通道）。
+        </span>
         <div class="card-foot__actions">
+          <el-button plain data-testid="raw-probe-btn" :loading="probing" @click="rawProbe">
+            编码探针
+          </el-button>
           <el-button
             :icon="Printer"
             data-testid="test-print-btn"

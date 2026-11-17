@@ -14,6 +14,7 @@ import {
 } from '../printing/print.service'
 import type { PrintSettings } from '../printing/print.service'
 import { generateReceiptBytes } from '../printing/escpos/escpos-generator'
+import { buildRawProbeBytes } from '../printing/escpos/raw-probe'
 import { generateReceiptHtml } from '../printing/driver/receipt-html'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
 import type { ReceiptTemplate, ReceiptVars } from '../../shared/receipt/template-schema'
@@ -37,6 +38,8 @@ import { rowsToAppSettings } from './settings.ipc'
  *                       纯 ASCII 假字节无法暴露真机问题）
  *  - printing:preview   小票预览（T15：预览与打印同源组装——G7）
  *  - printing:print     小票打印（T15：串行队列 best-effort，失败不影响已保存销售——G3）
+ *  - printing:rawProbe  RAW 编码探针（F1：一张纸四段编码假设，纸上结果决定
+ *                       spooler 通道的中文修法；driver 通道直接拒）
  *
  * ★ 只消费上游产物（printer-enumerator / print-channel 守卫 / getChannel /
  *   PrintQueue / generateReceiptBytes / generateReceiptHtml / 各 repo），
@@ -247,6 +250,37 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         return { ok: false, error: `测试打印失败（${settings.printer_channel} 通道）：${detail}` }
+      }
+    }
+  )
+
+  /**
+   * RAW 编码探针（F1）：一张纸按顺序打四段（ASCII / UTF-8 / GBK+FS& / GS v 0 光栅），
+   * 纸上结果决定 spooler 通道的中文修法（判读表在 shared/printing/raw-probe.ts）。
+   * driver 通道直接拒：那条通道把字节当 HTML 渲染，探针发过去只会打出一堆源码。
+   */
+  ipcMain.handle(
+    'printing:rawProbe',
+    async (
+      _event,
+      req: Partial<PrintTestRequest> | undefined
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const settings = toPrintSettings(req)
+      if (settings.printer_channel === 'driver') {
+        return {
+          ok: false,
+          error:
+            '编码探针只能走 RAW 通道（系统打印/网络/串口）：driver 通道会把字节当 HTML 渲染，探针无意义。请先把打印通道切到「系统打印」再点探针。'
+        }
+      }
+      try {
+        const channel = getChannel(settings)
+        const template = parseTemplateRow(templateRepo.getDefault())
+        await new PrintQueue(channel).enqueuePrintJob(buildRawProbeBytes(template.paperWidth))
+        return { ok: true }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        return { ok: false, error: `编码探针打印失败（${settings.printer_channel} 通道）：${detail}` }
       }
     }
   )

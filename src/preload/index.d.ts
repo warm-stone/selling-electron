@@ -130,6 +130,12 @@ export interface PrintingPreviewResult {
 export interface PrintingApi {
   printers: () => Promise<{ name: string; is_default: boolean }[]>
   testPrint: (req: PrintTestRequest) => Promise<{ ok: boolean; error?: string }>
+  /**
+   * RAW 编码探针（printing:rawProbe）：一张纸打四段编码假设（ASCII / UTF-8 /
+   * GBK+FS& / GS v 0 光栅），纸上结果决定系统打印通道能不能修好中文；
+   * driver 通道后端直接拒（那条通道把字节当 HTML 渲染）。
+   */
+  rawProbe: (req: PrintTestRequest) => Promise<{ ok: boolean; error?: string }>
   /** 小票预览（printing:preview）：ReceiptPreview 同源渲染（G7） */
   preview: (saleId: number) => Promise<PrintingPreviewResult>
   /** 小票打印（printing:print）：串行队列 best-effort；失败 { ok:false, error }（G3 不影响已保存销售） */

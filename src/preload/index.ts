@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DiagnosticReport, RepairActionId } from '../main/printing/diagnostics/schema'
+import type { PrintTestRequest } from '../main/ipc/printing.ipc'
 import type {
   AppSettings,
   CheckoutExtrasInput,
@@ -201,14 +202,15 @@ const api = {
      * req 为设置页当前打印表单值；走串行队列（PrintQueue），失败返回
      * { ok:false, error }（error 首段含通道名）。
      */
-    testPrint: (req: {
-      printer_channel: AppSettings['printer_channel']
-      printer_name: string | null
-      tcp_host: string | null
-      tcp_port: number | null
-      com_port: string | null
-    }): Promise<{ ok: boolean; error?: string }> =>
+    testPrint: (req: PrintTestRequest): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('printing:testPrint', req),
+    /**
+     * RAW 编码探针（F1）：一张纸按顺序打四段编码假设（ASCII / UTF-8 /
+     * GBK+FS& / GS v 0 光栅），纸上结果决定系统打印通道能不能修好中文。
+     * req 同 testPrint（设置页当前打印表单值）；driver 通道后端直接拒。
+     */
+    rawProbe: (req: PrintTestRequest): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('printing:rawProbe', req),
     /**
      * 小票预览（Task 15）：返回模板/明细/vars/logoUrls——与打印字节同一组装
      * 源头（G7）。与 index.d.ts 的 PrintingPreviewResult 保持结构同步。
