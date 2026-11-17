@@ -1,5 +1,6 @@
+import { EventEmitter } from 'node:events'
 import net from 'node:net'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { TcpChannel } from '../../../../src/main/printing/channels/tcp.channel'
 
 /**
@@ -79,13 +80,30 @@ describe('TcpChannel', () => {
     await expect(ch.send(new Uint8Array([0x1b, 0x40]))).rejects.toThrow(/tcp/i)
   })
 
-  it('连接超时（不可路由地址 + 短超时）→ 快速拒绝不挂死', async () => {
-    // RFC 5737 TEST-NET-1，保证不可路由（SYN 被丢弃）
-    const ch = new TcpChannel({ host: '192.0.2.1', port: 9100, connectTimeoutMs: 400 })
-    const start = Date.now()
-    await expect(ch.send(new Uint8Array([0x1b]))).rejects.toThrow()
-    const elapsed = Date.now() - start
-    expect(elapsed).toBeLessThan(3000) // 不得挂死
+  it('连接超时（对端不应答）→ 快速拒绝不挂死且销毁 socket', async () => {
+    // 不连真实地址：RFC 5737 TEST-NET-1 在部分网络（本机 WSL2 NAT、部分 CI runner）会被
+    // 透明代理接走并握手成功，「连不可路由地址」的写法把测试结果交给了环境（v0.4.2 发布因此被卡）
+    const destroyed: boolean[] = []
+    const fake = Object.assign(new EventEmitter(), {
+      destroy: () => {
+        destroyed.push(true)
+      },
+      write: () => true,
+      end: () => undefined
+    })
+    const spy = vi
+      .spyOn(net, 'createConnection')
+      .mockReturnValue(fake as unknown as net.Socket)
+
+    try {
+      const ch = new TcpChannel({ host: '192.0.2.1', port: 9100, connectTimeoutMs: 400 })
+      const start = Date.now()
+      await expect(ch.send(new Uint8Array([0x1b]))).rejects.toThrow(/连接超时/)
+      expect(Date.now() - start).toBeLessThan(3000) // 不得挂死
+      expect(destroyed).toEqual([true]) // 超时后必须销毁 socket，不留半开连接
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('未配置 host → send 拒绝并给出可诊断错误', async () => {
