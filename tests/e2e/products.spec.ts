@@ -54,6 +54,8 @@ async function fillProductForm(
   fields: { barcode?: string; name: string; stock: number; price: number | null }
 ): Promise<void> {
   const dialog = page.locator('.el-dialog')
+  // 建档默认「SN 商品」→ 本 spec 全为批量计商品，需显式切回（否则初始库存字段隐藏）
+  await page.getByTestId('product-tracking').getByText('批量计商品').click()
   if (fields.barcode !== undefined) {
     await dialog.locator('.el-form-item').filter({ hasText: '条码' }).locator('input').fill(fields.barcode)
   }

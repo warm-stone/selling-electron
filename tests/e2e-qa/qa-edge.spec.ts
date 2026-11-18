@@ -145,6 +145,8 @@ test.describe.serial('F3 QA · B：边界案例', () => {
     await page.getByRole('button', { name: '新增商品' }).click()
     const dialog = page.locator('.el-dialog')
     await expect(dialog).toBeVisible()
+    // 建档默认「SN 商品」→ 本例为批量计商品，需显式切回（否则库存字段隐藏）
+    await page.getByTestId('product-tracking').getByText('批量计商品').click()
     await dialog
       .locator('.el-form-item')
       .filter({ hasText: '条码' })

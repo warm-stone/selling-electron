@@ -141,6 +141,8 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
       await page.getByRole('button', { name: '新增商品' }).click()
       const dialog = page.locator('.el-dialog')
       await expect(dialog).toBeVisible()
+      // 建档默认「SN 商品」→ QA 商品均为批量计，需显式切回（否则库存字段隐藏）
+      await page.getByTestId('product-tracking').getByText('批量计商品').click()
       if (fields.barcode !== undefined) {
         await dialog
           .locator('.el-form-item')

@@ -50,12 +50,15 @@ interface ProductFormState {
   snPrefix: string
 }
 
+/** 建档默认「SN 商品」（一物一码为主业态）；批量计需显式切换 */
+const DEFAULT_TRACKING: ProductTracking = 'sn'
+
 const form = reactive<ProductFormState>({
   barcode: '',
   name: '',
   stock: 0,
   price: null,
-  tracking: 'quantity',
+  tracking: DEFAULT_TRACKING,
   snPrefix: ''
 })
 
@@ -139,7 +142,7 @@ function openCreate(): void {
     name: '',
     stock: 0,
     price: null,
-    tracking: 'quantity',
+    tracking: DEFAULT_TRACKING,
     snPrefix: ''
   })
   dialogVisible.value = true
