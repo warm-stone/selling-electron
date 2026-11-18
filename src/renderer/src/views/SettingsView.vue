@@ -60,13 +60,13 @@ const printForm = reactive({
 })
 
 const CHANNEL_OPTIONS: Array<{ value: PrinterChannel; title: string; desc: string }> = [
-  { value: 'spooler', title: '系统打印机', desc: 'Windows 打印后台 RAW 直发（推荐）' },
-  { value: 'tcp', title: '网络打印机', desc: '打印机网口直连 host:9100' },
-  { value: 'serial', title: '串口打印机', desc: 'COM 口直连（备用通道）' },
+  { value: 'spooler', title: '系统打印机', desc: 'Windows 打印后台 RAW 直发' },
   // driver 兜底：得力 DL-5801PW 等「云」热敏机走 spooler 时中文/Logo 不出（固件丢在哪一层
   // 尚未定证——用设置页「编码探针」分辨，见 docs/windows-manual-checklist.md §11.3），
   // 走打印机驱动渲染 HTML（同 Word 打印路径）则全兼容——详见 driver.channel.ts
-  { value: 'driver', title: '驱动渲染', desc: '经打印机驱动渲染 HTML（云打印机/中文图片打不出时用，同 Word 打印路径）' }
+  { value: 'driver', title: '驱动渲染', desc: '使用打印机原生驱动' },
+  { value: 'tcp', title: '网络打印机', desc: '打印机网口直连 host:9100' },
+  { value: 'serial', title: '串口打印机', desc: 'COM 口直连（备用通道）' }
 ]
 
 async function loadSettings(): Promise<void> {
