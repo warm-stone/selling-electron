@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { basename, join } from 'node:path'
-import type { DiagnosticReport } from '../../../../src/main/printing/diagnostics/schema'
+import type { DiagnosticReport } from '../../../../src/shared/printing/diagnostics-schema'
 import {
   archiveHistory,
   buildReportTxt,

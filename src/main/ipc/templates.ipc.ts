@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { PaperWidth } from '../../shared/receipt/char-grid'
 import type { ReceiptTemplate } from '../../shared/receipt/template-schema'
+import { typedHandle } from './typed-handle'
 import { createTemplateRepo, type UpdateTemplatePatch } from '../db/repositories/template.repo'
 
 /**
@@ -92,24 +93,24 @@ export function registerTemplatesIpc(db: Database.Database): void {
   const { ipcMain } = require('electron') as typeof import('electron')
   const repo = createTemplateRepo(db)
 
-  ipcMain.handle('templates:list', () => repo.list())
+  typedHandle(ipcMain, 'templates:list', () => repo.list())
 
-  ipcMain.handle('templates:create', (_event, req: unknown) => {
+  typedHandle(ipcMain, 'templates:create', (req) => {
     const { name, template } = parseTemplatesCreateRequest(req)
     return repo.create({ name, template })
   })
 
-  ipcMain.handle('templates:update', (_event, req: unknown) => {
+  typedHandle(ipcMain, 'templates:update', (req) => {
     const { id, patch } = parseTemplatesUpdateRequest(req)
     return repo.update(id, patch)
   })
 
-  ipcMain.handle('templates:delete', (_event, req: unknown) => {
+  typedHandle(ipcMain, 'templates:delete', (req) => {
     repo.delete(parseTemplateIdRequest(req))
     return { ok: true } as const
   })
 
-  ipcMain.handle('templates:setDefault', (_event, req: unknown) => {
+  typedHandle(ipcMain, 'templates:setDefault', (req) => {
     return repo.setDefault(parseTemplateIdRequest(req))
   })
 }

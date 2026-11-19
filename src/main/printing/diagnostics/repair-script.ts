@@ -24,7 +24,7 @@
  */
 
 import { escapePowerShellSingleQuoted } from '../channels/spooler.channel'
-import type { RepairAction } from './schema'
+import type { RepairAction } from '../../../shared/printing/diagnostics-schema'
 
 /** 拼装完成的 PowerShell 调用规格（纯函数产物，可单测、不执行） */
 export interface RepairCommandSpec {

@@ -148,8 +148,8 @@ export function createProductService(db: Database.Database) {
   return {
     /**
      * 列表/搜索：名称子串 / 条码前缀。
-     * 行带 willOrphan（删除影响计数——通道封闭约束下 UI 删除弹窗的唯一获取途径，
-     * 运行时为契约 res `Product[]` 的结构超集）。
+     * 行带 willOrphan（删除影响计数——通道封闭约束下 UI 删除弹窗的唯一获取途径；
+     * 契约 products:list res 即 ProductRow[]，与返回类型同源）。
      */
     list(keyword?: string): ProductRow[] {
       const kw = typeof keyword === 'string' ? keyword.trim() : ''

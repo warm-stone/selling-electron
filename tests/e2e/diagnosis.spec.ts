@@ -6,7 +6,7 @@ import { analyzeSnapshot } from '../../src/main/printing/diagnostics/analyze'
 import type {
   DiagnosticReport,
   PrintDiagnosticSnapshot
-} from '../../src/main/printing/diagnostics/schema'
+} from '../../src/shared/printing/diagnostics-schema'
 import { closeApp, launchApp, waitForRoute, type LaunchedApp } from './helpers'
 
 /**

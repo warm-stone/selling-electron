@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { DiagnosticReport, Finding, FindingSeverity } from './schema'
+import type { DiagnosticReport, Finding, FindingSeverity } from '../../../shared/printing/diagnostics-schema'
 
 /**
  * 诊断报告导出器（printer-diagnostics 计划 Wave 3 / T8）。

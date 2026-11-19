@@ -4,50 +4,35 @@
  * 并行任务统一约定：导出 registerXxxIpc(db)，由 src/main/index.ts 在
  * initDatabase() 调用之后逐任务追加一行装配。
  *
- * 通道名/req/res 类型对齐 src/shared/types/ipc.ts IpcChannels（T3 契约）。
+ * 通道名/req/res 类型经 typedHandle 钉死在 src/shared/types/ipc.ts 的
+ * IpcChannels 契约（T3）——service 返回与契约漂移即编译失败。
  * service 抛出的 ProductServiceError 经 Electron invoke 序列化后 message
  * 保留中文文案（renderer 侧剥去 "Error invoking remote method ..." 前缀展示）。
  */
 
 import { ipcMain } from 'electron'
 import type Database from 'better-sqlite3'
-import type { IpcChannels } from '../../shared/types/ipc'
+import { typedHandle } from './typed-handle'
 import { createProductService } from '../services/product.service'
 
 export function registerProductsIpc(db: Database.Database): void {
   const productService = createProductService(db)
 
-  ipcMain.handle('products:list', (_event, req: { keyword?: string }) =>
-    productService.list(req?.keyword)
-  )
+  typedHandle(ipcMain, 'products:list', (req) => productService.list(req?.keyword))
 
-  ipcMain.handle('products:create', (_event, req: IpcChannels['products:create']['req']) =>
-    productService.create(req)
-  )
+  typedHandle(ipcMain, 'products:create', (req) => productService.create(req))
 
-  ipcMain.handle('products:update', (_event, req: IpcChannels['products:update']['req']) =>
-    productService.update(req)
-  )
+  typedHandle(ipcMain, 'products:update', (req) => productService.update(req))
 
-  ipcMain.handle(
-    'products:updateStock',
-    (_event, req: IpcChannels['products:updateStock']['req']) =>
-      productService.updateStock(req)
-  )
+  typedHandle(ipcMain, 'products:updateStock', (req) => productService.updateStock(req))
 
-  ipcMain.handle('products:delete', (_event, req: IpcChannels['products:delete']['req']) =>
-    productService.delete(req)
-  )
+  typedHandle(ipcMain, 'products:delete', (req) => productService.delete(req))
 
-  ipcMain.handle('products:findSn', (_event, req: IpcChannels['products:findSn']['req']) =>
-    productService.findSn(req.sn)
-  )
+  typedHandle(ipcMain, 'products:findSn', (req) => productService.findSn(req.sn))
 
-  ipcMain.handle('products:listSns', (_event, req: IpcChannels['products:listSns']['req']) =>
+  typedHandle(ipcMain, 'products:listSns', (req) =>
     productService.listSns(req.product_id, req.include_sold)
   )
 
-  ipcMain.handle('products:deleteSn', (_event, req: IpcChannels['products:deleteSn']['req']) =>
-    productService.deleteSn(req.sn_id)
-  )
+  typedHandle(ipcMain, 'products:deleteSn', (req) => productService.deleteSn(req.sn_id))
 }

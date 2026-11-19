@@ -13,7 +13,7 @@ import type {
   PrintDiagnosticSnapshot,
   RepairActionId,
   RenderSnapshot
-} from '../../../../src/main/printing/diagnostics/schema'
+} from '../../../../src/shared/printing/diagnostics-schema'
 import { FIXTURES } from './fixtures/index'
 
 /**

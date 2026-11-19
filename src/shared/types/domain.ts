@@ -38,6 +38,17 @@ export interface Product {
 }
 
 /**
+ * 商品列表行（products:list res 行）：Product + 删除影响计数——通道封闭
+ * 约束下 UI 删除确认弹窗「N 条历史单据」引用数的唯一获取途径。
+ * 定义在 shared 层：main（product.repo/product.service 产出）与
+ * renderer（ProductsView 消费）同源，杜绝两侧手写镜像漂移。
+ */
+export interface ProductRow extends Product {
+  /** 关联的 sale_items + purchase_items 行数（删除弹窗文案用） */
+  willOrphan: number
+}
+
+/**
  * 购物车行（renderer 侧内存结构，不落库——D21）。
  * 重复扫码合并行规则（D16）：行 key = product_id + unit_price_cents。
  */
@@ -332,6 +343,16 @@ export interface AppSettings {
    */
   driver_use_default_page_size?: boolean
 }
+
+/**
+ * 测试打印 / RAW 编码探针请求（printing:testPrint / printing:rawProbe req）：
+ * AppSettings 的打印子集——设置页「打印设置」卡片当前表单值。
+ * 定义在 shared 层：main（printing.ipc 消费）与 preload/renderer（发起方）同源。
+ */
+export type PrintTestRequest = Pick<
+  AppSettings,
+  'printer_channel' | 'printer_name' | 'tcp_host' | 'tcp_port' | 'com_port'
+>
 
 // ══════════════ Logo（多 Logo 架构） ══════════════
 

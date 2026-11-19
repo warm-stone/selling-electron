@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { RULE_DEPENDS_ON } from '../../../../src/main/printing/diagnostics/schema'
-import type { FindingCode } from '../../../../src/main/printing/diagnostics/schema'
+import { RULE_DEPENDS_ON } from '../../../../src/shared/printing/diagnostics-schema'
+import type { FindingCode } from '../../../../src/shared/printing/diagnostics-schema'
 
 // ── printer-diagnostics 契约锁：17 个 FindingCode 清单（grep 断言的事实源）──
 // v2 T1 增补末两码：driver-print-combo-known-issue / printconfig-unavailable

@@ -39,6 +39,8 @@ const EXPECTED_CHANNELS = [
   'reports:export',
   // 打印
   'printing:printers',
+  'printing:testPrint',
+  'printing:rawProbe',
   'printing:preview',
   'printing:print',
   // 打印诊断（printer-diagnostics T1 契约：诊断/修复/导出）
@@ -54,6 +56,9 @@ const EXPECTED_CHANNELS = [
   // 设置
   'settings:get',
   'settings:set',
+  'settings:listLogos',
+  'settings:uploadLogo',
+  'settings:deleteLogo',
   'settings:getRecentSalespersons'
 ] as const
 

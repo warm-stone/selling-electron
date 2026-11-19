@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { IpcChannels } from '../../shared/types/ipc'
+import { typedHandle } from './typed-handle'
 import { exportReport } from '../export/export.service'
 import type { ExportFormat, ReportExportInput } from '../export/export.types'
 import { createReportService, type ReportService } from '../services/report.service'
@@ -69,16 +69,9 @@ export function buildReportExportInput(
 export function registerReportsExportIpc(db: Database.Database): void {
   const service = createReportService(db)
   // 懒加载 electron：registerReportsExportIpc 仅在主进程装配时调用（main/index.ts）
-  const { ipcMain } = require('electron') as {
-    ipcMain: {
-      handle(
-        channel: 'reports:export',
-        listener: (event: unknown, req: IpcChannels['reports:export']['req']) => Promise<IpcChannels['reports:export']['res']>
-      ): void
-    }
-  }
+  const { ipcMain } = require('electron') as typeof import('electron')
 
-  ipcMain.handle('reports:export', async (_event, req) => {
+  typedHandle(ipcMain, 'reports:export', async (req) => {
     const { kind, period, format } = parseReportsExportRequest(req)
     const input = buildReportExportInput(service, kind, period)
     const filePath = await exportReport(input, format)

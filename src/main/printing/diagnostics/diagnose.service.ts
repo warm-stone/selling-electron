@@ -30,7 +30,7 @@ import type {
   PrintDiagnosticSnapshot,
   RepairActionId,
   RenderSnapshot
-} from './schema'
+} from '../../../shared/printing/diagnostics-schema'
 
 // ══════════════ 依赖契约（全 DI） ══════════════
 

@@ -3,7 +3,7 @@ import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue'
-import type { Product, ProductSn, ProductTracking } from '../../../shared/types'
+import type { ProductRow, ProductSn, ProductTracking } from '../../../shared/types'
 import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 
 /**
@@ -18,11 +18,9 @@ import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
  * （输入 Math.round(yuan * 100) 入分，显示 (cents / 100).toFixed(2)）。
  */
 
-/** 列表行（与 preload ProductsApi.list 的 ProductRow 结构一致；不直接 import preload 模块以隔离 electron 依赖） */
-interface ProductRow extends Product {
-  /** 关联的 sale_items + purchase_items 行数（删除弹窗「N 条历史单据」文案用） */
-  willOrphan: number
-}
+// 列表行 ProductRow（Product + willOrphan）：真源在 shared/types/domain.ts
+// ——products:list 契约 res 行类型，与 main 侧 product.repo/service 同源，
+// 不再本地手写镜像。
 
 const PAGE_SIZE = 20
 const SEARCH_DEBOUNCE_MS = 300

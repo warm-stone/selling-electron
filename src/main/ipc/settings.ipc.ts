@@ -4,6 +4,7 @@ import { basename, extname, join } from 'node:path'
 import type Database from 'better-sqlite3'
 import type { OpenDialogOptions } from 'electron'
 import type { AppSettings, LogoInfo, PrinterChannel } from '../../shared/types'
+import { typedHandle } from './typed-handle'
 import { createSettingsRepo, type SettingsRepo } from '../db/repositories/settings.repo'
 import { createLogoRepo, type LogoRepo, type LogoRow } from '../db/repositories/logo.repo'
 import { pngBufferToDataUrl } from '../printing/print.service'
@@ -290,9 +291,9 @@ export function registerSettingsIpc(db: Database.Database): void {
   const currentLogoInfos = (): Promise<LogoInfo[]> =>
     rowsToLogoInfos(logoRepo.list(), logosDir())
 
-  ipcMain.handle('settings:get', (): AppSettings => currentSettings())
+  typedHandle(ipcMain, 'settings:get', () => currentSettings())
 
-  ipcMain.handle('settings:set', (_event, req: Partial<AppSettings> | undefined): AppSettings => {
+  typedHandle(ipcMain, 'settings:set', (req) => {
     const patch = req ?? {}
     // v2 实验键值域校验先行：写错值 throw 中文错误（不静默吞——防真机验证失真）
     validateSettingsPatch(patch)
@@ -300,19 +301,17 @@ export function registerSettingsIpc(db: Database.Database): void {
     return currentSettings()
   })
 
-  ipcMain.handle(
-    'settings:getRecentSalespersons',
-    (_event, _req: {} | undefined): string[] => readRecentSalespersons(repo)
-  )
+  typedHandle(ipcMain, 'settings:getRecentSalespersons', () => readRecentSalespersons(repo))
 
   /** Logo 列表：DB 行 + 文件读取 → LogoInfo[]（文件缺失行自动跳过） */
-  ipcMain.handle('settings:listLogos', async (): Promise<LogoInfo[]> => currentLogoInfos())
+  typedHandle(ipcMain, 'settings:listLogos', async () => currentLogoInfos())
 
   /**
    * Logo 上传：主进程原生文件对话框（选 png）→ 复制 userData/logos/
    * <uuid>.png + INSERT。用户取消 → 返回当前列表（保持现状，不报错）。
+   * event 参数：对话框父窗口定位（BrowserWindow.fromWebContents）。
    */
-  ipcMain.handle('settings:uploadLogo', async (event): Promise<LogoInfo[]> => {
+  typedHandle(ipcMain, 'settings:uploadLogo', async (_req, event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: OpenDialogOptions = {
       title: '选择 Logo 图片',
@@ -334,11 +333,8 @@ export function registerSettingsIpc(db: Database.Database): void {
    * Logo 删除：删 DB 行 + 删文件 → 返回最新列表（模板引用残留由渲染端
    * 跳过——image 段落 logoId 查不到 logoBuffers 时静默跳过，不做引用检查）。
    */
-  ipcMain.handle(
-    'settings:deleteLogo',
-    async (_event, req: { id: number } | undefined): Promise<LogoInfo[]> => {
-      await removeLogoFile(req?.id ?? Number.NaN, logosDir(), logoRepo)
-      return currentLogoInfos()
-    }
-  )
+  typedHandle(ipcMain, 'settings:deleteLogo', async (req) => {
+    await removeLogoFile(req?.id ?? Number.NaN, logosDir(), logoRepo)
+    return currentLogoInfos()
+  })
 }

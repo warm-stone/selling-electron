@@ -10,9 +10,9 @@
  * - T8（报告导出）序列化 DiagnosticReport。
  * 任何字段改名/增删都直接破坏上述消费方——改动契约必须同步升级 schemaVersion。
  *
- * 纯类型 + 纯数据模块：**零 Node/Electron 依赖**（shared/types/ipc.ts 以
- * import type 反向引用本模块，type-only 在编译期擦除，node/web 两侧
- * tsconfig 均可编译，不把 main 代码拉进 preload/renderer bundle）。
+ * 纯类型 + 纯数据模块：**零 Node/Electron 依赖**。居于 shared 层
+ * （src/shared/printing/）——main/preload/renderer/tests 四方共同消费，
+ * 依赖方向恒为「外层 → shared」，shared 不反向引用任何进程层模块。
  */
 
 // ══════════════ 采集快照 ══════════════
@@ -272,6 +272,17 @@ export interface RepairAction {
   requiresConfirm: boolean
   description: string
   dryRun: boolean
+}
+
+/**
+ * 修复结果（repair.runner 执行产物 / printing:repair res 的 outcome 字段）：
+ * done 已完成 / needs-manual 需人工（含 UAC 拒绝与 L4 引导）/ dry-run 仅预览。
+ * 跨进程消费（renderer printing.store 按 status 分支）——定义在 shared 层。
+ */
+export type RepairOutcome = {
+  status: 'done' | 'needs-manual' | 'dry-run'
+  detail?: string
+  commands?: string[]
 }
 
 // ══════════════ 报告 ══════════════

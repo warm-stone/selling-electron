@@ -37,7 +37,11 @@ import {
   buildWsdMigrateCommands,
   type RepairCommandSpec
 } from './repair-script'
-import type { RepairActionId } from './schema'
+import type { RepairActionId, RepairOutcome } from '../../../shared/printing/diagnostics-schema'
+
+// 类型真源已下沉 shared（renderer/契约层同源消费）；此处再导出保持既有消费方
+// （diagnose.service / tests）的 import 路径不变。
+export type { RepairOutcome }
 
 // ══════════════ 常量与依赖注入 ══════════════
 
@@ -81,13 +85,6 @@ export interface RepairDeps {
 export interface RepairActionContext {
   targetPrinter?: string
   hostAddress?: string
-}
-
-/** 修复结果：done 已完成 / needs-manual 需人工（含 UAC 拒绝与 L4 引导）/ dry-run 仅预览 */
-export type RepairOutcome = {
-  status: 'done' | 'needs-manual' | 'dry-run'
-  detail?: string
-  commands?: string[]
 }
 
 /** purge 结果文件（提权脚本 ConvertTo-Json 写出；字段宽松解析） */

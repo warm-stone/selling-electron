@@ -5,7 +5,7 @@ import type {
   FindingCode,
   PrintDiagnosticSnapshot,
   RepairActionId
-} from '../../../../src/main/printing/diagnostics/schema'
+} from '../../../../src/shared/printing/diagnostics-schema'
 import {
   FIXTURES,
   healthyMachine,

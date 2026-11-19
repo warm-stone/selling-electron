@@ -1,63 +1,30 @@
 /**
- * sales 通道装配（薄层：参数透传 + 调 service；通道名与 shared/types/ipc.ts 契约一致）。
+ * sales 通道装配（薄层：参数透传 + 调 service；通道名/req/res 经 typedHandle
+ * 钉死在 shared/types/ipc.ts 契约）。
  * 统一模式：registerSalesIpc(db)——main/index.ts 在 initDatabase() 行后调用。
  * service 抛出的 SaleServiceError 经 ipcMain.handle 转为 renderer 侧
  * invoke rejection（message 中文文案原样保留）。
+ *
+ * req 的运行时防御照旧（`req?.x ?? 哨兵`）：契约类型是编译期约定，
+ * renderer 实际 payload 不可信——哨兵值走 service 的可诊断错误路径。
  */
 
 import { ipcMain } from 'electron'
 import type Database from 'better-sqlite3'
+import { typedHandle } from './typed-handle'
 import { createSaleService } from '../services/sale.service'
-import type {
-  CheckoutCustomerInput,
-  CheckoutExtrasInput,
-  CheckoutItem,
-  SaleStatus
-} from '../../shared/types'
-
-interface CheckoutRequest {
-  items?: CheckoutItem[]
-  extras?: CheckoutExtrasInput
-}
-
-interface VoidRequest {
-  sale_id?: number
-}
-
-interface ListRequest {
-  date_from?: string
-  date_to?: string
-  status?: SaleStatus
-  customer_name?: string
-  customer_phone?: string
-  is_national_subsidy?: boolean
-}
-
-interface DetailRequest {
-  sale_id?: number
-}
-
-interface UpdateExtraRequest {
-  sale_id?: number
-  is_national_subsidy?: boolean
-  order_note?: string
-  salesperson?: string
-  customer?: CheckoutCustomerInput | null
-}
 
 export function registerSalesIpc(db: Database.Database): void {
   const service = createSaleService(db)
 
-  ipcMain.handle('sales:checkout', (_event, req: CheckoutRequest) =>
+  typedHandle(ipcMain, 'sales:checkout', (req) =>
     // extras 缺省 undefined = 散客快单路径（service 侧不落 sale_extras 行）
     service.checkout(req?.items ?? [], req?.extras)
   )
 
-  ipcMain.handle('sales:void', (_event, req: VoidRequest) =>
-    service.voidSale(req?.sale_id ?? -1)
-  )
+  typedHandle(ipcMain, 'sales:void', (req) => service.voidSale(req?.sale_id ?? -1))
 
-  ipcMain.handle('sales:list', (_event, req: ListRequest) =>
+  typedHandle(ipcMain, 'sales:list', (req) =>
     // 三筛选键缺省 undefined = 不过滤（trim 归一在 service 层）
     service.list({
       date_from: req?.date_from,
@@ -69,13 +36,11 @@ export function registerSalesIpc(db: Database.Database): void {
     })
   )
 
-  ipcMain.handle('sales:detail', (_event, req: DetailRequest) =>
-    service.getDetail(req?.sale_id ?? -1)
-  )
+  typedHandle(ipcMain, 'sales:detail', (req) => service.getDetail(req?.sale_id ?? -1))
 
   // patch 键缺省 undefined = 不动（sale-extra.repo.upsert 部分键语义）；
   // customer: null 透传为显式解绑
-  ipcMain.handle('sales:updateExtra', (_event, req: UpdateExtraRequest) =>
+  typedHandle(ipcMain, 'sales:updateExtra', (req) =>
     service.updateExtra(req?.sale_id ?? -1, {
       is_national_subsidy: req?.is_national_subsidy,
       order_note: req?.order_note,

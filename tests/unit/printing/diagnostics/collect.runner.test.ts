@@ -11,7 +11,7 @@ import {
   type CollectExecFileFn,
   type CollectOptions
 } from '../../../../src/main/printing/diagnostics/collect.runner'
-import type { PrintDiagnosticSnapshot, PrinterDiagnostic } from '../../../../src/main/printing/diagnostics/schema'
+import type { PrintDiagnosticSnapshot, PrinterDiagnostic } from '../../../../src/shared/printing/diagnostics-schema'
 
 /**
  * Task 4 — collect.runner 单元测试（fake execFile，不实际执行 PowerShell）。

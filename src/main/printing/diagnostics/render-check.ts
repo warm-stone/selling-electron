@@ -1,5 +1,5 @@
 import { FIT_TO_WIDTH_BODY } from '../driver/receipt-html'
-import type { RenderSnapshot } from './schema'
+import type { RenderSnapshot } from '../../../shared/printing/diagnostics-schema'
 
 /**
  * 渲染自检（printer-diagnostics 计划 Wave 3 / T7）——logo-measurement-race 的证据采集器。

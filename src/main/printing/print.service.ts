@@ -11,6 +11,7 @@ import type { SaleReceiptData } from '../../shared/receipt/item-columns'
 import type { ReceiptTemplate, ReceiptVars } from '../../shared/receipt/template-schema'
 import { formatMoney } from '../../shared/utils/money'
 import type { AppSettings, PrintTemplate, SaleDetail } from '../../shared/types'
+import type { PrintPreviewPayload } from '../../shared/types/ipc'
 
 /**
  * Task 7 — print.service（通道编排部分）。
@@ -156,17 +157,11 @@ export interface ReceiptPayload {
 
 /**
  * printing:preview 返回载荷：ReceiptPayload 的 IPC 形态——logoBuffers →
- * dataURL 集合（Buffer 不跨 IPC；契约 res 只声明 template+sale，本形态
- * 为其运行时结构超集）。
+ * dataURL 集合（Buffer 不跨 IPC）。类型真源 = 契约 PrintPreviewPayload
+ * （shared/types/ipc.ts）——旧版契约只声明 template+sale、本形态靠
+ * 「运行时结构超集」注释 + renderer 侧 cast 补差，已按运行时事实修正为同源。
  */
-export interface PreviewPayload {
-  template: ReceiptTemplate
-  sale: SaleDetail
-  data: SaleReceiptData
-  vars: ReceiptVars
-  /** Logo dataURL 集合（logoId → dataURL；未引用/读取失败 → 无该 key，ReceiptPreview 的 logoUrls prop） */
-  logoUrls: Record<number, string>
-}
+export type PreviewPayload = PrintPreviewPayload
 
 /** AppSettings → PrintSettings（T7 getChannel 参数；可空字段 null → ''/undefined 归一） */
 export function appSettingsToPrintSettings(s: AppSettings): PrintSettings {

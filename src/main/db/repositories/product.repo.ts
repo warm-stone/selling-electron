@@ -17,7 +17,18 @@
  */
 
 import type Database from 'better-sqlite3'
-import type { Product, ProductSn, ProductTracking, StockMovementSource } from '../../../shared/types'
+import type {
+  Product,
+  ProductRow,
+  ProductSn,
+  ProductTracking,
+  StockMovementSource
+} from '../../../shared/types'
+
+// ProductRow（products:list res 行 = Product + willOrphan）真源已下沉
+// shared/types/domain.ts——契约层与 renderer 同源消费；此处再导出保持
+// service/tests 既有 import 路径不变。
+export type { ProductRow }
 
 /** 新商品（落库前形态；stock 即初始库存，允许负值——D2；SN 商品由 service 强制 0——D-SN11） */
 export interface NewProduct {
@@ -50,15 +61,6 @@ export interface ProductSnRow {
   sale_no: string | null
   created_at: string
   updated_at: string
-}
-
-/**
- * 列表/搜索行：Product + 删除影响计数（运行时为契约 products:list res
- * `Product[]` 的结构超集——通道封闭约束下 UI 删除确认弹窗引用数的唯一获取途径）。
- */
-export interface ProductRow extends Product {
-  /** 关联的 sale_items + purchase_items 行数（删除弹窗「N 条历史单据」文案用） */
-  willOrphan: number
 }
 
 /** 前缀互斥校验用行（D-SN14；name 供冲突文案「与商品「X」的前缀冲突」） */

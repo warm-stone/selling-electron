@@ -1,5 +1,6 @@
 /**
- * reports:daily / reports:monthly 通道装配（薄层：参数透传 + 调 service）。
+ * reports:daily / reports:monthly 通道装配（薄层：参数透传 + 调 service；
+ * req/res 经 typedHandle 钉死在 shared/types/ipc.ts 契约）。
  * 统一模式：registerReportsIpc(db)——main/index.ts 在 initDatabase() 行后追加。
  * 日期格式校验在 service（REPORT_INVALID_DATE/MONTH 可诊断中文错误）；
  * req 运行时防御：非字符串一律传空串（service 正则拒绝，不依赖 renderer 输入可信）。
@@ -8,17 +9,17 @@
 
 import { ipcMain } from 'electron'
 import type Database from 'better-sqlite3'
-import type { IpcChannels } from '../../shared/types/ipc'
+import { typedHandle } from './typed-handle'
 import { createReportService } from '../services/report.service'
 
 export function registerReportsIpc(db: Database.Database): void {
   const service = createReportService(db)
 
-  ipcMain.handle('reports:daily', (_event, req: IpcChannels['reports:daily']['req']) =>
+  typedHandle(ipcMain, 'reports:daily', (req) =>
     service.daily(typeof req?.date === 'string' ? req.date : '')
   )
 
-  ipcMain.handle('reports:monthly', (_event, req: IpcChannels['reports:monthly']['req']) =>
+  typedHandle(ipcMain, 'reports:monthly', (req) =>
     service.monthly(typeof req?.month === 'string' ? req.month : '')
   )
 }

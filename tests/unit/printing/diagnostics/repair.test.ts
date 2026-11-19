@@ -12,7 +12,7 @@ import {
   buildWsdMigrateCommands
 } from '../../../../src/main/printing/diagnostics/repair-script'
 import { runRepairAction } from '../../../../src/main/printing/diagnostics/repair.runner'
-import type { RepairActionId, RepairLevel } from '../../../../src/main/printing/diagnostics/schema'
+import type { RepairActionId, RepairLevel } from '../../../../src/shared/printing/diagnostics-schema'
 
 /**
  * printer-diagnostics T6 —— 修复动作构建器 + 执行器测试。

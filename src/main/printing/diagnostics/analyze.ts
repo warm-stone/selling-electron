@@ -25,14 +25,14 @@
  * - 未命中的规则不产出（不产 pass 占位 Finding——status:'pass' 契约上不出现）。
  */
 import { RECEIPT_PRINT_GEOMETRY } from '../driver/receipt-html'
-import { RULE_DEPENDS_ON } from './schema'
+import { RULE_DEPENDS_ON } from '../../../shared/printing/diagnostics-schema'
 import type {
   Finding,
   FindingCode,
   PrintDiagnosticSnapshot,
   PrinterDiagnostic,
   RepairActionId
-} from './schema'
+} from '../../../shared/printing/diagnostics-schema'
 
 /** 云打印机固件名单（RAW 被固件按 UTF-8 文本解释的机型；子串匹配，大小写不敏感） */
 export const CLOUD_PRINTER_MODELS: readonly string[] = ['DL-5801PW']

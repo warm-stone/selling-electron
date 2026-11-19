@@ -16,7 +16,8 @@ import { archiveHistory } from '../printing/diagnostics/report.exporter'
 import { buildRepairActionCatalog } from '../printing/diagnostics/repair-script'
 import { runRepairAction } from '../printing/diagnostics/repair.runner'
 import { runRenderCheck } from '../printing/diagnostics/render-check'
-import type { DiagnosticReport, RepairActionId } from '../printing/diagnostics/schema'
+import type { DiagnosticReport, RepairActionId } from '../../shared/printing/diagnostics-schema'
+import { typedHandle } from './typed-handle'
 import { generateReceiptHtml, RECEIPT_PRINT_GEOMETRY } from '../printing/driver/receipt-html'
 import { collectSectionLogoIds, parseTemplateRow } from '../printing/print.service'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
@@ -353,9 +354,9 @@ export function registerDiagnosticsIpc(db: Database.Database, options: Diagnosti
     ? options.createService(db, userDataDir)
     : createDiagnoseService(createDefaultDeps(db, userDataDir, options.printQueueBusy))
 
-  ipcMain.handle('printing:diagnose', async (_event, raw: unknown) => {
+  typedHandle(ipcMain, 'printing:diagnose', async (req) => {
     try {
-      const { printerName } = parseDiagnoseRequest(raw)
+      const { printerName } = parseDiagnoseRequest(req)
       const report = await service.diagnose(printerName)
       return { ok: true, report }
     } catch (err) {
@@ -363,20 +364,20 @@ export function registerDiagnosticsIpc(db: Database.Database, options: Diagnosti
     }
   })
 
-  ipcMain.handle('printing:repair', async (_event, raw: unknown) => {
+  typedHandle(ipcMain, 'printing:repair', async (req) => {
     try {
-      const { actionId, targetPrinter } = parseRepairRequest(raw)
+      const { actionId, targetPrinter } = parseRepairRequest(req)
       const { outcome, verify } = await service.repair(actionId, targetPrinter)
-      // outcome 为 res 契约的运行时结构超集（preview 载荷同款先例）——T10 UI 消费
+      // outcome/verify 均在契约 res 内（旧版契约缺 outcome、靠消费方手写镜像，已修正）
       return { ok: true, outcome, verify }
     } catch (err) {
       return { ok: false, error: `修复失败（printing:repair）：${errorDetail(err)}` }
     }
   })
 
-  ipcMain.handle('printing:diagnoseExport', async (_event, raw: unknown) => {
+  typedHandle(ipcMain, 'printing:diagnoseExport', async (req) => {
     try {
-      const report = parseExportRequest(raw)
+      const report = parseExportRequest(req)
       return await service.exportReport(report)
     } catch (err) {
       return { ok: false, error: `导出失败（printing:diagnoseExport）：${errorDetail(err)}` }

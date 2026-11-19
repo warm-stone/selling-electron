@@ -163,7 +163,7 @@ async function openDetail(sale: Sale): Promise<void> {
 
 // ── 附加信息编辑区（customer-order-extras 任务 12；仅 completed 单渲染）──
 
-/** sales:updateExtra patch 形状（与 preload SalesApi.updateExtra 第二参同源派生） */
+/** sales:updateExtra patch 形状（与 PosApi sales.updateExtra 第二参同源——均从 IpcChannels 契约派生） */
 type SaleExtraPatch = Omit<IpcChannels['sales:updateExtra']['req'], 'sale_id'>
 
 /** 编辑区四字段（初值=当前值快照，diff 后才进 patch——undefined=不动语义） */

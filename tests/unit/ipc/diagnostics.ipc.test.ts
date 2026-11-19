@@ -17,7 +17,7 @@ import {
 } from '../../../src/main/ipc/diagnostics.ipc'
 import { analyzeSnapshot } from '../../../src/main/printing/diagnostics/analyze'
 import { createDiagnoseService, type DiagnoseService } from '../../../src/main/printing/diagnostics/diagnose.service'
-import type { DiagnosticReport, PrintDiagnosticSnapshot, RepairActionId } from '../../../src/main/printing/diagnostics/schema'
+import type { DiagnosticReport, PrintDiagnosticSnapshot, RepairActionId } from '../../../src/shared/printing/diagnostics-schema'
 import type { RepairOutcome } from '../../../src/main/printing/diagnostics/repair.runner'
 import { PrintQueue } from '../../../src/main/printing/print.service'
 import { DEFAULT_TEMPLATES } from '../../../src/shared/receipt/default-template'

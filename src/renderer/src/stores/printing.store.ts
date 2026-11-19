@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { createTypedInvoke } from '../../../shared/types/ipc'
+import type { PrintPreviewPayload } from '../../../shared/types/ipc'
 import type {
   DiagnosticReport,
   RepairActionId
-} from '../../../main/printing/diagnostics/schema'
+} from '../../../shared/printing/diagnostics-schema'
 
 /**
  * 打印编排全局状态（Task 15）：小票预览弹窗的跨页复用中枢。
@@ -19,18 +20,11 @@ import type {
  * （弹窗本体 props/emits 解耦，本 store 承担 IPC 与 toast）。
  */
 
-/** printing:preview res 的运行时结构超集形态（契约只声明 template+sale，附加字段由主进程 PreviewPayload 提供） */
-type PrintingPreviewResult = Awaited<ReturnType<typeof window.api.printing.preview>>
-
 /**
- * printing:repair res 的运行时结构超集（T9 交接）：契约只声明 ok/error/verify，
- * 主进程另附 outcome（repair.runner RepairOutcome 的形状镜像——该模块非 main
- * 纯类型模块，不跨侧 import；字段契约见 diagnostics.ipc「运行时结构超集」注释，
- * 引导文案在 outcome.detail，前端按 outcome.status 分支）。
+ * printing:preview res = 契约 PrintPreviewPayload（shared/types/ipc.ts 单一真源；
+ * 旧版「契约子集 + 消费方 cast 结构超集」模式已废除）。
  */
-type PrintingRepairResult = Awaited<ReturnType<typeof window.api.printing.repair>> & {
-  outcome?: { status: 'done' | 'needs-manual' | 'dry-run'; detail?: string; commands?: string[] }
-}
+type PrintingPreviewResult = PrintPreviewPayload
 
 /** 诊断流程状态机：idle 未诊断 / collecting 采集中 / report 已出报告 / error 诊断失败 */
 export type DiagnosisState = 'idle' | 'collecting' | 'report' | 'error'
@@ -66,9 +60,9 @@ export const usePrintingStore = defineStore('printing', {
       this.loading = true
       try {
         const res = await typedInvoke('printing:preview', { sale_id: saleId })
-        // res 契约类型为 { template, sale }；运行时是主进程 PreviewPayload
-        // 的结构超集（T8 ProductRow 同款下传 cast）
-        this.payload = res as PrintingPreviewResult
+        // res 类型 = 契约 PrintPreviewPayload（完整载荷，无需 cast——旧版
+        // 「契约子集 + 结构超集 cast」模式已随契约补全废除）
+        this.payload = res
         this.visible = true
       } catch (err) {
         ElMessage.error(`小票预览加载失败：${extractIpcErrorMessage(err)}`)
@@ -131,10 +125,7 @@ export const usePrintingStore = defineStore('printing', {
      */
     async repairAction(actionId: RepairActionId, targetPrinter?: string): Promise<void> {
       try {
-        const res = (await window.api.printing.repair(
-          actionId,
-          targetPrinter
-        )) as PrintingRepairResult
+        const res = await window.api.printing.repair(actionId, targetPrinter)
         if (res.ok) {
           if (res.verify) this.diagnosisReport = res.verify
           if (res.outcome?.status === 'needs-manual') {

@@ -11,7 +11,7 @@ import { usePrintingStore } from '@renderer/stores/printing.store'
 import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 import { createTypedInvoke } from '../../../shared/types/ipc'
 import { formatMoney } from '../../../shared/utils/money'
-import type { CheckoutExtrasInput, Product } from '../../../shared/types'
+import type { CheckoutExtrasInput, Product, ProductRow } from '../../../shared/types'
 
 /**
  * 收银台（Task 11）：扫码枪（主进程桥推送）+ 搜索双击加购 → 购物车 → 结账。
@@ -26,10 +26,8 @@ import type { CheckoutExtrasInput, Product } from '../../../shared/types'
  * 回调即时返回、查询后台进行，不阻塞 UI。
  */
 
-/** 商品列表行（products:list res 的运行时结构超集，含 willOrphan——无害附加字段） */
-interface ProductRow extends Product {
-  willOrphan: number
-}
+// 列表行 ProductRow（Product + willOrphan）：真源在 shared/types/domain.ts
+// ——products:list 契约 res 行类型，typedInvoke 直接返回，无需 cast/本地镜像。
 
 const typedInvoke = createTypedInvoke((channel, payload) =>
   window.api.invoke(channel, payload)
@@ -53,9 +51,9 @@ async function loadProducts(): Promise<void> {
   loading.value = true
   try {
     const kw = searchText.value.trim()
-    products.value = (await typedInvoke('products:list', {
+    products.value = await typedInvoke('products:list', {
       keyword: kw.length > 0 ? kw : undefined
-    })) as ProductRow[]
+    })
   } catch (err) {
     ElMessage.error(extractIpcErrorMessage(err))
   } finally {
@@ -144,7 +142,7 @@ async function lookupBarcode(code: string): Promise<void> {
     }
     const rows = await typedInvoke('products:list', { keyword: code })
     if (rows.length === 1 && rows[0]!.barcode === code) {
-      addToCart(rows[0]! as ProductRow)
+      addToCart(rows[0]!)
       return
     }
     flashSearchMiss()

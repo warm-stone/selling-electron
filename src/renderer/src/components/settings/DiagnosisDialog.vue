@@ -9,7 +9,7 @@ import type {
   FindingStatus,
   PrinterDiagnostic,
   RepairActionId
-} from '../../../../main/printing/diagnostics/schema'
+} from '../../../../shared/printing/diagnostics-schema'
 
 /**
  * 打印机诊断报告对话框（printer-diagnostics Wave 4 / T10）。

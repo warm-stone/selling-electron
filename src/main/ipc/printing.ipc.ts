@@ -9,8 +9,7 @@ import {
   getChannel,
   parseTemplateRow,
   PrintQueue,
-  type PrintOrchestrator,
-  type PreviewPayload
+  type PrintOrchestrator
 } from '../printing/print.service'
 import type { PrintSettings } from '../printing/print.service'
 import { generateReceiptBytes } from '../printing/escpos/escpos-generator'
@@ -23,7 +22,8 @@ import { createSaleExtraRepo } from '../db/repositories/sale-extra.repo'
 import { createSettingsRepo } from '../db/repositories/settings.repo'
 import { createTemplateRepo } from '../db/repositories/template.repo'
 import { createLogoRepo } from '../db/repositories/logo.repo'
-import type { AppSettings, PrintTemplate } from '../../shared/types'
+import type { AppSettings, PrintTemplate, PrintTestRequest } from '../../shared/types'
+import { typedHandle } from './typed-handle'
 import { rowsToAppSettings } from './settings.ipc'
 
 /**
@@ -55,11 +55,9 @@ export interface PrinterEntry {
   is_default: boolean
 }
 
-/** 测试打印请求：AppSettings 的打印子集（设置页「打印设置」卡片当前表单值） */
-export type PrintTestRequest = Pick<
-  AppSettings,
-  'printer_channel' | 'printer_name' | 'tcp_host' | 'tcp_port' | 'com_port'
->
+// PrintTestRequest（printing:testPrint / rawProbe req）真源已下沉
+// shared/types/domain.ts——契约层与 preload/renderer 同源消费。
+export type { PrintTestRequest }
 
 /**
  * 测试打印样例数据（模块级可测常量）：中文店名 + 中文商品名 + 超长商品名
@@ -215,7 +213,7 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
     readLogoById
   })
 
-  ipcMain.handle('printing:printers', async (): Promise<PrinterEntry[]> => {
+  typedHandle(ipcMain, 'printing:printers', async () => {
     const printers = await enumerator.listSystemPrinters()
     return printers.map((p) => ({ name: p.name, is_default: p.isDefault ?? false }))
   })
@@ -228,69 +226,57 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
    * 失败不抛给 renderer —— 返回 { ok:false, error } 且 error 首段含通道名
    * （设置页直接 ElMessage.error 展示）。
    */
-  ipcMain.handle(
-    'printing:testPrint',
-    async (
-      _event,
-      req: Partial<PrintTestRequest> | undefined
-    ): Promise<{ ok: boolean; error?: string }> => {
-      const settings = toPrintSettings(req)
-      try {
-        const channel = getChannel(settings)
-        const testDeps = {
-          getDefaultTemplate: () => templateRepo.getDefault(),
-          readLogoById
-        }
-        const bytes =
-          settings.printer_channel === 'driver'
-            ? await buildTestPrintHtml(testDeps)
-            : await buildTestPrintBytes(testDeps)
-        await new PrintQueue(channel).enqueuePrintJob(bytes)
-        return { ok: true }
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
-        return { ok: false, error: `测试打印失败（${settings.printer_channel} 通道）：${detail}` }
+  typedHandle(ipcMain, 'printing:testPrint', async (req) => {
+    const settings = toPrintSettings(req)
+    try {
+      const channel = getChannel(settings)
+      const testDeps = {
+        getDefaultTemplate: () => templateRepo.getDefault(),
+        readLogoById
       }
+      const bytes =
+        settings.printer_channel === 'driver'
+          ? await buildTestPrintHtml(testDeps)
+          : await buildTestPrintBytes(testDeps)
+      await new PrintQueue(channel).enqueuePrintJob(bytes)
+      return { ok: true }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: `测试打印失败（${settings.printer_channel} 通道）：${detail}` }
     }
-  )
+  })
 
   /**
    * RAW 编码探针（F1）：一张纸按顺序打四段（ASCII / UTF-8 / GBK+FS& / GS v 0 光栅），
    * 纸上结果决定 spooler 通道的中文修法（判读表在 shared/printing/raw-probe.ts）。
    * driver 通道直接拒：那条通道把字节当 HTML 渲染，探针发过去只会打出一堆源码。
    */
-  ipcMain.handle(
-    'printing:rawProbe',
-    async (
-      _event,
-      req: Partial<PrintTestRequest> | undefined
-    ): Promise<{ ok: boolean; error?: string }> => {
-      const settings = toPrintSettings(req)
-      if (settings.printer_channel === 'driver') {
-        return {
-          ok: false,
-          error:
-            '编码探针只能走 RAW 通道（系统打印/网络/串口）：driver 通道会把字节当 HTML 渲染，探针无意义。请先把打印通道切到「系统打印」再点探针。'
-        }
-      }
-      try {
-        const channel = getChannel(settings)
-        const template = parseTemplateRow(templateRepo.getDefault())
-        await new PrintQueue(channel).enqueuePrintJob(buildRawProbeBytes(template.paperWidth))
-        return { ok: true }
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
-        return { ok: false, error: `编码探针打印失败（${settings.printer_channel} 通道）：${detail}` }
+  typedHandle(ipcMain, 'printing:rawProbe', async (req) => {
+    const settings = toPrintSettings(req)
+    if (settings.printer_channel === 'driver') {
+      return {
+        ok: false,
+        error:
+          '编码探针只能走 RAW 通道（系统打印/网络/串口）：driver 通道会把字节当 HTML 渲染，探针无意义。请先把打印通道切到「系统打印」再点探针。'
       }
     }
-  )
+    try {
+      const channel = getChannel(settings)
+      const template = parseTemplateRow(templateRepo.getDefault())
+      await new PrintQueue(channel).enqueuePrintJob(buildRawProbeBytes(template.paperWidth))
+      return { ok: true }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: `编码探针打印失败（${settings.printer_channel} 通道）：${detail}` }
+    }
+  })
 
   /**
    * 小票预览（T15）：saleId → PreviewPayload（模板/明细/vars/logoUrls）——
    * 与 printing:print 的字节组装同一份 buildReceiptPayload（G7 同源）。
    * 错误（如销售单不存在）原样 reject，renderer 展示可诊断消息。
    */
-  ipcMain.handle('printing:preview', async (_event, req: unknown): Promise<PreviewPayload> => {
+  typedHandle(ipcMain, 'printing:preview', async (req) => {
     return orchestrator.previewSale(parseSaleId(req))
   })
 
@@ -299,22 +285,19 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
    * 失败**不抛**（G3：销售已落库，打印失败绝不影响销售）——返回
    * { ok:false, error }，error 含通道名 + 重打引导文案。
    */
-  ipcMain.handle(
-    'printing:print',
-    async (_event, req: unknown): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        await orchestrator.printSale(parseSaleId(req))
-        return { ok: true }
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err)
-        const channel = currentSettings().printer_channel
-        return {
-          ok: false,
-          error: `打印失败（${channel} 通道）：${detail}。销售已保存，可稍后在销售记录中重打`
-        }
+  typedHandle(ipcMain, 'printing:print', async (req) => {
+    try {
+      await orchestrator.printSale(parseSaleId(req))
+      return { ok: true }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const channel = currentSettings().printer_channel
+      return {
+        ok: false,
+        error: `打印失败（${channel} 通道）：${detail}。销售已保存，可稍后在销售记录中重打`
       }
     }
-  )
+  })
 
   return orchestrator
 }

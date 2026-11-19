@@ -56,7 +56,7 @@ import type {
   EventEntry,
   PrintDiagnosticSnapshot,
   PrinterDiagnostic
-} from './schema'
+} from '../../../shared/printing/diagnostics-schema'
 
 // ══════════════ execFile 注入 ══════════════
 

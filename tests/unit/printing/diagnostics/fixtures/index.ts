@@ -10,7 +10,7 @@
  * tests/**，schema.ts 字段改名/增删时这里最先红（as comparability 允许
  * widened string → 枚举联合，但字段缺失/多余/形状漂移立即 TS2352）。
  */
-import type { PrintDiagnosticSnapshot } from '../../../../../src/main/printing/diagnostics/schema'
+import type { PrintDiagnosticSnapshot } from '../../../../../src/shared/printing/diagnostics-schema'
 
 import symptom1DriverRawGarbledJson from './symptom1-driver-raw-garbled.json'
 import symptom1CloudUtf8Json from './symptom1-cloud-utf8.json'

@@ -12,7 +12,7 @@ import type {
   Finding,
   PrintDiagnosticSnapshot,
   RepairActionId
-} from '../../../src/main/printing/diagnostics/schema'
+} from '../../../src/shared/printing/diagnostics-schema'
 import { FIXTURES } from '../printing/diagnostics/fixtures/index'
 
 /**
