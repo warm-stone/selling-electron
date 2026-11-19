@@ -8,8 +8,10 @@
  *   - serial.channel.ts   备通道：串口设备路径（\\.\COM1，fs 流写入）
  *   - driver.channel.ts   兜底通道：Windows 打印机驱动 GDI 渲染（字节载荷 =
  *                          收据 HTML 的 UTF-8 → 隐藏窗口 webContents.print；
- *                          面向 RAW 通道丢 GBK 中文/光栅的「云」热敏机如
- *                          得力 DL-5801PW——Word 走的驱动渲染路径 100% 兼容）
+ *                          面向 RAW 通道打不出中文的「云」热敏机如得力
+ *                          DL-5801PW——真因是固件无 CJK 字模（20261118 探针：
+ *                          高位字节一律空推进，而 `GS v 0` 光栅可用）；
+ *                          Word 走的驱动渲染路径 100% 兼容）
  *
  * 职责边界（G6）：escpos-generator / receipt-html 是纯函数零 I/O；本目录只做 I/O。
  */

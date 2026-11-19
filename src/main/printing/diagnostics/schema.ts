@@ -201,7 +201,7 @@ export type FindingCode =
   | 'driver-missing' // 驱动未安装/名称不匹配
   | 'driver-crash-loop' // 驱动崩溃环（事件 1000 faultingModule 指向驱动 DLL）
   | 'raw-garbled-risk' // RAW 字节被驱动当文本渲染（乱码风险）
-  | 'cloud-printer-raw-utf8' // 云打印机固件把 RAW 当 UTF-8（丢 GBK 与光栅）
+  | 'cloud-printer-raw-utf8' // 云打印机 RAW 打不出中文（固件无 CJK 字模；id 名沿用旧假设「当 UTF-8 文本」，20261118 探针已推翻——光栅可用，报告兼容故不改 id）
   | 'driver-page-size-ignored' // 驱动忽略页宽设置（DEVMODE 与实际不符）
   | 'printable-area-clip' // 内容超可打印区域被裁切
   | 'logo-measurement-race' // Logo 尺寸测量竞态（heightDelta ≠ 0）

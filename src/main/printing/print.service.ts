@@ -21,8 +21,8 @@ import type { AppSettings, PrintTemplate, SaleDetail } from '../../shared/types'
  *   代码（G7：两条渲染路径同源，Buffer 与 dataURL 的分叉只发生在分支出口）。
  *   T19（设置页）消费 getChannel 校验与 listSystemPrinters。
  * - driver 通道分支（printSale 内）：设置通道为 driver 时载荷改走
- *   generateReceiptHtml（G7 第三渲染器，HTML 即字节过 send——云热敏机
- *   RAW 丢 GBK/光栅的驱动渲染兜底），队列/重试/G3 语义不变。
+ *   generateReceiptHtml（G7 第三渲染器，HTML 即字节过 send——固件无中文字模、
+ *   RAW 打不出中文的云热敏机的驱动渲染兜底），队列/重试/G3 语义不变。
  */
 
 /** 打印相关设置（settings 表键名与 ER 设计逐字一致） */
@@ -315,8 +315,8 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
   async function printSale(saleId: number): Promise<void> {
     const payload = await buildReceiptPayload(saleId)
     // driver 通道分支：字节载荷 = 收据 HTML 的 UTF-8 编码（G7 第三渲染器
-    // receipt-html——云热敏机 RAW 丢 GBK/光栅的驱动渲染兜底）；其余通道
-    // 走 ESC/POS 字节。PrintQueue 串行/重试/G3 语义对两种载荷完全一致
+    // receipt-html——固件无中文字模的云热敏机 RAW 打不出中文时的驱动渲染兜底）；
+    // 其余通道走 ESC/POS 字节。PrintQueue 串行/重试/G3 语义对两种载荷完全一致
     // （HTML 即字节过 send(bytes)——队列/通道全复用，这正是分支点唯一的原因）。
     const isDriver =
       appSettingsToPrintSettings(deps.getSettings()).printer_channel === 'driver'

@@ -301,8 +301,9 @@ export interface PrintTemplate {
 /**
  * 打印通道（settings.printer_channel；spooler 主 / tcp 辅 / 串口备——D5；
  * driver = Windows 打印机驱动 GDI 渲染兜底通道——收据 HTML → 隐藏窗口
- * webContents.print，面向「云固件把 RAW 字节当 UTF-8 文本、丢 GBK 中文
- * 与光栅」的机型如得力 DL-5801PW，见 main/printing/driver/）。
+ * webContents.print，面向「固件无中文字模：RAW 文本的中文一律被吃字节空推进
+ * （`GS v 0` 光栅反而可用）」的机型如得力 DL-5801PW（20261118 F1 探针实证，
+ * 见 docs/windows-manual-checklist.md §11.3 回填与 main/printing/driver/）。
  */
 export type PrinterChannel = 'spooler' | 'tcp' | 'serial' | 'driver'
 

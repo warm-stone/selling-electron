@@ -6,9 +6,14 @@ import type { PrintChannel } from './print-channel'
  * driver 兜底通道（Windows 打印机驱动 GDI 渲染——「云」热敏机兼容方案）。
  *
  * 为什么存在：得力 DL-5801PW 等 58mm 云外卖打印机能收到 spooler RAW 字节，
- * 但其云固件把原始载荷当 UTF-8 文本渲染——GBK 中文双字节是非法 UTF-8 被
- * 静默丢弃，ESC/POS 光栅指令（GS v 0）也不被支持；而同一台机器走 Windows
- * 打印机驱动渲染（Word 打印的同一条路径）中文与图片都完美（真机已验证）。
+ * 但其固件**没有中文字模**（20261118 F1 编码探针实证）：S1 ASCII 与 S4 光栅
+ * 黑块都正常 → 传输层与 ESC/POS 指令层（含 `GS v 0`）完好；S2 UTF-8 与
+ * S3 GBK+FS & 的中文一律不出，且 `A1` 前的空白格数 ≈ 该段高位字节数
+ * （S2 18 格 / S3 12 格，差值恰为 6 字 ×(3−2) 字节）→ 固件对每个 ≥0x80
+ * 字节「吃掉 + 推进一个半角空位 + 不画点」，与编码、与汉字模式均无关。
+ * 所以文本中文在 RAW 通道无解（编码类修法全部无望），只能靠位图；而同一台
+ * 机器走 Windows 打印机驱动渲染（Word 打印的同一条路径，由驱动光栅化）
+ * 中文与图片都完美（真机已验证）。
  * 因此本通道不发原始字节，而是把收据渲染成完整 HTML（driver/receipt-html.ts，
  * G7 同源第三渲染器），加载进隐藏 BrowserWindow 后走
  * webContents.print(silent + deviceName)——由系统驱动完成光栅化，

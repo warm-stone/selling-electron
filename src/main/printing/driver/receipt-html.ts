@@ -1,13 +1,14 @@
 /**
  * 收据 HTML 生成器（driver 通道载荷，纯函数零 I/O——G6）。
  *
- * 为什么存在 driver 通道（真机结论）：得力 DL-5801PW 等「云打印」热敏机的
- * RAW 通道把任意原始字节当 UTF-8 文本渲染——GBK 中文双字节流是非法 UTF-8
- * 被静默丢弃，ESC/POS 光栅指令（GS v 0）更不被云固件支持；但同一台机器走
- * Windows 打印机驱动（GDI 渲染，即 Word 打印的同一条路径）中文与图片都
- * 完美。因此 driver 通道不再发原始字节，而是把模板渲染成完整 HTML 文档，
- * 交给隐藏 BrowserWindow 的 webContents.print（silent + deviceName）由
- * 驱动完成光栅化——对「云固件吃字节」的机型是 100% 兼容兜底。
+ * 为什么存在 driver 通道（真机结论）：得力 DL-5801PW 等「云打印」热敏机的固件
+ * **没有中文字模**——RAW 通道对每个 ≥0x80 字节「吃掉 + 推进一个半角空位 +
+ * 不画点」，UTF-8 与 GBK+FS & 两种编码同样打不出中文（20261118 F1 探针实证：
+ * S1 ASCII 正常、S4 `GS v 0` 光栅黑块正常，坏的只有 CJK 字形层）；但同一台
+ * 机器走 Windows 打印机驱动（GDI 渲染，即 Word 打印的同一条路径）中文与图片
+ * 都完美——驱动替它光栅化了。因此 driver 通道不再发原始字节，而是把模板渲染成
+ * 完整 HTML 文档，交给隐藏 BrowserWindow 的 webContents.print（silent +
+ * deviceName）由驱动完成光栅化——对「无中文字模」的机型是 100% 兼容兜底。
  *
  * G7 同源第三渲染器：与 ESC/POS 生成器（escpos-generator.ts）、HTML 预览
  * （ReceiptPreview.vue）消费同一 shared/receipt 网格数学——文本行
