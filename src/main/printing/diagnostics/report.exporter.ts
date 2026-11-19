@@ -149,7 +149,7 @@ export function buildReportTxt(report: DiagnosticReport): string {
     const fp = rs.fontProbe
     if (fp) {
       lines.push(
-        `字体度量 半角数字 ${fp.digitPx.toFixed(3)}px / 半角空格 ${fp.spacePx.toFixed(3)}px / 全角汉字 ${fp.cjkPx.toFixed(3)}px · 字号 ${fp.fontSizePx.toFixed(3)}px（等宽 CJK 字体下应满足 全角=2×半角=字号） · 可用字体 ${fp.availableFonts.length > 0 ? fp.availableFonts.join('+') : '无（NSimSun/SimSun 都不在，已回退 monospace）'}`
+        `字体度量 半角数字 ${fp.digitPx.toFixed(3)}px / 半角空格 ${fp.spacePx.toFixed(3)}px / 全角汉字 ${fp.cjkPx.toFixed(3)}px · 字号 ${fp.fontSizePx.toFixed(3)}px（等宽 CJK 字体下应满足 全角=2×半角=字号） · 可用字体 ${fp.availableFonts.length > 0 ? fp.availableFonts.join('+') : '无（SimHei/NSimSun/SimSun 都不在，已回退 monospace）'}`
       )
     }
     lines.push('')

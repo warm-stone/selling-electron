@@ -87,6 +87,16 @@ describe('generateReceiptHtml（文档骨架：完整独立 HTML）', () => {
       expect(html).toContain('-webkit-print-color-adjust: exact')
     }
   })
+
+  it('打印字体栈：SimHei（黑体）打头，NSimSun/SimSun 兜底——治细笔画白点', () => {
+    // 真机 20261119：纯黑化后残留白点集中在细笔画处——宋体发丝横画在 ~20 点字高下
+    // 覆盖率不足 1 个设备点，光栅化成灰像素被驱动半调丢弃/抖成白点；黑体笔画均匀。
+    // SimHei 与 NSimSun 同为全角=2×半角度量，网格数学前提不变。
+    for (const paper of ['58mm', '80mm'] as const) {
+      const html = generateReceiptHtml(DEFAULT_TEMPLATES[paper], DATA, VARS, new Map())
+      expect(html).toContain('font-family: "SimHei", "NSimSun", "SimSun", monospace')
+    }
+  })
 })
 
 describe('RECEIPT_PRINT_GEOMETRY（打印版面几何唯一事实源）', () => {
@@ -112,7 +122,18 @@ describe('RECEIPT_PRINT_GEOMETRY（打印版面几何唯一事实源）', () => 
     expect(FIT_TO_WIDTH_BODY).toContain(".receipt-paper")
     // 回缩基准必须是实测值对（scrollWidth / clientWidth）——写死比例救不了未知字体
     expect(FIT_TO_WIDTH_BODY).toContain('fitEl.scrollWidth > fitEl.clientWidth + 1')
-    expect(FIT_TO_WIDTH_BODY).toContain('fitEl.clientWidth / fitEl.scrollWidth')
+    expect(FIT_TO_WIDTH_BODY).toContain('fs * fitEl.clientWidth / fitEl.scrollWidth')
+  })
+
+  it('FIT_TO_WIDTH_BODY 回缩量化到整数设备点（1 点 = 0.125mm @203dpi = 12/25.4 CSS px）', () => {
+    // 真机 20261119 残留白点根因之二：旧版回缩落成 toFixed(4) 任意小数字号，
+    // 打穿 mm 锚定的整点对齐 → 笔画边缘抗锯齿灰重现 → 驱动抖成白点。
+    // 字号向下取整到整点（不重新超宽），行高圆整到整点（行盒堆叠落在点阵栅格上）。
+    expect(FIT_TO_WIDTH_BODY).toContain('const dotPx = 12 / 25.4')
+    expect(FIT_TO_WIDTH_BODY).toContain(
+      'Math.floor(fs * fitEl.clientWidth / fitEl.scrollWidth / dotPx) * dotPx'
+    )
+    expect(FIT_TO_WIDTH_BODY).toContain('Math.round(lh / dotPx) * dotPx')
   })
 })
 

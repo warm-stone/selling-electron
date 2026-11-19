@@ -402,13 +402,14 @@ describe('DriverChannel 版面自适应与测量脚本（v3 右截断修复）',
     return script as string
   }
 
-  it('vm 沙箱直跑：字体回退导致每行超宽时按实测比例回缩字号直到不溢出，再返回元素级页高 + 页宽微米', async () => {
+  it('vm 沙箱直跑：字体回退导致每行超宽时按实测比例回缩字号（量化到整数设备点）直到不溢出，再返回元素级页高 + 页宽微米', async () => {
     const script = await measureScript()
 
     // 真机 20261117 现场：容器 clientWidth=192px（32 列网格），字体逐字回退到
     // monospace → 每字 0.594em（应 0.5em），32 字一行实测 216px 超宽 24px。
     // scrollWidth 做成 getter：每轮回缩后重新按当前字号算，模拟真实重排。
     const BASE_FS = 11.34
+    const DOT_PX = 12 / 25.4 // 1 设备点 = 0.125mm @203dpi（与 PAPER_DOTS 8 点/mm 同源）
     let fs = BASE_FS
     const style: Record<string, string> = {}
     const fitEl = {
@@ -435,14 +436,19 @@ describe('DriverChannel 版面自适应与测量脚本（v3 右截断修复）',
 
     const raw = runInNewContext(script, {
       document,
-      getComputedStyle: () => ({ fontSize: `${fs}px` })
+      // lineHeight 跟随当前字号（1.25 倍行高）——脚本回缩后会重读并整点圆整
+      getComputedStyle: () => ({ fontSize: `${fs}px`, lineHeight: `${fs * 1.25}px` })
     }) as string
 
     expect(JSON.parse(raw)).toEqual({ h: 538, pageWidthMicrons: '48000' })
-    // 回缩到不再溢出，且是**按实测比例**回缩（216→92 → 11.34→10.08），不是一刀切常数
+    // 回缩到不再溢出，且是**按实测比例**（216→192）再**向下量化到整点**：
+    // 11.34×192/216 = 10.08 → floor(10.08/dotPx) = 21 点 ≈ 9.9213px——
+    // 旧版 toFixed(4) 任意小数字号（10.08）会打穿整点对齐、笔画边缘重现抗锯齿灰（白点残留根因）
     expect(fitEl.scrollWidth).toBeLessThanOrEqual(fitEl.clientWidth + 1)
     expect(fs).toBeLessThan(BASE_FS)
-    expect(fs).toBeCloseTo((BASE_FS * 192) / 216, 3)
+    expect(fs / DOT_PX).toBeCloseTo(21, 3)
+    // 行高同步圆整到整点写入内联样式：21 点 × 1.25 = 26.25 → round = 26 点
+    expect(parseFloat(style.lineHeight) / DOT_PX).toBeCloseTo(26, 3)
   })
 
   it('vm 沙箱直跑：网格不超宽时字号原封不动（自适应不无故缩小版面）', async () => {
@@ -468,12 +474,13 @@ describe('DriverChannel 版面自适应与测量脚本（v3 右截断修复）',
 
     const raw = runInNewContext(script, {
       document,
-      getComputedStyle: () => ({ fontSize: `${fs}px` })
+      getComputedStyle: () => ({ fontSize: `${fs}px`, lineHeight: `${fs * 1.25}px` })
     }) as string
 
     expect(JSON.parse(raw)).toEqual({ h: 400, pageWidthMicrons: '48000' })
     expect(fs).toBe(BASE_FS)
     expect(writes).toBe(0) // 不超宽 → 一行内联样式都不写（不无故缩小版面）
+    expect(style.lineHeight).toBeUndefined() // 行高整点圆整只随回缩发生
   })
 
   it('vm 沙箱直跑：非收据 HTML（无 .receipt-paper）→ 回退 documentElement 页高，不 crash', async () => {

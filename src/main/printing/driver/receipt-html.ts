@@ -25,6 +25,13 @@
  * **纯黑单色**（真机 20261117 结论）：热敏机是 1 位色深，任何非纯黑都会被驱动
  * 抖动成灰阶网点，纸面表现就是「字里行间很多小白点」。打印侧一律 #000。
  *
+ * **黑体打印字体 + 回缩整点量化**（真机 20261119 结论）：纯黑化之后残留白点集中在
+ * **文字细笔画处**——宋体（NSimSun/SimSun）横画是发丝线，在 ~20-24 点字高下覆盖率
+ * 不足 1 个设备点，光栅化成灰像素后被驱动半调丢弃/抖成白点；叠加 FIT_TO_WIDTH_BODY
+ * 的回缩结果是任意小数字号，破坏 mm 锚定的整点对齐、让所有笔画边缘重新出抗锯齿灰。
+ * 修法：字体栈改 SimHei（黑体）打头（笔画粗细均匀，且同为全角=2×半角等宽度量，
+ * 网格数学前提不变）；回缩字号向下量化到整数设备点、行高圆整到整点（见 FIT_TO_WIDTH_BODY）。
+ *
  * 产物为完整独立文档（doctype + charset + 内联 style，零外部资源——离线
  * 可渲染）；body 带 data-paper-width="58mm|80mm"（纸张规格留档）与
  * data-page-width-microns（driver 通道 executeJavaScript 读取该属性定页宽微米）。
@@ -117,13 +124,21 @@ export const RECEIPT_PRINT_GEOMETRY: Record<PaperWidth, ReceiptPrintGeometry> = 
  * 7.125px = **0.594em**，比假设宽 18.75%——说明该机 ASCII/数字逐字回退到了
  * monospace（Courier New 一类 0.6em）而汉字仍走 NSimSun：版面看着正常，但每行都偏宽，
  * 顶在最右端的合计行金额尾数就被 overflow:hidden 吃掉。字体回退、合成粗体加宽、
- * 逐字亚像素取整都无法在生成期预知，此处按实测比例回缩字号直到不溢出
- * （最多 8 轮，线性收敛通常 1-2 轮），把「字体度量假设」从前提降级为兜底。
+ * 逐字亚像素取整都无法在生成期预知，此处按实测比例回缩字号（量化到整数设备点）
+ * 直到不溢出（最多 8 轮，线性收敛通常 1-2 轮），把「字体度量假设」从前提降级为兜底。
  *
  * 自带块级作用域（`{ ... }`）：可安全内联进任何 IIFE，不与宿主的 `el` 等标识符冲突。
+ *
+ * **整点量化**（真机 20261119 残留白点修复）：回缩若落成任意小数字号（旧版
+ * toFixed(4) 比例值），mm 锚定「字号 = 24 点、字形边界落在打印头点阵上」的前提
+ * 即被打穿——每个笔画边界都带亚点偏移，抗锯齿灰重新出现、被驱动抖成白点。
+ * 因此回缩目标字号**向下取整到整数设备点**（1 点 = 0.125mm @203dpi = 12/25.4
+ * CSS px，与 PAPER_DOTS 的 8 点/mm 同源；向下取整保证不会重新超宽），行高同步
+ * 圆整到整点（行盒堆叠也落在点阵栅格上）。量化步长远小于 1 字符列宽（12 点），
+ * 收敛性与旧版比例回缩一致（通常 1-2 轮）。
  */
 export const FIT_TO_WIDTH_BODY =
-  "{ const fitEl = document.querySelector('.receipt-paper'); if (fitEl) { for (let i = 0; i < 8 && fitEl.scrollWidth > fitEl.clientWidth + 1; i++) { const fs = parseFloat(getComputedStyle(fitEl).fontSize); if (!(fs > 0)) break; fitEl.style.fontSize = (fs * fitEl.clientWidth / fitEl.scrollWidth).toFixed(4) + 'px'; } } }"
+  "{ const fitEl = document.querySelector('.receipt-paper'); if (fitEl) { const dotPx = 12 / 25.4; for (let i = 0; i < 8 && fitEl.scrollWidth > fitEl.clientWidth + 1; i++) { const fs = parseFloat(getComputedStyle(fitEl).fontSize); if (!(fs > 0)) break; const next = Math.floor(fs * fitEl.clientWidth / fitEl.scrollWidth / dotPx) * dotPx; if (!(next > 0)) break; fitEl.style.fontSize = next.toFixed(4) + 'px'; const lh = parseFloat(getComputedStyle(fitEl).lineHeight); if (lh > 0) fitEl.style.lineHeight = (Math.round(lh / dotPx) * dotPx).toFixed(4) + 'px'; } } }"
 
 /** HTML 转义：& < > " '（全部插值文本必经——店名/商品名/变量值不得注入标记） */
 function escapeHtml(s: string): string {
@@ -306,7 +321,9 @@ function itemsTableHtml(template: ReceiptTemplate, data: SaleReceiptData): strin
 
 /**
  * 内联样式（打印文档专用，**不是** ReceiptPreview scoped 样式的拷贝）：
- * - 字体栈 NSimSun/SimSun——全角恰 2× 半角的等宽 CJK，网格 pad 对齐的前提；
+ * - 字体栈 SimHei（黑体）打头、NSimSun/SimSun 兜底——黑体笔画粗细均匀、无发丝线，
+ *   低字高下细笔画不再是「覆盖率不足 1 点的灰像素」（真机 20261119 细笔画白点修复）；
+ *   三者同为全角恰 2× 半角的等宽 CJK，网格 pad 对齐的前提不变；
  *   该假设在目标机不成立时由 FIT_TO_WIDTH_BODY 实测回缩兜底（见其头注）。
  * - 尺寸一律 mm 而不用 px：热敏机是点阵设备（203dpi → 1 点 = 0.125mm），用 mm
  *   排版才能让「1 列 = 12 点、字高 = 24 点、行距 = 30 点」落在整数点上；px 排版
@@ -325,7 +342,7 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
   padding: ${g.cssPadding};
   background: #ffffff;
   color: #000000;
-  font-family: "NSimSun", "SimSun", monospace;
+  font-family: "SimHei", "NSimSun", "SimSun", monospace;
   font-size: ${g.fontSizeMm}mm;
   line-height: ${LINE_HEIGHT};
   overflow: hidden;

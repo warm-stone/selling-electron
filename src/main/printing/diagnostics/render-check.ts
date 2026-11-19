@@ -104,7 +104,7 @@ const FONT_PROBE_BODY = `(() => {
     spacePx: measure(' '.repeat(48)) / 48,
     cjkPx: measure('国'.repeat(24)) / 24,
     fontSizePx: parseFloat(getComputedStyle(host).fontSize),
-    availableFonts: ['NSimSun', 'SimSun'].filter((f) => !!(api && api.check && api.check('1em "' + f + '"')))
+    availableFonts: ['SimHei', 'NSimSun', 'SimSun'].filter((f) => !!(api && api.check && api.check('1em "' + f + '"')))
   };
 })()`
 

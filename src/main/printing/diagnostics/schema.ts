@@ -57,7 +57,7 @@ export interface RenderSnapshot {
     cjkPx: number
     /** .receipt-paper 自适应回缩后的实际字号 px（未回缩时 = 3mm ≈ 11.34px） */
     fontSizePx: number
-    /** document.fonts.check 判定可用的等宽 CJK 字体（空数组 = NSimSun/SimSun 都不在） */
+    /** document.fonts.check 判定可用的等宽 CJK 字体（空数组 = SimHei/NSimSun/SimSun 都不在） */
     availableFonts: string[]
   } | null
 }
