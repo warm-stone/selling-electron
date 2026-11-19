@@ -326,7 +326,8 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
       }
     }
 
-    // R9 cloud-printer-raw-utf8：云固件把 RAW 当 UTF-8（GBK 中文与光栅全丢）
+    // R9 cloud-printer-raw-utf8：云打印机 RAW 打不出中文（真因是固件无 CJK 字模——
+    // 20261118 探针实证高位字节一律空推进，而 GS v 0 光栅可用；id 沿用旧假设名以保报告兼容）
     if (!depsFailed('cloud-printer-raw-utf8')) {
       const cloudModel = matchCloudModel(target)
       const processorPath =
@@ -348,7 +349,7 @@ export function analyzeSnapshot(s: PrintDiagnosticSnapshot): Finding[] {
           status: 'pending',
           description: `目标打印机「${target.name}」疑似云固件机型${
             cloudModel !== null ? `（命中名单 ${cloudModel}）` : ''
-          }：RAW 字节流会被固件按 UTF-8 文本解释，GBK 中文与 ESC/POS 光栅指令全部丢失或乱码。请切换到 driver 渲染通道（由应用渲染完整版面后交驱动输出）。`
+          }：RAW 通道打不出中文——固件字形层缺失（20261118 编码探针实证：ASCII 与 GS v 0 光栅均正常，中文无论 UTF-8 还是 GBK+汉字模式都只按字节推进空白格）。请切换到 driver 渲染通道（由应用渲染完整版面后交驱动输出）。`
         })
       }
     }
