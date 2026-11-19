@@ -1,0 +1,101 @@
+/**
+ * 设置页卡片骨架样式（ShopInfoCard / PrintSettingsCard / LogoManagerCard /
+ * 内联诊断卡共用）——由 SettingsView 的非 scoped <style src> 全局加载一次。
+ *
+ * 原为 SettingsView scoped 样式（:deep 穿透 el-card 内部）；卡片拆分为独立
+ * 组件后 scoped 无法跨组件生效，故收敛为全局规则——所有选择器一律挂在
+ * .settings-page 命名空间下，防泄漏到其它页面。
+ */
+
+/* ── 卡片 ── */
+.settings-page .settings-card {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+}
+
+.settings-page .settings-card .el-card__header {
+  padding: 14px 20px;
+  background: var(--el-fill-color-lighter);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.settings-page .settings-card .el-card__body {
+  padding: 20px;
+}
+
+.settings-page .card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.settings-page .card-head__marker {
+  width: 4px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--el-color-warning);
+  align-self: center;
+}
+
+.settings-page .card-head__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.settings-page .card-head__desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+/* ── 表单 ── */
+.settings-page .form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+}
+
+.settings-page .form-grid--tcp {
+  grid-template-columns: 3fr 2fr;
+}
+
+.settings-page .settings-form .el-form-item {
+  margin-bottom: 18px;
+}
+
+.settings-page .settings-form .el-form-item__label {
+  font-weight: 500;
+  color: var(--el-text-color-regular);
+  padding-bottom: 4px;
+}
+
+.settings-page .field-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.settings-page .field-hint--block {
+  margin-bottom: 4px;
+}
+
+/* ── 卡片底栏 ── */
+.settings-page .card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.settings-page .card-foot__hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-placeholder);
+}
+
+.settings-page .card-foot__actions {
+  display: flex;
+  gap: 10px;
+}
