@@ -13,7 +13,9 @@ defineProps<{
 
 <template>
   <section class="placeholder-page">
-    <h2 class="placeholder-page__title">{{ title }}</h2>
+    <h2 class="placeholder-page__title">
+      {{ title }}
+    </h2>
     <el-empty
       class="placeholder-page__empty"
       :description="description ?? '功能建设中，敬请期待'"

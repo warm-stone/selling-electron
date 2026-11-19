@@ -53,7 +53,9 @@ function onPriceChange(index: number, yuan: number | undefined): void {
   <aside class="cart-panel">
     <header class="cart-panel__header">
       <div class="cart-panel__title">
-        <h3 class="cart-panel__title-text">购物车</h3>
+        <h3 class="cart-panel__title-text">
+          购物车
+        </h3>
         <span class="cart-panel__count">{{ pieceCount }} 件</span>
       </div>
       <el-button
@@ -68,21 +70,40 @@ function onPriceChange(index: number, yuan: number | undefined): void {
     </header>
 
     <div class="cart-panel__body">
-      <div v-if="empty" class="cart-empty">
-        <el-empty description="扫码或双击商品加入购物车" :image-size="96" />
+      <div
+        v-if="empty"
+        class="cart-empty"
+      >
+        <el-empty
+          description="扫码或双击商品加入购物车"
+          :image-size="96"
+        />
       </div>
-      <div v-else class="cart-list">
+      <div
+        v-else
+        class="cart-list"
+      >
         <div
           v-for="(item, index) in cart.items"
           :key="`${item.product_id}-${item.unit_price_cents}-${item.sn ?? ''}`"
           class="cart-row"
         >
           <div class="cart-row__name">
-            <span class="cart-row__name-text" :title="item.name">{{ item.name }}</span>
-            <span v-if="item.sn !== null" class="cart-row__sn" :title="item.sn">
+            <span
+              class="cart-row__name-text"
+              :title="item.name"
+            >{{ item.name }}</span>
+            <span
+              v-if="item.sn !== null"
+              class="cart-row__sn"
+              :title="item.sn"
+            >
               SN：{{ item.sn }}
             </span>
-            <span v-if="isOverStock(item)" class="cart-row__warn">
+            <span
+              v-if="isOverStock(item)"
+              class="cart-row__warn"
+            >
               库存不足(负库存将产生)
             </span>
           </div>

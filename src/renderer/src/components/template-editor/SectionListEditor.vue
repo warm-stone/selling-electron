@@ -146,15 +146,29 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
         {{ meta.title }}
         <span class="tpl-group__sub">{{ meta.sub }}</span>
       </h4>
-      <el-popover v-if="meta.varsPopover" placement="left-start" :width="280" trigger="click">
+      <el-popover
+        v-if="meta.varsPopover"
+        placement="left-start"
+        :width="280"
+        trigger="click"
+      >
         <template #reference>
-          <el-icon class="tpl-vars-trigger" data-testid="tpl-vars">
+          <el-icon
+            class="tpl-vars-trigger"
+            data-testid="tpl-vars"
+          >
             <QuestionFilled />
           </el-icon>
         </template>
         <div class="tpl-vars">
-          <p class="tpl-vars__title">内容可用变量插槽（打印时替换为实值）</p>
-          <p v-for="v in RECEIPT_VAR_DOCS" :key="v.name" class="tpl-vars__row">
+          <p class="tpl-vars__title">
+            内容可用变量插槽（打印时替换为实值）
+          </p>
+          <p
+            v-for="v in RECEIPT_VAR_DOCS"
+            :key="v.name"
+            class="tpl-vars__row"
+          >
             <code>{{ varSlot(v.name) }}</code>
             <span>{{ v.description }}</span>
           </p>
@@ -164,7 +178,12 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
 
     <!-- ── 合计区分支（label 单行文案 + 对齐/字号/加粗）── -->
     <template v-if="target === 'totals'">
-      <p v-if="draft.totals.length === 0" class="section-list__empty">{{ meta.emptyText }}</p>
+      <p
+        v-if="draft.totals.length === 0"
+        class="section-list__empty"
+      >
+        {{ meta.emptyText }}
+      </p>
       <div
         v-for="(t, i) in draft.totals"
         :key="`${meta.keyPrefix}-${i}`"
@@ -177,23 +196,54 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
             data-testid="tpl-label"
             placeholder="行文案，如 合计: ￥{total}"
           />
-          <el-select v-model="t.align" data-testid="tpl-align" placeholder="对齐">
-            <el-option v-for="o in ALIGN_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
+          <el-select
+            v-model="t.align"
+            data-testid="tpl-align"
+            placeholder="对齐"
+          >
+            <el-option
+              v-for="o in ALIGN_OPTIONS"
+              :key="o.value"
+              :value="o.value"
+              :label="o.label"
+            />
           </el-select>
-          <el-select v-model="t.size" data-testid="tpl-size" placeholder="字号">
-            <el-option v-for="o in SIZE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
+          <el-select
+            v-model="t.size"
+            data-testid="tpl-size"
+            placeholder="字号"
+          >
+            <el-option
+              v-for="o in SIZE_OPTIONS"
+              :key="o.value"
+              :value="o.value"
+              :label="o.label"
+            />
           </el-select>
-          <el-switch v-model="t.bold" data-testid="tpl-bold" />
+          <el-switch
+            v-model="t.bold"
+            data-testid="tpl-bold"
+          />
         </div>
         <div class="section-row__ops">
-          <el-button :icon="ArrowUp" text :disabled="i === 0" @click="moveLine(i, -1)" />
+          <el-button
+            :icon="ArrowUp"
+            text
+            :disabled="i === 0"
+            @click="moveLine(i, -1)"
+          />
           <el-button
             :icon="ArrowDown"
             text
             :disabled="i === draft.totals.length - 1"
             @click="moveLine(i, 1)"
           />
-          <el-button :icon="Delete" text type="danger" @click="removeLine(i)" />
+          <el-button
+            :icon="Delete"
+            text
+            type="danger"
+            @click="removeLine(i)"
+          />
         </div>
       </div>
 
@@ -211,7 +261,12 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
 
     <!-- ── 头部/底部段落分支（类型 + Logo/文案 + 对齐/字号/加粗）── -->
     <template v-else>
-      <p v-if="sections.length === 0" class="section-list__empty">{{ meta.emptyText }}</p>
+      <p
+        v-if="sections.length === 0"
+        class="section-list__empty"
+      >
+        {{ meta.emptyText }}
+      </p>
       <div
         v-for="(s, i) in sections"
         :key="`${meta.keyPrefix}-${i}`"
@@ -219,11 +274,22 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
         :data-testid="meta.rowTestId"
       >
         <div class="section-row__main">
-          <el-select v-model="s.type" data-testid="tpl-type">
-            <el-option v-for="o in TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
+          <el-select
+            v-model="s.type"
+            data-testid="tpl-type"
+          >
+            <el-option
+              v-for="o in TYPE_OPTIONS"
+              :key="o.value"
+              :value="o.value"
+              :label="o.label"
+            />
           </el-select>
           <!-- image 段落：Logo 选择（多 Logo；清空 = 未指定）+ 缩略图 + 上传入口 -->
-          <div v-if="s.type === 'image'" class="logo-picker">
+          <div
+            v-if="s.type === 'image'"
+            class="logo-picker"
+          >
             <el-select
               v-model="s.logoId"
               data-testid="tpl-logo-select"
@@ -232,7 +298,12 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
               clearable
               :disabled="logos.length === 0"
             >
-              <el-option v-for="l in logos" :key="l.id" :value="l.id" :label="l.display_name" />
+              <el-option
+                v-for="l in logos"
+                :key="l.id"
+                :value="l.id"
+                :label="l.display_name"
+              />
             </el-select>
             <el-image
               v-if="logoThumbUrl(s.logoId)"
@@ -251,7 +322,10 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
             >
               上传
             </el-button>
-            <span v-if="logos.length === 0" class="logo-picker__hint">
+            <span
+              v-if="logos.length === 0"
+              class="logo-picker__hint"
+            >
               请先在 设置→小票Logo 上传
             </span>
           </div>
@@ -262,23 +336,54 @@ function logoThumbUrl(logoId: number | undefined): string | undefined {
             :disabled="s.type !== 'text'"
             :placeholder="contentPlaceholder(s.type)"
           />
-          <el-select v-model="s.align" data-testid="tpl-align" placeholder="对齐">
-            <el-option v-for="o in ALIGN_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
+          <el-select
+            v-model="s.align"
+            data-testid="tpl-align"
+            placeholder="对齐"
+          >
+            <el-option
+              v-for="o in ALIGN_OPTIONS"
+              :key="o.value"
+              :value="o.value"
+              :label="o.label"
+            />
           </el-select>
-          <el-select v-model="s.size" data-testid="tpl-size" placeholder="字号">
-            <el-option v-for="o in SIZE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
+          <el-select
+            v-model="s.size"
+            data-testid="tpl-size"
+            placeholder="字号"
+          >
+            <el-option
+              v-for="o in SIZE_OPTIONS"
+              :key="o.value"
+              :value="o.value"
+              :label="o.label"
+            />
           </el-select>
-          <el-switch v-model="s.bold" data-testid="tpl-bold" />
+          <el-switch
+            v-model="s.bold"
+            data-testid="tpl-bold"
+          />
         </div>
         <div class="section-row__ops">
-          <el-button :icon="ArrowUp" text :disabled="i === 0" @click="moveLine(i, -1)" />
+          <el-button
+            :icon="ArrowUp"
+            text
+            :disabled="i === 0"
+            @click="moveLine(i, -1)"
+          />
           <el-button
             :icon="ArrowDown"
             text
             :disabled="i === sections.length - 1"
             @click="moveLine(i, 1)"
           />
-          <el-button :icon="Delete" text type="danger" @click="removeLine(i)" />
+          <el-button
+            :icon="Delete"
+            text
+            type="danger"
+            @click="removeLine(i)"
+          />
         </div>
       </div>
 

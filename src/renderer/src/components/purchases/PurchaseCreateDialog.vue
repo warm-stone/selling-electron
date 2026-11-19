@@ -334,8 +334,15 @@ function close(): void {
     :close-on-click-modal="false"
     @update:model-value="(v: boolean) => emit('update:visible', v)"
   >
-    <el-table :data="formRows" class="create-form__table" row-key-class-name="form-row">
-      <el-table-column label="商品（可搜名称/条码）" min-width="380">
+    <el-table
+      :data="formRows"
+      class="create-form__table"
+      row-key-class-name="form-row"
+    >
+      <el-table-column
+        label="商品（可搜名称/条码）"
+        min-width="380"
+      >
         <template #default="{ row }">
           <template v-if="row.kind === 'quantity'">
             <el-select
@@ -383,7 +390,10 @@ function close(): void {
                   添加
                 </el-button>
               </div>
-              <div v-if="row.sns.length > 0" class="sn-sub__tags">
+              <div
+                v-if="row.sns.length > 0"
+                class="sn-sub__tags"
+              >
                 <el-tag
                   v-for="sn in row.sns"
                   :key="sn"
@@ -399,7 +409,10 @@ function close(): void {
           </template>
         </template>
       </el-table-column>
-      <el-table-column label="数量" width="150">
+      <el-table-column
+        label="数量"
+        width="150"
+      >
         <template #default="{ row }">
           <el-input-number
             v-if="row.kind === 'quantity'"
@@ -410,10 +423,16 @@ function close(): void {
             style="width: 100%"
           />
           <!-- SN 行数量 = SN 个数（禁手填——D-SN9） -->
-          <span v-else class="sn-qty">已录 {{ row.sns.length }} 个</span>
+          <span
+            v-else
+            class="sn-qty"
+          >已录 {{ row.sns.length }} 个</span>
         </template>
       </el-table-column>
-      <el-table-column label="成本价（元）" width="170">
+      <el-table-column
+        label="成本价（元）"
+        width="170"
+      >
         <template #default="{ row }">
           <el-input-number
             v-model="row.costYuan"
@@ -424,22 +443,47 @@ function close(): void {
           />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="80" align="center">
+      <el-table-column
+        label="操作"
+        width="80"
+        align="center"
+      >
         <template #default="{ $index }">
-          <el-button link type="danger" @click="removeRow($index)">
+          <el-button
+            link
+            type="danger"
+            @click="removeRow($index)"
+          >
             删除
           </el-button>
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty description="请添加商品行" :image-size="60" />
+        <el-empty
+          description="请添加商品行"
+          :image-size="60"
+        />
       </template>
     </el-table>
     <div class="create-form__actions">
-      <el-button data-testid="add-sn-row" @click="addSnRow">+ SN 商品</el-button>
-      <el-button data-testid="add-quantity-row" @click="addQuantityRow">+ 批量计商品</el-button>
+      <el-button
+        data-testid="add-sn-row"
+        @click="addSnRow"
+      >
+        + SN 商品
+      </el-button>
+      <el-button
+        data-testid="add-quantity-row"
+        @click="addQuantityRow"
+      >
+        + 批量计商品
+      </el-button>
     </div>
-    <el-form label-width="64px" class="create-form__note" @submit.prevent>
+    <el-form
+      label-width="64px"
+      class="create-form__note"
+      @submit.prevent
+    >
       <el-form-item label="备注">
         <el-input
           v-model="noteInput"
@@ -449,8 +493,14 @@ function close(): void {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="close">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="submitCreate">
+      <el-button @click="close">
+        取消
+      </el-button>
+      <el-button
+        type="primary"
+        :loading="submitting"
+        @click="submitCreate"
+      >
         提交入库
       </el-button>
     </template>

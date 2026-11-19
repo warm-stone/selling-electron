@@ -324,19 +324,34 @@ onMounted(async () => {
 
 <template>
   <div class="template-editor">
-    <aside class="tpl-sidebar" v-loading="loading">
+    <aside
+      v-loading="loading"
+      class="tpl-sidebar"
+    >
       <div class="tpl-sidebar__head">
         <div>
-          <h2 class="tpl-sidebar__title">我的模板</h2>
-          <p class="tpl-sidebar__count">共 {{ templates.length }} 个</p>
+          <h2 class="tpl-sidebar__title">
+            我的模板
+          </h2>
+          <p class="tpl-sidebar__count">
+            共 {{ templates.length }} 个
+          </p>
         </div>
-        <el-button type="primary" :icon="Plus" data-testid="tpl-new" @click="newDraft">
+        <el-button
+          type="primary"
+          :icon="Plus"
+          data-testid="tpl-new"
+          @click="newDraft"
+        >
           新建
         </el-button>
       </div>
 
       <div class="tpl-list">
-        <p v-if="templates.length === 0" class="tpl-list__empty">
+        <p
+          v-if="templates.length === 0"
+          class="tpl-list__empty"
+        >
           暂无模板，点击「新建」从默认样式开始
         </p>
         <button
@@ -350,10 +365,18 @@ onMounted(async () => {
         >
           <span class="tpl-item__name">{{ t.name }}</span>
           <span class="tpl-item__meta">
-            <el-tag size="small" :type="t.paper_width === '58mm' ? 'warning' : 'info'" effect="plain">
+            <el-tag
+              size="small"
+              :type="t.paper_width === '58mm' ? 'warning' : 'info'"
+              effect="plain"
+            >
               {{ t.paper_width }}
             </el-tag>
-            <el-tag v-if="t.is_default" size="small" type="success">默认</el-tag>
+            <el-tag
+              v-if="t.is_default"
+              size="small"
+              type="success"
+            >默认</el-tag>
           </span>
         </button>
       </div>
@@ -385,11 +408,24 @@ onMounted(async () => {
       <div class="tpl-form">
         <div class="tpl-form__toolbar">
           <div class="tpl-form__heading">
-            <h3 class="tpl-form__title">{{ isDraft ? '新模板' : draft.name }}</h3>
-            <el-tag v-if="isDraft" size="small" type="warning" data-testid="tpl-draft-tag">
+            <h3 class="tpl-form__title">
+              {{ isDraft ? '新模板' : draft.name }}
+            </h3>
+            <el-tag
+              v-if="isDraft"
+              size="small"
+              type="warning"
+              data-testid="tpl-draft-tag"
+            >
               未保存
             </el-tag>
-            <el-tag v-else-if="selected?.is_default" size="small" type="success">默认模板</el-tag>
+            <el-tag
+              v-else-if="selected?.is_default"
+              size="small"
+              type="success"
+            >
+              默认模板
+            </el-tag>
           </div>
           <el-button
             type="primary"
@@ -405,11 +441,21 @@ onMounted(async () => {
 
         <VarDocsPanel />
 
-        <el-form :model="draft" :rules="rules" label-position="top">
+        <el-form
+          :model="draft"
+          :rules="rules"
+          label-position="top"
+        >
           <section class="tpl-group">
-            <h4 class="tpl-group__title">基本信息</h4>
+            <h4 class="tpl-group__title">
+              基本信息
+            </h4>
             <div class="tpl-grid-basic">
-              <el-form-item label="模板名称" prop="name" class="tpl-basic__name">
+              <el-form-item
+                label="模板名称"
+                prop="name"
+                class="tpl-basic__name"
+              >
                 <el-input
                   v-model="draft.name"
                   data-testid="tpl-name"
@@ -418,13 +464,29 @@ onMounted(async () => {
                 />
               </el-form-item>
               <el-form-item label="纸宽">
-                <el-radio-group v-model="draft.paperWidth" data-testid="tpl-paper">
-                  <el-radio value="80mm" data-testid="tpl-paper-80">80mm（48 列）</el-radio>
-                  <el-radio value="58mm" data-testid="tpl-paper-58">58mm（32 列）</el-radio>
+                <el-radio-group
+                  v-model="draft.paperWidth"
+                  data-testid="tpl-paper"
+                >
+                  <el-radio
+                    value="80mm"
+                    data-testid="tpl-paper-80"
+                  >
+                    80mm（48 列）
+                  </el-radio>
+                  <el-radio
+                    value="58mm"
+                    data-testid="tpl-paper-58"
+                  >
+                    58mm（32 列）
+                  </el-radio>
                 </el-radio-group>
               </el-form-item>
               <el-form-item label="打印后切纸">
-                <el-switch v-model="draft.cutPaper" data-testid="tpl-cut" />
+                <el-switch
+                  v-model="draft.cutPaper"
+                  data-testid="tpl-cut"
+                />
               </el-form-item>
               <el-form-item label="默认模板">
                 <el-radio-group
@@ -432,8 +494,12 @@ onMounted(async () => {
                   data-testid="tpl-default"
                   @change="onDefaultChange"
                 >
-                  <el-radio :value="true">设为默认</el-radio>
-                  <el-radio :value="false">非默认</el-radio>
+                  <el-radio :value="true">
+                    设为默认
+                  </el-radio>
+                  <el-radio :value="false">
+                    非默认
+                  </el-radio>
                 </el-radio-group>
               </el-form-item>
             </div>
@@ -454,20 +520,38 @@ onMounted(async () => {
               </h4>
             </div>
             <div class="tpl-items">
-              <el-form-item label="打印列头" class="tpl-items__switch">
-                <el-switch v-model="draft.items.showHeader" data-testid="tpl-items-header" />
+              <el-form-item
+                label="打印列头"
+                class="tpl-items__switch"
+              >
+                <el-switch
+                  v-model="draft.items.showHeader"
+                  data-testid="tpl-items-header"
+                />
               </el-form-item>
               <el-form-item label="商品列">
-                <el-input v-model="draft.items.nameLabel" data-testid="tpl-col-name" />
+                <el-input
+                  v-model="draft.items.nameLabel"
+                  data-testid="tpl-col-name"
+                />
               </el-form-item>
               <el-form-item label="数量列">
-                <el-input v-model="draft.items.qtyLabel" data-testid="tpl-col-qty" />
+                <el-input
+                  v-model="draft.items.qtyLabel"
+                  data-testid="tpl-col-qty"
+                />
               </el-form-item>
               <el-form-item label="单价列">
-                <el-input v-model="draft.items.priceLabel" data-testid="tpl-col-price" />
+                <el-input
+                  v-model="draft.items.priceLabel"
+                  data-testid="tpl-col-price"
+                />
               </el-form-item>
               <el-form-item label="小计列">
-                <el-input v-model="draft.items.subtotalLabel" data-testid="tpl-col-subtotal" />
+                <el-input
+                  v-model="draft.items.subtotalLabel"
+                  data-testid="tpl-col-subtotal"
+                />
               </el-form-item>
 
               <el-form-item label="名称列宽">
@@ -552,7 +636,10 @@ onMounted(async () => {
         </el-form>
       </div>
 
-      <TemplatePreviewPane :template="previewTemplate" :logo-urls="logoUrlsMap" />
+      <TemplatePreviewPane
+        :template="previewTemplate"
+        :logo-urls="logoUrlsMap"
+      />
     </section>
   </div>
 </template>

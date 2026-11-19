@@ -165,18 +165,45 @@ function close(): void {
     destroy-on-close
     @update:model-value="(v: boolean) => emit('update:visible', v)"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
-      <el-form-item v-if="mode === 'create'" label="类型">
-        <el-radio-group v-model="form.tracking" data-testid="product-tracking">
-          <el-radio-button value="sn">SN 商品</el-radio-button>
-          <el-radio-button value="quantity">批量计商品</el-radio-button>
+    <el-form
+      ref="formRef"
+      :model="form"
+      :rules="rules"
+      label-width="96px"
+    >
+      <el-form-item
+        v-if="mode === 'create'"
+        label="类型"
+      >
+        <el-radio-group
+          v-model="form.tracking"
+          data-testid="product-tracking"
+        >
+          <el-radio-button value="sn">
+            SN 商品
+          </el-radio-button>
+          <el-radio-button value="quantity">
+            批量计商品
+          </el-radio-button>
         </el-radio-group>
-        <div class="form-hint">商品类型创建后不可修改</div>
+        <div class="form-hint">
+          商品类型创建后不可修改
+        </div>
       </el-form-item>
       <!-- 编辑 SN 商品：只读类型标识（D-SN1 禁互转，不提供切换） -->
-      <el-form-item v-if="mode === 'edit' && form.tracking === 'sn'" label="类型">
-        <el-tag type="warning" effect="plain">SN 商品</el-tag>
-        <div class="form-hint">类型创建后不可修改；库存为在库 SN 数，从进货录入</div>
+      <el-form-item
+        v-if="mode === 'edit' && form.tracking === 'sn'"
+        label="类型"
+      >
+        <el-tag
+          type="warning"
+          effect="plain"
+        >
+          SN 商品
+        </el-tag>
+        <div class="form-hint">
+          类型创建后不可修改；库存为在库 SN 数，从进货录入
+        </div>
       </el-form-item>
       <el-form-item label="条码">
         <el-input
@@ -185,28 +212,53 @@ function close(): void {
           maxlength="64"
           placeholder="扫码或手动输入，可留空"
         />
-        <div v-if="mode === 'edit'" class="form-hint">条码创建后不可修改</div>
+        <div
+          v-if="mode === 'edit'"
+          class="form-hint"
+        >
+          条码创建后不可修改
+        </div>
       </el-form-item>
-      <el-form-item label="名称" prop="name">
-        <el-input v-model="form.name" maxlength="60" show-word-limit placeholder="商品名称" />
+      <el-form-item
+        label="名称"
+        prop="name"
+      >
+        <el-input
+          v-model="form.name"
+          maxlength="60"
+          show-word-limit
+          placeholder="商品名称"
+        />
       </el-form-item>
       <!-- 批量计：初始库存/调整为库存（原逻辑逐字节不变）；SN 商品隐藏（D-SN11） -->
       <el-form-item
         v-if="form.tracking === 'quantity'"
         :label="mode === 'create' ? '初始库存' : '调整为库存'"
       >
-        <el-input-number v-model="form.stock" :precision="0" :step="1" class="form-number" />
-        <div class="form-hint">允许负值（盘点差异可记负，行标红提示）</div>
+        <el-input-number
+          v-model="form.stock"
+          :precision="0"
+          :step="1"
+          class="form-number"
+        />
+        <div class="form-hint">
+          允许负值（盘点差异可记负，行标红提示）
+        </div>
       </el-form-item>
       <!-- SN 商品：SN 前缀（可改，影响以后进货匹配——D-SN2） -->
-      <el-form-item v-if="form.tracking === 'sn'" label="SN 前缀">
+      <el-form-item
+        v-if="form.tracking === 'sn'"
+        label="SN 前缀"
+      >
         <el-input
           v-model="form.snPrefix"
           maxlength="32"
           placeholder="选填，进货扫 SN 自动匹配商品用"
           data-testid="product-sn-prefix"
         />
-        <div class="form-hint">非空前缀不能与其他 SN 商品相同或互为前缀；留空表示不启用</div>
+        <div class="form-hint">
+          非空前缀不能与其他 SN 商品相同或互为前缀；留空表示不启用
+        </div>
       </el-form-item>
       <el-form-item label="默认售价">
         <el-input-number
@@ -218,12 +270,22 @@ function close(): void {
           class="form-number"
           placeholder="元"
         />
-        <div class="form-hint">单位元；留空表示不设加购默认价</div>
+        <div class="form-hint">
+          单位元；留空表示不设加购默认价
+        </div>
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="close">取消</el-button>
-      <el-button type="warning" :loading="submitting" @click="save()">保存</el-button>
+      <el-button @click="close">
+        取消
+      </el-button>
+      <el-button
+        type="warning"
+        :loading="submitting"
+        @click="save()"
+      >
+        保存
+      </el-button>
     </template>
   </el-dialog>
 </template>

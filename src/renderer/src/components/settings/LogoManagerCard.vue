@@ -70,26 +70,45 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
 
 <template>
   <!-- ═══ 卡片三：小票 Logo（多 Logo 管理：此处上传，小票模板的图片段落选用）═══ -->
-  <el-card v-loading="loading" class="settings-card" shadow="never">
+  <el-card
+    v-loading="loading"
+    class="settings-card"
+    shadow="never"
+  >
     <template #header>
       <div class="card-head">
-        <span class="card-head__marker" aria-hidden="true"></span>
+        <span
+          class="card-head__marker"
+          aria-hidden="true"
+        />
         <span class="card-head__title">小票 Logo</span>
         <span class="card-head__desc">可上传多张，在小票模板的图片段落中选择使用</span>
       </div>
     </template>
 
-    <div v-if="logos.length > 0" class="logo-grid" data-testid="logo-grid">
-      <div v-for="logo in logos" :key="logo.id" class="logo-cell" data-testid="logo-item">
+    <div
+      v-if="logos.length > 0"
+      class="logo-grid"
+      data-testid="logo-grid"
+    >
+      <div
+        v-for="logo in logos"
+        :key="logo.id"
+        class="logo-cell"
+        data-testid="logo-item"
+      >
         <div class="logo-cell__thumb">
           <img
             :src="logo.data_url"
             :alt="logo.display_name"
             class="logo-cell__img"
             data-testid="logo-preview"
-          />
+          >
         </div>
-        <span class="logo-cell__name" :title="logo.display_name">{{ logo.display_name }}</span>
+        <span
+          class="logo-cell__name"
+          :title="logo.display_name"
+        >{{ logo.display_name }}</span>
         <el-button
           text
           type="danger"
@@ -102,9 +121,19 @@ async function onDeleteLogo(logo: LogoInfo): Promise<void> {
         </el-button>
       </div>
     </div>
-    <div v-else class="logo-empty">
-      <el-icon :size="26" class="logo-empty__icon"><Picture /></el-icon>
-      <p class="logo-empty__text">暂未上传 Logo，上传后可在小票模板中选择使用</p>
+    <div
+      v-else
+      class="logo-empty"
+    >
+      <el-icon
+        :size="26"
+        class="logo-empty__icon"
+      >
+        <Picture />
+      </el-icon>
+      <p class="logo-empty__text">
+        暂未上传 Logo，上传后可在小票模板中选择使用
+      </p>
     </div>
 
     <footer class="card-foot">

@@ -236,7 +236,9 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
   <section class="products-page">
     <header class="page-header">
       <div class="page-title">
-        <h2 class="page-title__text">商品管理</h2>
+        <h2 class="page-title__text">
+          商品管理
+        </h2>
         <span class="page-title__count">共 {{ total }} 款商品</span>
       </div>
       <div class="page-actions">
@@ -249,7 +251,13 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
           @input="onSearchInput"
           @clear="onSearchInput"
         />
-        <el-button type="warning" :icon="Plus" @click="openCreate">新增商品</el-button>
+        <el-button
+          type="warning"
+          :icon="Plus"
+          @click="openCreate"
+        >
+          新增商品
+        </el-button>
       </div>
     </header>
 
@@ -263,7 +271,10 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
       height="100%"
       @expand-change="onExpandChange"
     >
-      <el-table-column type="expand" width="36">
+      <el-table-column
+        type="expand"
+        width="36"
+      >
         <template #default="{ row }">
           <SnLedgerPanel
             :row="row"
@@ -275,9 +286,15 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
           />
         </template>
       </el-table-column>
-      <el-table-column label="条码" width="180">
+      <el-table-column
+        label="条码"
+        width="180"
+      >
         <template #default="{ row }">
-          <span class="cell-barcode" :class="{ 'cell-barcode--empty': row.barcode === null }">
+          <span
+            class="cell-barcode"
+            :class="{ 'cell-barcode--empty': row.barcode === null }"
+          >
             {{ row.barcode ?? '— 无条码 —' }}
           </span>
         </template>
@@ -303,24 +320,56 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="stock" label="库存" width="110" align="center" sortable>
+      <el-table-column
+        prop="stock"
+        label="库存"
+        width="110"
+        align="center"
+        sortable
+      >
         <template #default="{ row }">
           <span class="cell-stock">{{ row.stock }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="默认售价" width="130" align="right">
+      <el-table-column
+        label="默认售价"
+        width="130"
+        align="right"
+      >
         <template #default="{ row }">
           <span class="cell-price">{{ formatCents(row.default_price_cents) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" align="center" fixed="right">
+      <el-table-column
+        label="操作"
+        width="150"
+        align="center"
+        fixed="right"
+      >
         <template #default="{ row }">
-          <el-button text type="primary" :icon="Edit" @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" :icon="Delete" @click="handleDelete(row)">删除</el-button>
+          <el-button
+            text
+            type="primary"
+            :icon="Edit"
+            @click="openEdit(row)"
+          >
+            编辑
+          </el-button>
+          <el-button
+            text
+            type="danger"
+            :icon="Delete"
+            @click="handleDelete(row)"
+          >
+            删除
+          </el-button>
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty :description="emptyDescription" :image-size="110" />
+        <el-empty
+          :description="emptyDescription"
+          :image-size="110"
+        />
       </template>
     </el-table>
 

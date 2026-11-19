@@ -32,10 +32,17 @@ async function copyVarSlot(name: string): Promise<void> {
 </script>
 
 <template>
-  <el-collapse v-model="varsHelpActive" class="tpl-vars-help" data-testid="tpl-vars-help">
+  <el-collapse
+    v-model="varsHelpActive"
+    class="tpl-vars-help"
+    data-testid="tpl-vars-help"
+  >
     <el-collapse-item name="vars">
       <template #title>
-        <span class="tpl-vars-help__title" data-testid="tpl-vars-help-toggle">
+        <span
+          class="tpl-vars-help__title"
+          data-testid="tpl-vars-help-toggle"
+        >
           <el-icon class="tpl-vars-help__icon"><QuestionFilled /></el-icon>
           可用变量（输入 {变量名} 自动替换，点击变量可复制）
         </span>

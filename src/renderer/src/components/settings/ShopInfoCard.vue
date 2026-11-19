@@ -51,16 +51,27 @@ async function saveShop(): Promise<void> {
 
 <template>
   <!-- ═══ 卡片一：店铺信息（小票模板变量源头：shopName / shopPhone / receiptNote）═══ -->
-  <el-card v-loading="loading" class="settings-card" shadow="never">
+  <el-card
+    v-loading="loading"
+    class="settings-card"
+    shadow="never"
+  >
     <template #header>
       <div class="card-head">
-        <span class="card-head__marker" aria-hidden="true"></span>
+        <span
+          class="card-head__marker"
+          aria-hidden="true"
+        />
         <span class="card-head__title">店铺信息</span>
         <span class="card-head__desc">打印在小票头部与底部</span>
       </div>
     </template>
 
-    <el-form label-position="top" class="settings-form" @submit.prevent>
+    <el-form
+      label-position="top"
+      class="settings-form"
+      @submit.prevent
+    >
       <div class="form-grid">
         <el-form-item label="店名">
           <el-input
@@ -94,7 +105,12 @@ async function saveShop(): Promise<void> {
 
     <footer class="card-foot">
       <span class="card-foot__hint">保存后，新小票的店名 / 电话 / 备注随之更新。</span>
-      <el-button type="primary" data-testid="save-shop-btn" :loading="savingShop" @click="saveShop">
+      <el-button
+        type="primary"
+        data-testid="save-shop-btn"
+        :loading="savingShop"
+        @click="saveShop"
+      >
         保存
       </el-button>
     </footer>

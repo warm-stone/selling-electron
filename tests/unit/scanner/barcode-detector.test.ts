@@ -108,7 +108,7 @@ describe('BarcodeDetector 扫码枪状态机', () => {
 
   it('修饰键（Shift 等）不打断连发序列；其他控制键（Tab）打断', () => {
     // 模拟配置了大小写转换的扫码枪：Shift + 字母序列
-    let ts = 1000
+    const ts = 1000
     const seq: Array<[string, number]> = [
       ['Shift', 0],
       ['A', 1],

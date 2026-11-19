@@ -34,8 +34,12 @@ const diagnosisDialogVisible = computed(
 <template>
   <section class="settings-page">
     <header class="page-head">
-      <h1 class="page-head__title">系统设置</h1>
-      <p class="page-head__sub">店铺信息、打印通道与小票 Logo 集中管理</p>
+      <h1 class="page-head__title">
+        系统设置
+      </h1>
+      <p class="page-head__sub">
+        店铺信息、打印通道与小票 Logo 集中管理
+      </p>
     </header>
 
     <ShopInfoCard />
@@ -45,10 +49,16 @@ const diagnosisDialogVisible = computed(
     <LogoManagerCard />
 
     <!-- ═══ 卡片四：打印机诊断（printer-diagnostics T10——采集 → 规则 → 报告 → 修复建议）═══ -->
-    <el-card class="settings-card diagnosis-card" shadow="never">
+    <el-card
+      class="settings-card diagnosis-card"
+      shadow="never"
+    >
       <template #header>
         <div class="card-head">
-          <span class="card-head__marker" aria-hidden="true"></span>
+          <span
+            class="card-head__marker"
+            aria-hidden="true"
+          />
           <span class="card-head__title">打印机诊断</span>
           <span class="card-head__desc">打印异常时一键采集环境、定位根因</span>
         </div>

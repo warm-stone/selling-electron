@@ -48,7 +48,7 @@ await app.close()
 
 // 截图文件完整性：非空 + PNG 魔数 + 1280×800 尺寸
 const shots = readdirSync(EVIDENCE).filter((f) => f.endsWith('.png')).sort()
-let bad = []
+const bad = []
 for (const f of shots) {
   const p = join(EVIDENCE, f)
   const size = statSync(p).size

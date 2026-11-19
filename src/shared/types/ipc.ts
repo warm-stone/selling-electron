@@ -251,7 +251,7 @@ export interface IpcChannels {
   /** Logo 删除（DB 行 + 文件；模板引用残留由渲染端跳过）；返回完整最新列表 */
   'settings:deleteLogo': { req: { id: number }; res: LogoInfo[] }
   /** 最近销售人员（settings key recent_salespersons 的 JSON 队列，新→旧；脏值回落 []） */
-  'settings:getRecentSalespersons': { req: {}; res: string[] }
+  'settings:getRecentSalespersons': { req: Record<string, never>; res: string[] }
 }
 
 /** 契约 req 便捷别名（void 通道 = 无请求体） */

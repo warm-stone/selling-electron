@@ -55,7 +55,12 @@ const isVoided = computed(() => store.payload?.sale.status === 'voided')
       </div>
     </template>
     <template #footer>
-      <el-button :disabled="store.printing" @click="store.close()">取消</el-button>
+      <el-button
+        :disabled="store.printing"
+        @click="store.close()"
+      >
+        取消
+      </el-button>
       <el-button
         type="primary"
         :loading="store.printing"

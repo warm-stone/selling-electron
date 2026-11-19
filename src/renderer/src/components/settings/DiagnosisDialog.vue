@@ -239,19 +239,33 @@ function onClose(): void {
     @update:model-value="onClose"
   >
     <!-- 采集中且尚无报告：装载占位（有旧报告时保持展示，按钮 loading 提示进度） -->
-    <div v-if="props.report === null" class="diagnosis-loading" data-testid="diagnosis-loading">
-      <el-icon class="is-loading"><Loading /></el-icon>
+    <div
+      v-if="props.report === null"
+      class="diagnosis-loading"
+      data-testid="diagnosis-loading"
+    >
+      <el-icon class="is-loading">
+        <Loading />
+      </el-icon>
       <span>{{ props.loading ? '正在采集打印环境信息，通常需要几秒钟…' : '暂无诊断报告' }}</span>
     </div>
 
     <template v-else>
       <!-- ══ 区 1：系统概况 ══ -->
-      <section class="diagnosis-zone diagnosis-zone--system" data-testid="diagnosis-zone-system">
-        <h4 class="diagnosis-zone__title">系统概况</h4>
+      <section
+        class="diagnosis-zone diagnosis-zone--system"
+        data-testid="diagnosis-zone-system"
+      >
+        <h4 class="diagnosis-zone__title">
+          系统概况
+        </h4>
         <div class="diagnosis-summary">
           <span class="diagnosis-summary__row">
             打印服务（Print Spooler）：
-            <el-tag :type="spoolerRunning ? 'success' : 'danger'" size="small">
+            <el-tag
+              :type="spoolerRunning ? 'success' : 'danger'"
+              size="small"
+            >
               {{ spoolerRunning ? '运行中' : props.report.snapshot.system.spooler.status }}
             </el-tag>
           </span>
@@ -270,30 +284,61 @@ function onClose(): void {
       </section>
 
       <!-- ══ 区 2：打印机列表 ══ -->
-      <section class="diagnosis-zone diagnosis-zone--printers" data-testid="diagnosis-zone-printers">
-        <h4 class="diagnosis-zone__title">打印机（{{ props.report.snapshot.printers.length }} 台）</h4>
-        <ul v-if="props.report.snapshot.printers.length > 0" class="printer-list">
+      <section
+        class="diagnosis-zone diagnosis-zone--printers"
+        data-testid="diagnosis-zone-printers"
+      >
+        <h4 class="diagnosis-zone__title">
+          打印机（{{ props.report.snapshot.printers.length }} 台）
+        </h4>
+        <ul
+          v-if="props.report.snapshot.printers.length > 0"
+          class="printer-list"
+        >
           <li
             v-for="p in props.report.snapshot.printers"
             :key="p.name"
             class="printer-row"
             data-testid="diagnosis-printer-row"
           >
-            <span class="printer-row__name" :title="p.name">{{ p.name }}</span>
-            <el-tag :type="PRINTER_STATE_TAG[p.status.state].type" size="small">
+            <span
+              class="printer-row__name"
+              :title="p.name"
+            >{{ p.name }}</span>
+            <el-tag
+              :type="PRINTER_STATE_TAG[p.status.state].type"
+              size="small"
+            >
               {{ PRINTER_STATE_TAG[p.status.state].label }}
             </el-tag>
             <span class="printer-row__meta">驱动：{{ p.driver.name }}</span>
-            <el-tag v-if="p.driver.rawOnlyBit" type="info" size="small" effect="plain">仅 RAW</el-tag>
+            <el-tag
+              v-if="p.driver.rawOnlyBit"
+              type="info"
+              size="small"
+              effect="plain"
+            >
+              仅 RAW
+            </el-tag>
             <span class="printer-row__meta">端口：{{ p.port.name }}</span>
           </li>
         </ul>
-        <p v-else class="printer-empty">未采集到打印机（打印服务不可用或本机未安装打印机）</p>
+        <p
+          v-else
+          class="printer-empty"
+        >
+          未采集到打印机（打印服务不可用或本机未安装打印机）
+        </p>
       </section>
 
       <!-- ══ 区 3：发现问题（severity 排序）═══ -->
-      <section class="diagnosis-zone diagnosis-zone--findings" data-testid="diagnosis-zone-findings">
-        <h4 class="diagnosis-zone__title">发现问题（{{ sortedFindings.length }} 项）</h4>
+      <section
+        class="diagnosis-zone diagnosis-zone--findings"
+        data-testid="diagnosis-zone-findings"
+      >
+        <h4 class="diagnosis-zone__title">
+          发现问题（{{ sortedFindings.length }} 项）
+        </h4>
         <el-alert
           v-if="sortedFindings.length === 0"
           type="success"
@@ -307,7 +352,10 @@ function onClose(): void {
           class="diagnosis-finding"
           data-testid="diagnosis-finding"
         >
-          <el-alert :type="SEVERITY_ALERT[f.severity]" :closable="false">
+          <el-alert
+            :type="SEVERITY_ALERT[f.severity]"
+            :closable="false"
+          >
             <template #title>
               <span class="diagnosis-finding__title">
                 <span class="diagnosis-finding__severity">[{{ SEVERITY_LABEL[f.severity] }}]</span>
@@ -329,7 +377,10 @@ function onClose(): void {
                 </el-tag>
               </span>
             </div>
-            <div v-if="actionableButtons(f).length > 0" class="diagnosis-finding__actions">
+            <div
+              v-if="actionableButtons(f).length > 0"
+              class="diagnosis-finding__actions"
+            >
               <el-button
                 v-for="btn in actionableButtons(f)"
                 :key="btn.id"
@@ -342,7 +393,10 @@ function onClose(): void {
                 {{ btn.ui.label }}
               </el-button>
             </div>
-            <el-collapse v-if="guideSections(f).length > 0" class="diagnosis-guide">
+            <el-collapse
+              v-if="guideSections(f).length > 0"
+              class="diagnosis-guide"
+            >
               <el-collapse-item
                 v-for="(section, sIdx) in guideSections(f)"
                 :key="sIdx"
@@ -350,7 +404,12 @@ function onClose(): void {
                 :name="`${f.code}-${sIdx}`"
               >
                 <ol class="diagnosis-guide__steps">
-                  <li v-for="(step, tIdx) in section.steps" :key="tIdx">{{ step }}</li>
+                  <li
+                    v-for="(step, tIdx) in section.steps"
+                    :key="tIdx"
+                  >
+                    {{ step }}
+                  </li>
                 </ol>
               </el-collapse-item>
             </el-collapse>
@@ -360,7 +419,12 @@ function onClose(): void {
     </template>
 
     <template #footer>
-      <el-button data-testid="diagnosis-dialog-close" @click="onClose">关闭</el-button>
+      <el-button
+        data-testid="diagnosis-dialog-close"
+        @click="onClose"
+      >
+        关闭
+      </el-button>
       <el-button
         type="primary"
         :disabled="props.report === null"

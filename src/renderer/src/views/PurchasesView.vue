@@ -63,10 +63,18 @@ onMounted(() => {
   <section class="purchases-view">
     <header class="purchases-view__header">
       <div>
-        <h2 class="purchases-view__title">进货管理</h2>
-        <p class="purchases-view__sub">入库自动累加库存并记录流水，明细保留商品快照</p>
+        <h2 class="purchases-view__title">
+          进货管理
+        </h2>
+        <p class="purchases-view__sub">
+          入库自动累加库存并记录流水，明细保留商品快照
+        </p>
       </div>
-      <el-button type="primary" data-testid="create-purchase" @click="openCreateDialog">
+      <el-button
+        type="primary"
+        data-testid="create-purchase"
+        @click="openCreateDialog"
+      >
         新建进货单
       </el-button>
     </header>
@@ -77,17 +85,48 @@ onMounted(() => {
       class="purchases-view__table"
       row-key="id"
     >
-      <el-table-column prop="order_no" label="单号" min-width="130" />
-      <el-table-column prop="created_at" label="时间" min-width="165" />
-      <el-table-column label="品种数" width="90" align="center">
-        <template #default="{ row }">{{ row.items.length }}</template>
-      </el-table-column>
-      <el-table-column prop="note" label="备注" min-width="140" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.note ?? '—' }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="110" align="center">
+      <el-table-column
+        prop="order_no"
+        label="单号"
+        min-width="130"
+      />
+      <el-table-column
+        prop="created_at"
+        label="时间"
+        min-width="165"
+      />
+      <el-table-column
+        label="品种数"
+        width="90"
+        align="center"
+      >
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDetailDialog(row)">查看明细</el-button>
+          {{ row.items.length }}
+        </template>
+      </el-table-column>
+      <el-table-column
+        prop="note"
+        label="备注"
+        min-width="140"
+        show-overflow-tooltip
+      >
+        <template #default="{ row }">
+          {{ row.note ?? '—' }}
+        </template>
+      </el-table-column>
+      <el-table-column
+        label="操作"
+        width="110"
+        align="center"
+      >
+        <template #default="{ row }">
+          <el-button
+            link
+            type="primary"
+            @click="openDetailDialog(row)"
+          >
+            查看明细
+          </el-button>
         </template>
       </el-table-column>
       <template #empty>
@@ -98,7 +137,10 @@ onMounted(() => {
       </template>
     </el-table>
 
-    <PurchaseCreateDialog v-model:visible="createDialogVisible" @created="refreshOrders" />
+    <PurchaseCreateDialog
+      v-model:visible="createDialogVisible"
+      @created="refreshOrders"
+    />
 
     <el-dialog
       v-model="detailDialogVisible"
@@ -110,17 +152,45 @@ onMounted(() => {
           单号 {{ currentOrder.order_no }} · {{ currentOrder.created_at }}
           <span v-if="currentOrder.note"> · 备注：{{ currentOrder.note }}</span>
         </p>
-        <el-table :data="currentOrder.items" size="small">
-          <el-table-column prop="product_name" label="商品名（快照）" min-width="170" />
-          <el-table-column label="条码" min-width="135">
-            <template #default="{ row }">{{ row.barcode ?? '—' }}</template>
+        <el-table
+          :data="currentOrder.items"
+          size="small"
+        >
+          <el-table-column
+            prop="product_name"
+            label="商品名（快照）"
+            min-width="170"
+          />
+          <el-table-column
+            label="条码"
+            min-width="135"
+          >
+            <template #default="{ row }">
+              {{ row.barcode ?? '—' }}
+            </template>
           </el-table-column>
-          <el-table-column label="SN" min-width="135">
-            <template #default="{ row }">{{ row.sn ?? '—' }}</template>
+          <el-table-column
+            label="SN"
+            min-width="135"
+          >
+            <template #default="{ row }">
+              {{ row.sn ?? '—' }}
+            </template>
           </el-table-column>
-          <el-table-column prop="quantity" label="数量" width="70" align="center" />
-          <el-table-column label="成本价（元）" width="110" align="right">
-            <template #default="{ row }">{{ centsToYuan(row.cost_price_cents) }}</template>
+          <el-table-column
+            prop="quantity"
+            label="数量"
+            width="70"
+            align="center"
+          />
+          <el-table-column
+            label="成本价（元）"
+            width="110"
+            align="right"
+          >
+            <template #default="{ row }">
+              {{ centsToYuan(row.cost_price_cents) }}
+            </template>
           </el-table-column>
         </el-table>
       </template>

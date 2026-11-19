@@ -27,10 +27,16 @@ const emit = defineEmits<{
 
 <template>
   <!-- 防御兜底：批量计行箭头已隐藏（row-expandable disabled），正常不可达 -->
-  <div v-if="row.tracking !== 'sn'" class="ledger-empty-hint">
+  <div
+    v-if="row.tracking !== 'sn'"
+    class="ledger-empty-hint"
+  >
     批量计商品无 SN 台账
   </div>
-  <div v-else class="ledger-panel">
+  <div
+    v-else
+    class="ledger-panel"
+  >
     <div class="ledger-panel__header">
       <div class="ledger-panel__title">
         <span class="ledger-panel__name">SN 台账</span>
@@ -42,8 +48,12 @@ const emit = defineEmits<{
         data-testid="sn-ledger-filter"
         @change="(val: string | number | boolean | undefined) => emit('filter-change', val === true)"
       >
-        <el-radio-button :value="false">仅在库</el-radio-button>
-        <el-radio-button :value="true">含已售</el-radio-button>
+        <el-radio-button :value="false">
+          仅在库
+        </el-radio-button>
+        <el-radio-button :value="true">
+          含已售
+        </el-radio-button>
       </el-radio-group>
     </div>
     <el-table
@@ -54,12 +64,19 @@ const emit = defineEmits<{
       :max-height="320"
       data-testid="sn-ledger-table"
     >
-      <el-table-column label="SN" min-width="200">
+      <el-table-column
+        label="SN"
+        min-width="200"
+      >
         <template #default="{ row: sn }">
           <span class="cell-sn">{{ sn.sn }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="80" align="center">
+      <el-table-column
+        label="状态"
+        width="80"
+        align="center"
+      >
         <template #default="{ row: sn }">
           <el-tag
             :type="sn.status === 'in_stock' ? 'success' : 'info'"
@@ -70,14 +87,31 @@ const emit = defineEmits<{
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="关联单号" min-width="130">
+      <el-table-column
+        label="关联单号"
+        min-width="130"
+      >
         <template #default="{ row: sn }">
-          <span v-if="sn.sale_no" class="cell-sn">{{ sn.sale_no }}</span>
-          <span v-else class="cell-dash">—</span>
+          <span
+            v-if="sn.sale_no"
+            class="cell-sn"
+          >{{ sn.sale_no }}</span>
+          <span
+            v-else
+            class="cell-dash"
+          >—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="入库时间" min-width="160" />
-      <el-table-column label="操作" width="80" align="center">
+      <el-table-column
+        prop="created_at"
+        label="入库时间"
+        min-width="160"
+      />
+      <el-table-column
+        label="操作"
+        width="80"
+        align="center"
+      >
         <template #default="{ row: sn }">
           <!-- D-SN16：仅在库 SN 可删；已售行走作废流程（D-SN17） -->
           <el-button
@@ -91,7 +125,10 @@ const emit = defineEmits<{
           >
             删除
           </el-button>
-          <span v-else class="cell-dash">—</span>
+          <span
+            v-else
+            class="cell-dash"
+          >—</span>
         </template>
       </el-table-column>
       <template #empty>

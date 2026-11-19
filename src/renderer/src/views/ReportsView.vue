@@ -161,16 +161,24 @@ function errorMessage(err: unknown): string {
   <section class="reports">
     <header class="reports__header">
       <div>
-        <h2 class="reports__title">报表统计</h2>
+        <h2 class="reports__title">
+          报表统计
+        </h2>
         <p class="reports__sub">
           按日/按月汇总销售数据（自动剔除已作废订单），支持导出 .txt / .xlsx / .docx
         </p>
       </div>
     </header>
 
-    <el-tabs v-model="activeTab" class="reports__tabs">
+    <el-tabs
+      v-model="activeTab"
+      class="reports__tabs"
+    >
       <!-- ═══ 日报 ═══ -->
-      <el-tab-pane label="日报" name="daily">
+      <el-tab-pane
+        label="日报"
+        name="daily"
+      >
         <div class="reports__pane">
           <div class="reports__toolbar">
             <!-- el-date-picker 的 $attrs 落在 teleport popper 上（data-testid 不可用）；
@@ -184,26 +192,49 @@ function errorMessage(err: unknown): string {
               :shortcuts="dateShortcuts"
               class="reports__date-picker reports__date-picker--daily"
             />
-            <div class="reports__toolbar-spacer" aria-hidden="true"></div>
+            <div
+              class="reports__toolbar-spacer"
+              aria-hidden="true"
+            />
             <!-- 导出锚点用原生 wrapper div（el-dropdown 根为 ElTooltip 包装，attr 传递不可靠） -->
-            <div class="reports__export" data-testid="daily-export">
-              <el-dropdown trigger="click" @command="exportDaily">
-                <el-button type="primary" :loading="exporting !== null">
-                  <el-icon class="reports__export-icon"><Download /></el-icon>
+            <div
+              class="reports__export"
+              data-testid="daily-export"
+            >
+              <el-dropdown
+                trigger="click"
+                @command="exportDaily"
+              >
+                <el-button
+                  type="primary"
+                  :loading="exporting !== null"
+                >
+                  <el-icon class="reports__export-icon">
+                    <Download />
+                  </el-icon>
                   导出日报
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="txt">导出 .txt（纯文本）</el-dropdown-item>
-                    <el-dropdown-item command="xlsx">导出 .xlsx（Excel）</el-dropdown-item>
-                    <el-dropdown-item command="docx">导出 .docx（Word）</el-dropdown-item>
+                    <el-dropdown-item command="txt">
+                      导出 .txt（纯文本）
+                    </el-dropdown-item>
+                    <el-dropdown-item command="xlsx">
+                      导出 .xlsx（Excel）
+                    </el-dropdown-item>
+                    <el-dropdown-item command="docx">
+                      导出 .docx（Word）
+                    </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
             </div>
           </div>
 
-          <div class="reports__stats" data-testid="daily-stats">
+          <div
+            class="reports__stats"
+            data-testid="daily-stats"
+          >
             <div class="stat-card">
               <span class="stat-card__label">总销售额（元）</span>
               <strong class="stat-card__value stat-card__value--money">{{
@@ -230,15 +261,36 @@ function errorMessage(err: unknown): string {
             row-key="id"
             data-testid="daily-table"
           >
-            <el-table-column prop="sale_no" label="单号" min-width="140" />
-            <el-table-column prop="created_at" label="时间" min-width="160" />
-            <el-table-column prop="item_count" label="商品数" width="90" align="center" />
-            <el-table-column label="合计（元）" width="120" align="right">
+            <el-table-column
+              prop="sale_no"
+              label="单号"
+              min-width="140"
+            />
+            <el-table-column
+              prop="created_at"
+              label="时间"
+              min-width="160"
+            />
+            <el-table-column
+              prop="item_count"
+              label="商品数"
+              width="90"
+              align="center"
+            />
+            <el-table-column
+              label="合计（元）"
+              width="120"
+              align="right"
+            >
               <template #default="{ row }">
                 <span class="reports__amount">{{ formatMoney(row.total_cents) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="90" align="center">
+            <el-table-column
+              label="状态"
+              width="90"
+              align="center"
+            >
               <template #default="{ row }">
                 <el-tag
                   :type="row.status === 'voided' ? 'danger' : 'primary'"
@@ -250,24 +302,42 @@ function errorMessage(err: unknown): string {
             </el-table-column>
             <!-- 尾部追加两列（定案）：td nth 序号零破坏——E2E rowA.nth(2)/nth(3) 不受影响；
                  false 渲染纯文本「否」而非 el-tag——E2E rows.locator('.el-tag') 计数只数状态列 -->
-            <el-table-column label="是否国补" width="100" align="center">
+            <el-table-column
+              label="是否国补"
+              width="100"
+              align="center"
+            >
               <template #default="{ row }">
-                <el-tag v-if="row.is_national_subsidy" type="success" disable-transitions>
+                <el-tag
+                  v-if="row.is_national_subsidy"
+                  type="success"
+                  disable-transitions
+                >
                   国补
                 </el-tag>
                 <span v-else>否</span>
               </template>
             </el-table-column>
-            <el-table-column prop="order_note" label="订单备注" min-width="160" />
+            <el-table-column
+              prop="order_note"
+              label="订单备注"
+              min-width="160"
+            />
             <template #empty>
-              <el-empty description="当日无销售" :image-size="100" />
+              <el-empty
+                description="当日无销售"
+                :image-size="100"
+              />
             </template>
           </el-table>
         </div>
       </el-tab-pane>
 
       <!-- ═══ 月报 ═══ -->
-      <el-tab-pane label="月报" name="monthly">
+      <el-tab-pane
+        label="月报"
+        name="monthly"
+      >
         <div class="reports__pane">
           <div class="reports__toolbar">
             <el-date-picker
@@ -279,25 +349,48 @@ function errorMessage(err: unknown): string {
               :shortcuts="monthShortcuts"
               class="reports__date-picker reports__date-picker--monthly"
             />
-            <div class="reports__toolbar-spacer" aria-hidden="true"></div>
-            <div class="reports__export" data-testid="monthly-export">
-              <el-dropdown trigger="click" @command="exportMonthly">
-                <el-button type="primary" :loading="exporting !== null">
-                  <el-icon class="reports__export-icon"><Download /></el-icon>
+            <div
+              class="reports__toolbar-spacer"
+              aria-hidden="true"
+            />
+            <div
+              class="reports__export"
+              data-testid="monthly-export"
+            >
+              <el-dropdown
+                trigger="click"
+                @command="exportMonthly"
+              >
+                <el-button
+                  type="primary"
+                  :loading="exporting !== null"
+                >
+                  <el-icon class="reports__export-icon">
+                    <Download />
+                  </el-icon>
                   导出月报
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="txt">导出 .txt（纯文本）</el-dropdown-item>
-                    <el-dropdown-item command="xlsx">导出 .xlsx（Excel）</el-dropdown-item>
-                    <el-dropdown-item command="docx">导出 .docx（Word）</el-dropdown-item>
+                    <el-dropdown-item command="txt">
+                      导出 .txt（纯文本）
+                    </el-dropdown-item>
+                    <el-dropdown-item command="xlsx">
+                      导出 .xlsx（Excel）
+                    </el-dropdown-item>
+                    <el-dropdown-item command="docx">
+                      导出 .docx（Word）
+                    </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
             </div>
           </div>
 
-          <div class="reports__stats" data-testid="monthly-stats">
+          <div
+            class="reports__stats"
+            data-testid="monthly-stats"
+          >
             <div class="stat-card">
               <span class="stat-card__label">总销售额（元）</span>
               <strong class="stat-card__value stat-card__value--money">{{
@@ -317,15 +410,31 @@ function errorMessage(err: unknown): string {
             row-key="date"
             data-testid="monthly-table"
           >
-            <el-table-column prop="date" label="日期" min-width="140" />
-            <el-table-column label="销售额（元）" min-width="140" align="right">
+            <el-table-column
+              prop="date"
+              label="日期"
+              min-width="140"
+            />
+            <el-table-column
+              label="销售额（元）"
+              min-width="140"
+              align="right"
+            >
               <template #default="{ row }">
                 <span class="reports__amount">{{ formatMoney(row.total_cents) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="order_count" label="订单数" width="100" align="center" />
+            <el-table-column
+              prop="order_count"
+              label="订单数"
+              width="100"
+              align="center"
+            />
             <template #empty>
-              <el-empty description="当月无销售" :image-size="100" />
+              <el-empty
+                description="当月无销售"
+                :image-size="100"
+              />
             </template>
           </el-table>
         </div>

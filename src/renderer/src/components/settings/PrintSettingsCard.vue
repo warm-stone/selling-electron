@@ -198,18 +198,32 @@ function probeGuideHtml(): string {
 
 <template>
   <!-- ═══ 卡片二：打印设置（通道 + 测试打印）═══ -->
-  <el-card v-loading="loading" class="settings-card" shadow="never">
+  <el-card
+    v-loading="loading"
+    class="settings-card"
+    shadow="never"
+  >
     <template #header>
       <div class="card-head">
-        <span class="card-head__marker" aria-hidden="true"></span>
+        <span
+          class="card-head__marker"
+          aria-hidden="true"
+        />
         <span class="card-head__title">打印设置</span>
         <span class="card-head__desc">小票机连接通道与测试</span>
       </div>
     </template>
 
-    <el-form label-position="top" class="settings-form" @submit.prevent>
+    <el-form
+      label-position="top"
+      class="settings-form"
+      @submit.prevent
+    >
       <el-form-item label="打印通道">
-        <el-radio-group v-model="printForm.printer_channel" class="channel-group">
+        <el-radio-group
+          v-model="printForm.printer_channel"
+          class="channel-group"
+        >
           <el-radio
             v-for="opt in CHANNEL_OPTIONS"
             :key="opt.value"
@@ -233,7 +247,11 @@ function probeGuideHtml(): string {
               placeholder="自动选择"
               :loading="printersLoading"
             >
-              <el-option label="自动选择" value="" data-testid="printer-auto-option" />
+              <el-option
+                label="自动选择"
+                value=""
+                data-testid="printer-auto-option"
+              />
               <el-option
                 v-for="p in printers"
                 :key="p.name"
@@ -281,7 +299,9 @@ function probeGuideHtml(): string {
             />
           </el-form-item>
         </div>
-        <div class="field-hint field-hint--block">默认端口 9100（ESC/POS 标准网络打印端口）。</div>
+        <div class="field-hint field-hint--block">
+          默认端口 9100（ESC/POS 标准网络打印端口）。
+        </div>
       </template>
 
       <!-- serial 分区 -->
@@ -300,10 +320,16 @@ function probeGuideHtml(): string {
 
       <!-- ═══ 打印高级选项（实验）折叠区（v2）：常驻可见——非 driver 通道仅标注
            「仅 driver 通道生效」而非隐藏（避免用户切通道后找不到开关去哪了）═══ -->
-      <el-collapse class="advanced-collapse" data-testid="driver-advanced-collapse">
+      <el-collapse
+        class="advanced-collapse"
+        data-testid="driver-advanced-collapse"
+      >
         <el-collapse-item name="driverAdvanced">
           <template #title>
-            <span class="advanced-collapse__title" data-testid="driver-advanced-collapse-title">
+            <span
+              class="advanced-collapse__title"
+              data-testid="driver-advanced-collapse-title"
+            >
               打印高级选项（实验）
             </span>
             <span
@@ -325,7 +351,10 @@ function probeGuideHtml(): string {
               class="dpi-input"
               placeholder="留空=默认（不发送 dpi）"
             />
-            <div class="field-hint field-hint--block" data-testid="driver-dpi-hint">
+            <div
+              class="field-hint field-hint--block"
+              data-testid="driver-dpi-hint"
+            >
               热敏打印机常见 203；设置后诊断报告会记录该实验值。
             </div>
           </el-form-item>
@@ -339,7 +368,10 @@ function probeGuideHtml(): string {
                 {{ printForm.driver_use_default_page_size ? '开' : '关' }}
               </span>
             </div>
-            <div class="field-hint field-hint--block" data-testid="driver-page-size-warning">
+            <div
+              class="field-hint field-hint--block"
+              data-testid="driver-page-size-warning"
+            >
               启用后由驱动决定页尺寸；若驱动无法提供默认尺寸将回退 A4（连续纸会被按 A4 分页）。
             </div>
           </el-form-item>
@@ -350,7 +382,10 @@ function probeGuideHtml(): string {
 
       <el-form-item label="打印后自动切纸">
         <div class="auto-cut-row">
-          <el-switch v-model="printForm.auto_cut" class="auto-cut-switch" />
+          <el-switch
+            v-model="printForm.auto_cut"
+            class="auto-cut-switch"
+          />
           <span class="auto-cut-state">{{ printForm.auto_cut ? '开' : '关' }}</span>
         </div>
         <div class="field-hint field-hint--block">
@@ -364,7 +399,12 @@ function probeGuideHtml(): string {
         测试打印发一张完整样张小票（中文店名 + 商品明细）；编码探针打一张四段判读页，用于定位系统打印通道的中文编码（仅 RAW 通道）。
       </span>
       <div class="card-foot__actions">
-        <el-button plain data-testid="raw-probe-btn" :loading="probing" @click="rawProbe">
+        <el-button
+          plain
+          data-testid="raw-probe-btn"
+          :loading="probing"
+          @click="rawProbe"
+        >
           编码探针
         </el-button>
         <el-button
@@ -375,7 +415,12 @@ function probeGuideHtml(): string {
         >
           测试打印
         </el-button>
-        <el-button type="primary" data-testid="save-print-btn" :loading="savingPrint" @click="savePrint">
+        <el-button
+          type="primary"
+          data-testid="save-print-btn"
+          :loading="savingPrint"
+          @click="savePrint"
+        >
           保存
         </el-button>
       </div>

@@ -34,7 +34,10 @@ const activeMenu = computed(() => route.path)
 
 <template>
   <el-container class="app-shell">
-    <el-aside class="app-aside" width="200px">
+    <el-aside
+      class="app-aside"
+      width="200px"
+    >
       <div class="app-brand">
         <span class="app-brand__logo">销</span>
         <div class="app-brand__text">
@@ -42,8 +45,16 @@ const activeMenu = computed(() => route.path)
           <span class="app-brand__version">v{{ appStore.appVersion }}</span>
         </div>
       </div>
-      <el-menu class="app-menu" router :default-active="activeMenu">
-        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
+      <el-menu
+        class="app-menu"
+        router
+        :default-active="activeMenu"
+      >
+        <el-menu-item
+          v-for="m in menus"
+          :key="m.path"
+          :index="m.path"
+        >
           <el-icon><component :is="m.icon" /></el-icon>
           <span>{{ m.label }}</span>
         </el-menu-item>

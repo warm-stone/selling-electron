@@ -122,10 +122,19 @@ function closeDialog(): void {
     class="sn-entry-dialog"
     @update:model-value="(v: boolean | string | number) => { if (!v) closeDialog() }"
   >
-    <div v-if="props.product" class="sn-entry">
+    <div
+      v-if="props.product"
+      class="sn-entry"
+    >
       <div class="sn-entry__product">
-        <span class="sn-entry__product-name" :title="props.product.name">{{ props.product.name }}</span>
-        <span v-if="props.product.barcode" class="sn-entry__product-barcode">
+        <span
+          class="sn-entry__product-name"
+          :title="props.product.name"
+        >{{ props.product.name }}</span>
+        <span
+          v-if="props.product.barcode"
+          class="sn-entry__product-barcode"
+        >
           {{ props.product.barcode }}
         </span>
       </div>
@@ -138,10 +147,17 @@ function closeDialog(): void {
         clearable
         data-testid="sn-entry-input"
       />
-      <p class="sn-entry__hint">扫码即自动确认；手动输入后请点击「确认」按钮</p>
+      <p class="sn-entry__hint">
+        扫码即自动确认；手动输入后请点击「确认」按钮
+      </p>
     </div>
     <template #footer>
-      <el-button data-testid="sn-entry-cancel" @click="closeDialog()">取消</el-button>
+      <el-button
+        data-testid="sn-entry-cancel"
+        @click="closeDialog()"
+      >
+        取消
+      </el-button>
       <el-button
         type="primary"
         :loading="submitting"

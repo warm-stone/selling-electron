@@ -199,7 +199,9 @@ function centsToYuan(cents: number): string {
   <section class="sales-history">
     <header class="sales-history__header">
       <div>
-        <h2 class="sales-history__title">销售记录</h2>
+        <h2 class="sales-history__title">
+          销售记录
+        </h2>
         <p class="sales-history__sub">
           按日期与状态查询历史销售，双击行查看明细；作废会回滚库存，作废单仍可重打小票
         </p>
@@ -219,10 +221,19 @@ function centsToYuan(cents: number): string {
         class="sales-history__date-range"
         data-testid="date-range"
       />
-      <el-radio-group v-model="statusFilter" data-testid="status-filter">
-        <el-radio value="all">全部</el-radio>
-        <el-radio value="completed">已完成</el-radio>
-        <el-radio value="voided">已作废</el-radio>
+      <el-radio-group
+        v-model="statusFilter"
+        data-testid="status-filter"
+      >
+        <el-radio value="all">
+          全部
+        </el-radio>
+        <el-radio value="completed">
+          已完成
+        </el-radio>
+        <el-radio value="voided">
+          已作废
+        </el-radio>
       </el-radio-group>
       <!-- 三新筛选（需求变更 W1）：文本两框 300ms 防抖；国补三态 select 一次成型走 watch -->
       <el-input
@@ -248,9 +259,18 @@ function centsToYuan(cents: number): string {
         class="sales-history__subsidy-select"
         data-testid="filter-subsidy"
       >
-        <el-option label="全部" value="all" />
-        <el-option label="是" :value="true" />
-        <el-option label="否" :value="false" />
+        <el-option
+          label="全部"
+          value="all"
+        />
+        <el-option
+          label="是"
+          :value="true"
+        />
+        <el-option
+          label="否"
+          :value="false"
+        />
       </el-select>
     </div>
 
@@ -261,15 +281,36 @@ function centsToYuan(cents: number): string {
       row-key="id"
       @row-dblclick="openDetail"
     >
-      <el-table-column prop="sale_no" label="单号" min-width="130" />
-      <el-table-column prop="created_at" label="时间" min-width="160" />
-      <el-table-column prop="item_count" label="商品数" width="80" align="center" />
-      <el-table-column label="合计（元）" width="110" align="right">
+      <el-table-column
+        prop="sale_no"
+        label="单号"
+        min-width="130"
+      />
+      <el-table-column
+        prop="created_at"
+        label="时间"
+        min-width="160"
+      />
+      <el-table-column
+        prop="item_count"
+        label="商品数"
+        width="80"
+        align="center"
+      />
+      <el-table-column
+        label="合计（元）"
+        width="110"
+        align="right"
+      >
         <template #default="{ row }">
           <span class="sales-history__amount">{{ centsToYuan(row.total_cents) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="90" align="center">
+      <el-table-column
+        label="状态"
+        width="90"
+        align="center"
+      >
         <template #default="{ row }">
           <el-tag
             :type="row.status === 'voided' ? 'danger' : 'primary'"
@@ -282,39 +323,70 @@ function centsToYuan(cents: number): string {
       <!-- 五新列（需求变更 W1）：插在「状态」后、「操作」前（操作列保持最右——UI 惯例；
            存量行级 E2E 不依赖列序）。null → '—' 占位；国补照 ReportsView 惯例
            true 才 el-tag（false 纯文本「否」——保 .el-tag 计数）。 -->
-      <el-table-column label="姓名" min-width="100">
+      <el-table-column
+        label="姓名"
+        min-width="100"
+      >
         <template #default="{ row }">
           <span data-testid="list-customer-name">{{ row.customer_name ?? '—' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="电话" min-width="130">
+      <el-table-column
+        label="电话"
+        min-width="130"
+      >
         <template #default="{ row }">
           <span data-testid="list-customer-phone">{{ row.customer_phone ?? '—' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="是否国补" width="90" align="center">
+      <el-table-column
+        label="是否国补"
+        width="90"
+        align="center"
+      >
         <template #default="{ row }">
           <span data-testid="list-subsidy">
-            <el-tag v-if="row.is_national_subsidy" type="success" disable-transitions>
+            <el-tag
+              v-if="row.is_national_subsidy"
+              type="success"
+              disable-transitions
+            >
               国补
             </el-tag>
             <span v-else>否</span>
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="销售人员" min-width="100">
+      <el-table-column
+        label="销售人员"
+        min-width="100"
+      >
         <template #default="{ row }">
           <span data-testid="list-salesperson">{{ row.salesperson ?? '—' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="订单备注" min-width="140" show-overflow-tooltip>
+      <el-table-column
+        label="订单备注"
+        min-width="140"
+        show-overflow-tooltip
+      >
         <template #default="{ row }">
           <span data-testid="list-order-note">{{ row.order_note ?? '—' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" align="center">
+      <el-table-column
+        label="操作"
+        width="200"
+        align="center"
+      >
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDetail(row)">查看明细</el-button>
+          <el-button
+            link
+            type="primary"
+            @click="openDetail(row)"
+          >
+            查看明细
+          </el-button>
           <el-button
             link
             type="danger"
@@ -323,11 +395,20 @@ function centsToYuan(cents: number): string {
           >
             作废
           </el-button>
-          <el-button link type="primary" @click="reprint(row)">重打小票</el-button>
+          <el-button
+            link
+            type="primary"
+            @click="reprint(row)"
+          >
+            重打小票
+          </el-button>
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty description="所选日期范围内暂无销售记录" :image-size="100" />
+        <el-empty
+          description="所选日期范围内暂无销售记录"
+          :image-size="100"
+        />
       </template>
     </el-table>
 

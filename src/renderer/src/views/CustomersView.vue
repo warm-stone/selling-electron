@@ -184,7 +184,9 @@ async function save(): Promise<void> {
   <section class="customers-page">
     <header class="page-header">
       <div class="page-title">
-        <h2 class="page-title__text">客户管理</h2>
+        <h2 class="page-title__text">
+          客户管理
+        </h2>
         <span class="page-title__count">共 {{ total }} 位客户</span>
       </div>
       <div class="page-actions">
@@ -198,7 +200,12 @@ async function save(): Promise<void> {
           @input="onSearchInput"
           @clear="onSearchInput"
         />
-        <el-button type="warning" :icon="Plus" data-testid="customer-create-btn" @click="openCreate">
+        <el-button
+          type="warning"
+          :icon="Plus"
+          data-testid="customer-create-btn"
+          @click="openCreate"
+        >
           新增客户
         </el-button>
       </div>
@@ -212,33 +219,75 @@ async function save(): Promise<void> {
       height="100%"
       data-testid="customer-table"
     >
-      <el-table-column label="姓名" min-width="140">
+      <el-table-column
+        label="姓名"
+        min-width="140"
+      >
         <template #default="{ row }">
-          <span class="cell-name" :class="{ 'cell-name--empty': row.name.length === 0 }">
+          <span
+            class="cell-name"
+            :class="{ 'cell-name--empty': row.name.length === 0 }"
+          >
             {{ row.name.length > 0 ? row.name : '—' }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="电话" width="160">
+      <el-table-column
+        label="电话"
+        width="160"
+      >
         <template #default="{ row }">
           <span class="cell-phone">{{ row.phone }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="地址" min-width="180" show-overflow-tooltip>
+      <el-table-column
+        label="地址"
+        min-width="180"
+        show-overflow-tooltip
+      >
         <template #default="{ row }">
-          <span v-if="row.address.length > 0" class="cell-text">{{ row.address }}</span>
-          <span v-else class="cell-dash">—</span>
+          <span
+            v-if="row.address.length > 0"
+            class="cell-text"
+          >{{ row.address }}</span>
+          <span
+            v-else
+            class="cell-dash"
+          >—</span>
         </template>
       </el-table-column>
-      <el-table-column label="客户备注" min-width="160" show-overflow-tooltip>
+      <el-table-column
+        label="客户备注"
+        min-width="160"
+        show-overflow-tooltip
+      >
         <template #default="{ row }">
-          <span v-if="row.note.length > 0" class="cell-text">{{ row.note }}</span>
-          <span v-else class="cell-dash">—</span>
+          <span
+            v-if="row.note.length > 0"
+            class="cell-text"
+          >{{ row.note }}</span>
+          <span
+            v-else
+            class="cell-dash"
+          >—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" min-width="160" />
-      <el-table-column prop="updated_at" label="更新时间" min-width="160" />
-      <el-table-column label="操作" width="110" align="center" fixed="right">
+      <el-table-column
+        prop="created_at"
+        label="创建时间"
+        min-width="160"
+      />
+      <el-table-column
+        prop="updated_at"
+        label="更新时间"
+        min-width="160"
+      />
+      <el-table-column
+        label="操作"
+        width="110"
+        align="center"
+        fixed="right"
+      >
         <template #default="{ row }">
           <!-- 本期无删除（MUST NOT DO）：唯一操作是编辑 -->
           <el-button
@@ -253,7 +302,10 @@ async function save(): Promise<void> {
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty :description="emptyDescription" :image-size="110" />
+        <el-empty
+          :description="emptyDescription"
+          :image-size="110"
+        />
       </template>
     </el-table>
 
@@ -275,7 +327,12 @@ async function save(): Promise<void> {
       :close-on-click-modal="false"
       destroy-on-close
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
+      <el-form
+        ref="formRef"
+        :model="form"
+        :rules="rules"
+        label-width="96px"
+      >
         <el-form-item label="姓名">
           <el-input
             v-model="form.name"
@@ -283,7 +340,10 @@ async function save(): Promise<void> {
             data-testid="customer-name"
           />
         </el-form-item>
-        <el-form-item label="电话" prop="phone">
+        <el-form-item
+          label="电话"
+          prop="phone"
+        >
           <el-input
             v-model="form.phone"
             placeholder="客户联系电话（必填）"
@@ -291,7 +351,11 @@ async function save(): Promise<void> {
           />
         </el-form-item>
         <el-form-item label="地址">
-          <el-input v-model="form.address" placeholder="选填" data-testid="customer-address" />
+          <el-input
+            v-model="form.address"
+            placeholder="选填"
+            data-testid="customer-address"
+          />
         </el-form-item>
         <el-form-item label="客户备注">
           <el-input
@@ -304,7 +368,9 @@ async function save(): Promise<void> {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">
+          取消
+        </el-button>
         <el-button
           type="warning"
           :loading="submitting"

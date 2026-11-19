@@ -216,11 +216,22 @@ async function saveExtra(): Promise<void> {
 
 <template>
   <!-- ── 附加信息编辑区（仅 completed 单可见；voided 前置隐藏——Q4）── -->
-  <div class="sales-history__extra-edit" data-testid="extra-edit">
-    <el-divider class="sales-history__edit-divider">修改附加信息</el-divider>
-    <el-form class="sales-history__edit-form" label-width="96px">
+  <div
+    class="sales-history__extra-edit"
+    data-testid="extra-edit"
+  >
+    <el-divider class="sales-history__edit-divider">
+      修改附加信息
+    </el-divider>
+    <el-form
+      class="sales-history__edit-form"
+      label-width="96px"
+    >
       <el-form-item label="国补">
-        <el-switch v-model="extraForm.isSubsidy" data-testid="extra-is-subsidy" />
+        <el-switch
+          v-model="extraForm.isSubsidy"
+          data-testid="extra-is-subsidy"
+        />
       </el-form-item>
       <el-form-item label="客户电话">
         <el-input
@@ -249,7 +260,12 @@ async function saveExtra(): Promise<void> {
           placeholder="选择或输入销售人员"
           data-testid="extra-salesperson"
         >
-          <el-option v-for="name in salespersonOptions" :key="name" :label="name" :value="name" />
+          <el-option
+            v-for="name in salespersonOptions"
+            :key="name"
+            :label="name"
+            :value="name"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="订单备注">

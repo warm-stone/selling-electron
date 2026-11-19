@@ -83,25 +83,63 @@ const vars = computed<ReceiptVars>(() => {
 <template>
   <div class="demo-page">
     <aside class="demo-panel">
-      <h2 class="demo-panel__title">小票预览 Demo</h2>
-      <p class="demo-panel__hint">同源渲染（G7）：文本行 = char-grid wrapToGrid/padLine 多行 / items 行 = buildItemLines 折行多行，与 ESC/POS 字节流同一数学。</p>
+      <h2 class="demo-panel__title">
+        小票预览 Demo
+      </h2>
+      <p class="demo-panel__hint">
+        同源渲染（G7）：文本行 = char-grid wrapToGrid/padLine 多行 / items 行 = buildItemLines 折行多行，与 ESC/POS 字节流同一数学。
+      </p>
 
       <el-form label-position="top">
         <el-form-item label="纸宽（网格列数）">
-          <el-radio-group v-model="paperWidth" data-testid="demo-paper">
-            <el-radio value="80mm" data-testid="demo-paper-80">80mm（48 列）</el-radio>
-            <el-radio value="58mm" data-testid="demo-paper-58">58mm（32 列）</el-radio>
+          <el-radio-group
+            v-model="paperWidth"
+            data-testid="demo-paper"
+          >
+            <el-radio
+              value="80mm"
+              data-testid="demo-paper-80"
+            >
+              80mm（48 列）
+            </el-radio>
+            <el-radio
+              value="58mm"
+              data-testid="demo-paper-58"
+            >
+              58mm（32 列）
+            </el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="样例数据">
-          <el-radio-group v-model="sampleKey" data-testid="demo-sample">
-            <el-radio value="normal" data-testid="demo-sample-normal">常规</el-radio>
-            <el-radio value="longName" data-testid="demo-sample-long">超长商品名</el-radio>
-            <el-radio value="empty" data-testid="demo-sample-empty">空明细</el-radio>
+          <el-radio-group
+            v-model="sampleKey"
+            data-testid="demo-sample"
+          >
+            <el-radio
+              value="normal"
+              data-testid="demo-sample-normal"
+            >
+              常规
+            </el-radio>
+            <el-radio
+              value="longName"
+              data-testid="demo-sample-long"
+            >
+              超长商品名
+            </el-radio>
+            <el-radio
+              value="empty"
+              data-testid="demo-sample-empty"
+            >
+              空明细
+            </el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="Logo 段落（image）">
-          <el-switch v-model="withLogo" data-testid="demo-logo" />
+          <el-switch
+            v-model="withLogo"
+            data-testid="demo-logo"
+          />
         </el-form-item>
       </el-form>
 

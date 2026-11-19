@@ -223,7 +223,9 @@ onBeforeUnmount(() => {
   <section class="pos-page">
     <div class="pos-left">
       <header class="pos-left__header">
-        <h2 class="pos-left__title">收银台</h2>
+        <h2 class="pos-left__title">
+          收银台
+        </h2>
         <span class="pos-left__hint">扫码即加购 · 双击商品行加入购物车</span>
       </header>
 
@@ -243,24 +245,44 @@ onBeforeUnmount(() => {
         :row-class-name="rowClassName"
         @row-dblclick="onRowDblClick"
       >
-        <el-table-column prop="name" label="名称" min-width="190" show-overflow-tooltip>
+        <el-table-column
+          prop="name"
+          label="名称"
+          min-width="190"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">
             <span class="cell-name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="条码" width="160">
+        <el-table-column
+          label="条码"
+          width="160"
+        >
           <template #default="{ row }">
-            <span class="cell-barcode" :class="{ 'cell-barcode--empty': row.barcode === null }">
+            <span
+              class="cell-barcode"
+              :class="{ 'cell-barcode--empty': row.barcode === null }"
+            >
               {{ row.barcode ?? '— 无条码 —' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="stock" label="库存" width="86" align="center">
+        <el-table-column
+          prop="stock"
+          label="库存"
+          width="86"
+          align="center"
+        >
           <template #default="{ row }">
             <span class="cell-stock">{{ row.stock }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="默认售价" width="104" align="right">
+        <el-table-column
+          label="默认售价"
+          width="104"
+          align="right"
+        >
           <template #default="{ row }">
             <span class="cell-price">
               {{ row.default_price_cents === null ? '—' : `¥${formatMoney(row.default_price_cents)}` }}
@@ -276,13 +298,20 @@ onBeforeUnmount(() => {
       </el-table>
     </div>
 
-    <CartPanel class="pos-right" :checking-out="checkingOut" @checkout="checkout()" />
+    <CartPanel
+      class="pos-right"
+      :checking-out="checkingOut"
+      @checkout="checkout()"
+    />
 
     <!-- Task 15：结账成功 → 小票预览弹窗（与销售记录重打共用，printing store 全局状态） -->
     <ReceiptPreviewDialog />
 
     <!-- SN 商品加购弹窗（双击 / 扫商品码命中 → 录 SN——D-SN5，T2.A） -->
-    <SnEntryDialog v-model:visible="snDialogVisible" :product="snDialogProduct" />
+    <SnEntryDialog
+      v-model:visible="snDialogVisible"
+      :product="snDialogProduct"
+    />
 
     <!-- Task 10：结账弹窗（客户/订单附加信息；确认回调走 sales:checkout 原成功链路） -->
     <CheckoutDialog

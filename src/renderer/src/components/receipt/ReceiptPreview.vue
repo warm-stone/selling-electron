@@ -193,7 +193,10 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
     :style="{ width: `${paperWidthPx}px` }"
     data-testid="receipt-paper"
   >
-    <template v-for="(s, i) in template.header" :key="`h-${i}`">
+    <template
+      v-for="(s, i) in template.header"
+      :key="`h-${i}`"
+    >
       <template v-if="s.type === 'text'">
         <div
           v-for="(line, j) in sectionTexts(s)"
@@ -201,7 +204,9 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
           class="receipt-line"
           :class="lineClasses(s)"
           :style="lineStyle(s)"
-        >{{ line }}</div>
+        >
+          {{ line }}
+        </div>
       </template>
       <img
         v-else-if="s.type === 'image' && logoSrcOf(s)"
@@ -209,23 +214,56 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
         :src="logoSrcOf(s)"
         :style="{ maxWidth: logoMaxWidth }"
         alt="店铺 Logo"
+      >
+      <div
+        v-else-if="s.type === 'divider'"
+        class="receipt-divider"
       />
-      <div v-else-if="s.type === 'divider'" class="receipt-divider" />
     </template>
 
-    <table v-if="showItemHeader || data.items.length > 0" class="receipt-items">
+    <table
+      v-if="showItemHeader || data.items.length > 0"
+      class="receipt-items"
+    >
       <colgroup>
-        <col v-for="c in itemCols" :key="c.key" :style="{ width: c.pct }" />
+        <col
+          v-for="c in itemCols"
+          :key="c.key"
+          :style="{ width: c.pct }"
+        >
       </colgroup>
       <tbody>
         <template v-if="showItemHeader">
-          <tr v-for="(cells, j) in headerRows" :key="`hd-${j}`" class="receipt-line">
-            <td v-for="c in cells" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
+          <tr
+            v-for="(cells, j) in headerRows"
+            :key="`hd-${j}`"
+            class="receipt-line"
+          >
+            <td
+              v-for="c in cells"
+              :key="c.key"
+              :style="{ textAlign: c.cssAlign }"
+            >
+              {{ c.text }}
+            </td>
           </tr>
         </template>
-        <template v-for="(item, i) in data.items" :key="`it-${i}`">
-          <tr v-for="(cells, j) in itemRows(item)" :key="`it-${i}-${j}`" class="receipt-line">
-            <td v-for="c in cells" :key="c.key" :style="{ textAlign: c.cssAlign }">{{ c.text }}</td>
+        <template
+          v-for="(item, i) in data.items"
+          :key="`it-${i}`"
+        >
+          <tr
+            v-for="(cells, j) in itemRows(item)"
+            :key="`it-${i}-${j}`"
+            class="receipt-line"
+          >
+            <td
+              v-for="c in cells"
+              :key="c.key"
+              :style="{ textAlign: c.cssAlign }"
+            >
+              {{ c.text }}
+            </td>
           </tr>
           <tr
             v-for="(line, j) in snLines(item)"
@@ -233,23 +271,36 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
             class="receipt-line receipt-line--sn"
             data-testid="receipt-item-sn"
           >
-            <td colspan="4" style="text-align: left">{{ line }}</td>
+            <td
+              colspan="4"
+              style="text-align: left"
+            >
+              {{ line }}
+            </td>
           </tr>
         </template>
       </tbody>
     </table>
 
-    <template v-for="(t, i) in template.totals" :key="`t-${i}`">
+    <template
+      v-for="(t, i) in template.totals"
+      :key="`t-${i}`"
+    >
       <div
         v-for="(line, j) in totalTexts(t)"
         :key="`t-${i}-${j}`"
         class="receipt-line"
         :class="lineClasses(t)"
         :style="lineStyle(t)"
-      >{{ line }}</div>
+      >
+        {{ line }}
+      </div>
     </template>
 
-    <template v-for="(s, i) in template.footer" :key="`f-${i}`">
+    <template
+      v-for="(s, i) in template.footer"
+      :key="`f-${i}`"
+    >
       <template v-if="s.type === 'text'">
         <div
           v-for="(line, j) in sectionTexts(s)"
@@ -257,7 +308,9 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
           class="receipt-line"
           :class="lineClasses(s)"
           :style="lineStyle(s)"
-        >{{ line }}</div>
+        >
+          {{ line }}
+        </div>
       </template>
       <img
         v-else-if="s.type === 'image' && logoSrcOf(s)"
@@ -265,11 +318,18 @@ function lineStyle(line: { align?: LineAlign; size?: SectionSize }): Record<stri
         :src="logoSrcOf(s)"
         :style="{ maxWidth: logoMaxWidth }"
         alt="店铺 Logo"
+      >
+      <div
+        v-else-if="s.type === 'divider'"
+        class="receipt-divider"
       />
-      <div v-else-if="s.type === 'divider'" class="receipt-divider" />
     </template>
 
-    <div v-if="template.cutPaper" class="receipt-cut" aria-hidden="true" />
+    <div
+      v-if="template.cutPaper"
+      class="receipt-cut"
+      aria-hidden="true"
+    />
   </div>
 </template>
 

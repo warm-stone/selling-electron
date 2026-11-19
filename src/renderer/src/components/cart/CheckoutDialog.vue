@@ -233,15 +233,29 @@ function onCancel(): void {
     @update:model-value="(v: boolean | string | number) => { if (!v) onCancel() }"
   >
     <!-- 合计条：收银主 CTA 的琥珀强调（与 CartPanel 合计同视觉语言） -->
-    <div class="checkout-dialog__total" data-testid="checkout-total">
+    <div
+      class="checkout-dialog__total"
+      data-testid="checkout-total"
+    >
       <span class="checkout-dialog__total-label">合计金额</span>
       <span class="checkout-dialog__total-value">{{ totalText }}</span>
     </div>
 
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="88px" @submit.prevent>
+    <el-form
+      ref="formRef"
+      :model="form"
+      :rules="rules"
+      label-width="88px"
+      @submit.prevent
+    >
       <!-- ── 客户信息组：以电话为锚（失焦自动关联已有客户）── -->
-      <div class="checkout-dialog__section-title">客户信息</div>
-      <el-form-item label="姓名" prop="name">
+      <div class="checkout-dialog__section-title">
+        客户信息
+      </div>
+      <el-form-item
+        label="姓名"
+        prop="name"
+      >
         <el-input
           v-model="form.name"
           maxlength="60"
@@ -249,7 +263,10 @@ function onCancel(): void {
           data-testid="checkout-customer-name"
         />
       </el-form-item>
-      <el-form-item label="电话" prop="phone">
+      <el-form-item
+        label="电话"
+        prop="phone"
+      >
         <el-input
           v-model="form.phone"
           class="checkout-dialog__phone"
@@ -266,7 +283,10 @@ function onCancel(): void {
           已关联客户：{{ matchedCustomer.name }}（信息已带入，可修改）
         </div>
       </el-form-item>
-      <el-form-item label="地址" prop="address">
+      <el-form-item
+        label="地址"
+        prop="address"
+      >
         <el-input
           v-model="form.address"
           maxlength="120"
@@ -274,7 +294,10 @@ function onCancel(): void {
           data-testid="checkout-customer-address"
         />
       </el-form-item>
-      <el-form-item label="客户备注" prop="note">
+      <el-form-item
+        label="客户备注"
+        prop="note"
+      >
         <el-input
           v-model="form.note"
           maxlength="200"
@@ -284,10 +307,17 @@ function onCancel(): void {
       </el-form-item>
 
       <!-- ── 订单信息组 ── -->
-      <div class="checkout-dialog__section-title">订单信息</div>
+      <div class="checkout-dialog__section-title">
+        订单信息
+      </div>
       <el-form-item label="参与国补">
-        <el-switch v-model="form.isNationalSubsidy" data-testid="checkout-subsidy-switch" />
-        <div class="checkout-dialog__hint">国补订单需登记客户姓名和电话</div>
+        <el-switch
+          v-model="form.isNationalSubsidy"
+          data-testid="checkout-subsidy-switch"
+        />
+        <div class="checkout-dialog__hint">
+          国补订单需登记客户姓名和电话
+        </div>
       </el-form-item>
       <el-form-item label="订单备注">
         <el-input
@@ -311,7 +341,12 @@ function onCancel(): void {
           placeholder="输入姓名或选择"
           data-testid="checkout-salesperson-select"
         >
-          <el-option v-for="name in salespersons" :key="name" :label="name" :value="name" />
+          <el-option
+            v-for="name in salespersons"
+            :key="name"
+            :label="name"
+            :value="name"
+          />
         </el-select>
       </el-form-item>
     </el-form>

@@ -50,50 +50,102 @@ function centsToYuan(cents: number): string {
         单号 {{ detail.sale_no }} · {{ detail.created_at }} · 合计
         <span class="sales-history__amount">￥{{ centsToYuan(detail.total_cents) }}</span>
       </p>
-      <el-table :data="detail.items" size="small">
-        <el-table-column prop="product_name" label="商品名（快照）" min-width="170" />
-        <el-table-column label="条码（快照）" min-width="135">
-          <template #default="{ row }">{{ row.barcode ?? '—' }}</template>
+      <el-table
+        :data="detail.items"
+        size="small"
+      >
+        <el-table-column
+          prop="product_name"
+          label="商品名（快照）"
+          min-width="170"
+        />
+        <el-table-column
+          label="条码（快照）"
+          min-width="135"
+        >
+          <template #default="{ row }">
+            {{ row.barcode ?? '—' }}
+          </template>
         </el-table-column>
-        <el-table-column label="SN" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.sn ?? '—' }}</template>
+        <el-table-column
+          label="SN"
+          min-width="150"
+          show-overflow-tooltip
+        >
+          <template #default="{ row }">
+            {{ row.sn ?? '—' }}
+          </template>
         </el-table-column>
-        <el-table-column prop="quantity" label="数量" width="70" align="center" />
-        <el-table-column label="单价（元）" width="100" align="right">
-          <template #default="{ row }">{{ centsToYuan(row.unit_price_cents) }}</template>
+        <el-table-column
+          prop="quantity"
+          label="数量"
+          width="70"
+          align="center"
+        />
+        <el-table-column
+          label="单价（元）"
+          width="100"
+          align="right"
+        >
+          <template #default="{ row }">
+            {{ centsToYuan(row.unit_price_cents) }}
+          </template>
         </el-table-column>
-        <el-table-column label="小计（元）" width="100" align="right">
-          <template #default="{ row }">{{ centsToYuan(row.subtotal_cents) }}</template>
+        <el-table-column
+          label="小计（元）"
+          width="100"
+          align="right"
+        >
+          <template #default="{ row }">
+            {{ centsToYuan(row.subtotal_cents) }}
+          </template>
         </el-table-column>
       </el-table>
 
       <!-- ── 附加信息展示区（T12：customer 为引用最新——改档案后重开立即反映）── -->
-      <div class="sales-history__extras" data-testid="detail-extras">
+      <div
+        class="sales-history__extras"
+        data-testid="detail-extras"
+      >
         <div class="extras-panel">
           <div class="extras-panel__col">
-            <h4 class="extras-panel__title">客户信息</h4>
+            <h4 class="extras-panel__title">
+              客户信息
+            </h4>
             <template v-if="detail.extras?.customer">
               <div class="extras-panel__row">
                 <span class="extras-panel__label">姓名</span>
-                <span class="extras-panel__value" data-testid="detail-customer-name">{{
+                <span
+                  class="extras-panel__value"
+                  data-testid="detail-customer-name"
+                >{{
                   detail.extras.customer.name || '—'
                 }}</span>
               </div>
               <div class="extras-panel__row">
                 <span class="extras-panel__label">电话</span>
-                <span class="extras-panel__value" data-testid="detail-customer-phone">{{
+                <span
+                  class="extras-panel__value"
+                  data-testid="detail-customer-phone"
+                >{{
                   detail.extras.customer.phone || '—'
                 }}</span>
               </div>
               <div class="extras-panel__row">
                 <span class="extras-panel__label">地址</span>
-                <span class="extras-panel__value" data-testid="detail-customer-address">{{
+                <span
+                  class="extras-panel__value"
+                  data-testid="detail-customer-address"
+                >{{
                   detail.extras.customer.address || '—'
                 }}</span>
               </div>
               <div class="extras-panel__row">
                 <span class="extras-panel__label">客户备注</span>
-                <span class="extras-panel__value" data-testid="detail-customer-note">{{
+                <span
+                  class="extras-panel__value"
+                  data-testid="detail-customer-note"
+                >{{
                   detail.extras.customer.note || '—'
                 }}</span>
               </div>
@@ -107,12 +159,21 @@ function centsToYuan(cents: number): string {
             </p>
           </div>
           <div class="extras-panel__col">
-            <h4 class="extras-panel__title">订单附加</h4>
+            <h4 class="extras-panel__title">
+              订单附加
+            </h4>
             <div class="extras-panel__row">
               <span class="extras-panel__label">是否国补</span>
               <!-- true 才渲染 el-tag（ReportsView 惯例）：false 纯文本「否」——保 .el-tag 计数 -->
-              <span class="extras-panel__value" data-testid="detail-subsidy">
-                <el-tag v-if="detail.extras?.is_national_subsidy" type="success" disable-transitions>
+              <span
+                class="extras-panel__value"
+                data-testid="detail-subsidy"
+              >
+                <el-tag
+                  v-if="detail.extras?.is_national_subsidy"
+                  type="success"
+                  disable-transitions
+                >
                   国补
                 </el-tag>
                 <span v-else>否</span>
@@ -120,13 +181,19 @@ function centsToYuan(cents: number): string {
             </div>
             <div class="extras-panel__row">
               <span class="extras-panel__label">订单备注</span>
-              <span class="extras-panel__value" data-testid="detail-order-note">{{
+              <span
+                class="extras-panel__value"
+                data-testid="detail-order-note"
+              >{{
                 detail.extras?.order_note || '—'
               }}</span>
             </div>
             <div class="extras-panel__row">
               <span class="extras-panel__label">销售人员</span>
-              <span class="extras-panel__value" data-testid="detail-salesperson">{{
+              <span
+                class="extras-panel__value"
+                data-testid="detail-salesperson"
+              >{{
                 detail.extras?.salesperson || '—'
               }}</span>
             </div>
