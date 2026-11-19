@@ -94,16 +94,21 @@ jobs:
       - name: Build installer (publishing handled by gh CLI)
         run: npx electron-builder --win nsis --publish never
 
-      # 幂等发布：view 命中（re-run 场景）则复用，否则 create draft；
-      # upload --clobber 覆盖同名资产。GH_TOKEN 为 Actions 运行时内置
-      # GITHUB_TOKEN（发布到本仓库 Releases，无需手动密钥）。
+      # 幂等发布：view 命中（re-run 场景）则复用，否则 create 直接正式发布
+      # （不进 draft）；upload --clobber 覆盖同名资产。GH_TOKEN 为 Actions
+      # 运行时内置 GITHUB_TOKEN（发布到本仓库 Releases，无需手动密钥）。
       # shell 用 bash：gh 自行展开 glob + 规避 PowerShell 引号坑（产物名为
       # ASCII 的 selling-electron-setup-*.exe，无中文编码问题）。
-      - name: Create draft release & upload assets
+      - name: Create release & upload assets
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="$GITHUB_REF_NAME"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "$TAG" --generate-notes
-          gh release upload "$TAG" release/*.exe release/*.exe.blockmap --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/*.exe release/*.exe.blockmap --clobber
+          else
+            # create 直接附带资产：发布即可见完整安装包，无空窗
+            gh release create "$TAG" --latest --title "$TAG" --generate-notes \
+              release/*.exe release/*.exe.blockmap
+          fi
