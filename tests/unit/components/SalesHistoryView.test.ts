@@ -5,6 +5,7 @@ import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { VueWrapper } from '@vue/test-utils'
+import SaleExtrasForm from '../../../src/renderer/src/components/sales/SaleExtrasForm.vue'
 import SalesHistoryView from '../../../src/renderer/src/views/SalesHistoryView.vue'
 import type {
   Customer,
@@ -348,10 +349,11 @@ describe('明细弹窗：电话联想（Q5）', () => {
 })
 
 describe('明细弹窗：保存 patch 组装与结果刷新', () => {
-  /** 编辑区表单的测试侧直达通道（el-select 交互在 jsdom 不便，仅此一处走 setupState） */
+  /** 编辑区表单的测试侧直达通道（el-select 交互在 jsdom 不便，仅此一处走 setupState；
+   *  批次 3 拆分后 extraForm 在 SaleExtrasForm 子组件——findComponent 定位） */
   function setSalesperson(wrapper: VueWrapper, value: string): void {
     const form = (
-      wrapper.vm as unknown as { extraForm: { salesperson: string } }
+      wrapper.findComponent(SaleExtrasForm).vm as unknown as { extraForm: { salesperson: string } }
     ).extraForm
     form.salesperson = value
   }
