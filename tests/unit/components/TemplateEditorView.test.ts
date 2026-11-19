@@ -4,11 +4,13 @@ import ElementPlus, { ElMessage } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { VueWrapper } from '@vue/test-utils'
-import TemplateEditorView from '../../../src/renderer/src/views/TemplateEditorView.vue'
-import type { PrintTemplate } from '../../../src/shared/types'
+import VarDocsPanel from '../../../src/renderer/src/components/template-editor/VarDocsPanel.vue'
 
 /**
  * 模板编辑器顶部「可用变量」说明区组件测试。
+ *
+ * 批次 4 拆分后说明区为独立自包含组件 VarDocsPanel（原 TemplateEditorView
+ * 内联——本测试原整视图挂载，现直接挂载说明区组件，断言零改动）。
  *
  * 说明区消费 shared/receipt/template-schema 的 RECEIPT_VAR_DOCS（单一事实源），
  * 断言用写死的期望数组锁数量与键名——schema 常量若漂移（改名/增删键）测试即红。
@@ -25,18 +27,6 @@ class ResizeObserverStub {
   disconnect(): void {}
 }
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
-
-// ── window.api 前置 stub（视图 onMounted 走 templates.list / settings.listLogos）──
-
-const api = vi.hoisted(() => {
-  const templatesList = vi.fn<() => Promise<PrintTemplate[]>>()
-  const listLogos = vi.fn<() => Promise<never[]>>()
-  window.api = {
-    templates: { list: templatesList },
-    settings: { listLogos }
-  } as unknown as Window['api']
-  return { templatesList, listLogos }
-})
 
 /** ElMessage 渲染挂 document.body——spy 且置空实现，断言文案即可 */
 const messageSuccessSpy = vi
@@ -58,13 +48,11 @@ const EXPECTED_SLOTS = [
   '{companyFooter}'
 ]
 
-function mountView(): VueWrapper {
-  return mount(TemplateEditorView, { global: { plugins: [ElementPlus] } })
+function mountPanel(): VueWrapper {
+  return mount(VarDocsPanel, { global: { plugins: [ElementPlus] } })
 }
 
 beforeEach(() => {
-  api.templatesList.mockReset().mockResolvedValue([])
-  api.listLogos.mockReset().mockResolvedValue([])
   messageSuccessSpy.mockClear()
   clipboardWriteText.mockReset().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'clipboard', {
@@ -75,7 +63,7 @@ beforeEach(() => {
 
 describe('模板编辑器：可用变量说明区', () => {
   it('渲染全部 8 个变量（slot 原文 + 含义），默认展开可见', async () => {
-    const wrapper = mountView()
+    const wrapper = mountPanel()
     await flushPromises()
 
     const items = wrapper.findAll('[data-testid="tpl-var-item"]')
@@ -101,7 +89,7 @@ describe('模板编辑器：可用变量说明区', () => {
   })
 
   it('点击 {shopName} 复制到剪贴板并 toast「已复制」', async () => {
-    const wrapper = mountView()
+    const wrapper = mountPanel()
     await flushPromises()
 
     const first = wrapper.findAll('[data-testid="tpl-var-item"]')[0]
@@ -119,7 +107,7 @@ describe('模板编辑器：可用变量说明区', () => {
 
   it('剪贴板不可用时静默降级：不 toast、不抛错', async () => {
     clipboardWriteText.mockRejectedValue(new Error('Clipboard API denied'))
-    const wrapper = mountView()
+    const wrapper = mountPanel()
     await flushPromises()
 
     await wrapper.findAll('[data-testid="tpl-var-item"]')[0].trigger('click')

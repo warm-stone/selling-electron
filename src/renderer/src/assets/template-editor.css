@@ -1,0 +1,42 @@
+/**
+ * 模板编辑器·组卡片骨架样式（基本信息/明细列组在视图，头部/合计/底部段落组
+ * 在 SectionListEditor——两组共用）——由 TemplateEditorView 的非 scoped
+ * <style src> 全局加载一次。
+ *
+ * 原为 TemplateEditorView scoped 样式；段落组拆分为独立组件后 scoped 无法
+ * 跨组件生效，故收敛为全局规则——所有选择器一律挂在 .template-editor
+ * 命名空间下，防泄漏到其它页面。
+ */
+
+.template-editor .tpl-group {
+  margin-top: 14px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+}
+
+.template-editor .tpl-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.template-editor .tpl-group__title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.template-editor .tpl-group__head .tpl-group__title {
+  margin: 0;
+}
+
+.template-editor .tpl-group__sub {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+}

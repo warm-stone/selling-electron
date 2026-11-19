@@ -2,117 +2,45 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormRules } from 'element-plus'
+import { Delete, DocumentChecked, DocumentCopy, Plus } from '@element-plus/icons-vue'
+import SectionListEditor from '@renderer/components/template-editor/SectionListEditor.vue'
+import TemplatePreviewPane from '@renderer/components/template-editor/TemplatePreviewPane.vue'
+import VarDocsPanel from '@renderer/components/template-editor/VarDocsPanel.vue'
 import {
-  ArrowDown,
-  ArrowUp,
-  Delete,
-  DocumentChecked,
-  DocumentCopy,
-  Plus,
-  QuestionFilled,
-  Upload
-} from '@element-plus/icons-vue'
-import ReceiptPreview from '@renderer/components/receipt/ReceiptPreview.vue'
-import { PAPER_COLUMNS, type LineAlign, type PaperWidth } from '../../../shared/receipt/char-grid'
+  provideTemplateDraft,
+  type TemplateDraft
+} from '@renderer/components/template-editor/template-draft'
+import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
+import { PAPER_COLUMNS, type PaperWidth } from '../../../shared/receipt/char-grid'
 import { DEFAULT_TEMPLATES } from '../../../shared/receipt/default-template'
 import {
   ITEM_COLUMN_WIDTHS,
-  type ItemColumnWidths,
-  type SaleReceiptData
+  type ItemColumnWidths
 } from '../../../shared/receipt/item-columns'
-import type {
-  ReceiptTemplate,
-  ReceiptVars,
-  Section,
-  SectionSize,
-  TotalLine
-} from '../../../shared/receipt/template-schema'
-import { RECEIPT_VAR_DOCS } from '../../../shared/receipt/template-schema'
-import type { PrintTemplate } from '../../../shared/types'
-import { formatMoney, parseMoneyToCents } from '../../../shared/utils/money'
+import type { ReceiptTemplate } from '../../../shared/receipt/template-schema'
+import type { LogoInfo, PrintTemplate } from '../../../shared/types'
 
 /**
  * 小票模板编辑器（Task 16）：左侧模板列表（新建/复制/删除）+ 右侧表单区
  * （段落级配置，G14——无拖拽/逐元素样式）+ 底部实时预览。
  *
+ * 拆分（巨型视图治理批次 4）：
+ * - VarDocsPanel        可用变量说明区（RECEIPT_VAR_DOCS 单一事实源 + 点击复制）
+ * - SectionListEditor   头部/合计/底部三组段落行编辑（上移/下移/删除/添加 +
+ *                       image 段落 Logo 选择；草稿经 provideTemplateDraft 注入）
+ * - TemplatePreviewPane 底部实时预览（样例数据自包含）
+ * 本页仅留：模板列表/选中、表单模型（draft）与 CRUD/设默认编排、明细列
+ * （列头文案 + 列宽联动校验）、Logo 列表加载与上传 IPC。
+ *
  * 实时预览数据流：表单 draft（reactive）→ previewTemplate（computed，即
- * 表单的响应式 watch，**不保存也即时刷新**）→ ReceiptPreview（T12 组件，
- * 样例数据 shopName='测试商店' / 三行商品含超长名；logo 列表经设置页
- * 上传，image 段落按 logoId 选用并传入预览渲染）。
+ * 表单的响应式 watch，**不保存也即时刷新**）→ TemplatePreviewPane（T12
+ * ReceiptPreview 同源渲染；logo 列表经设置页上传，image 段落按 logoId 选用）。
  * 表单字段与 shared/receipt/template-schema 的 ReceiptTemplate 一一对应
  * （type/align/size 枚举逐字复用），保存经 repo 校验守卫落库。
  */
 
-/** window.api.settings 的 Logo 条目类型（preload 契约：listLogos/uploadLogo/deleteLogo 返回） */
-type LogoInfo = Awaited<ReturnType<typeof window.api.settings.listLogos>>[number]
-
-type Option<T extends string> = { value: T; label: string }
-
-const TYPE_OPTIONS: Option<Section['type']>[] = [
-  { value: 'text', label: '文本' },
-  { value: 'image', label: '图片 Logo' },
-  { value: 'divider', label: '分隔线' }
-]
-
-const ALIGN_OPTIONS: Option<LineAlign>[] = [
-  { value: 'left', label: '左对齐' },
-  { value: 'center', label: '居中' },
-  { value: 'right', label: '右对齐' }
-]
-
-const SIZE_OPTIONS: Option<SectionSize>[] = [
-  { value: 'normal', label: '标准' },
-  { value: 'doubleHeight', label: '倍高' },
-  { value: 'doubleWidth', label: '倍宽' },
-  { value: 'quad', label: '双倍' }
-]
-
-// ── 实时预览样例数据（虚构店铺 + 三行商品，含超长中文名验证名称列折行；金额经 shared/utils/money 组装——G1）──
-const SAMPLE_ITEMS: SaleReceiptData = {
-  items: [
-    { name: '经典奶茶（大杯）', quantity: '2', unitPrice: '15.00', subtotal: '30.00' },
-    { name: '现烤菠萝包', quantity: '1', unitPrice: '6.50', subtotal: '6.50' },
-    { name: '招牌秘制香辣鸡腿堡超级套餐（含饮品小食各一份）', quantity: '1', unitPrice: '39.90', subtotal: '39.90' }
-  ]
-}
-
-const sampleVars = computed<ReceiptVars>(() => {
-  const cents = SAMPLE_ITEMS.items.reduce((s, it) => s + parseMoneyToCents(it.subtotal), 0)
-  const count = SAMPLE_ITEMS.items.reduce((s, it) => s + Number(it.quantity), 0)
-  return {
-    shopName: '测试商店',
-    shopPhone: '138-0000-0000',
-    receiptNote: '欢迎再次光临',
-    saleNo: '20261101-0001',
-    datetime: '2026-11-01 12:30:00',
-    total: formatMoney(cents),
-    itemCount: String(count)
-  }
-})
-
-// ── 表单模型（与 ReceiptTemplate 字段一一对应）──
-
-interface TemplateDraft {
-  name: string
-  paperWidth: PaperWidth
-  cutPaper: boolean
-  header: Section[]
-  items: {
-    showHeader: boolean
-    nameLabel: string
-    qtyLabel: string
-    priceLabel: string
-    subtotalLabel: string
-    /**
-     * 列宽覆盖（Partial：undefined 键 = 未覆盖，沿用纸宽默认）。
-     * 恒为对象（空对象起步）便于 el-input-number 直接绑定；
-     * 序列化时未覆盖键不写入 JSON（见 serializeColumnWidths）。
-     */
-    columnWidths: Partial<ItemColumnWidths>
-  }
-  totals: TotalLine[]
-  footer: Section[]
-}
+// ── 表单模型（与 ReceiptTemplate 字段一一对应；接口在 template-draft.ts，
+//    经 provide 下发段落编辑子组件——同一 reactive 对象，行内编辑即时联动预览）──
 
 function cloneDefault(width: PaperWidth): ReceiptTemplate {
   return JSON.parse(JSON.stringify(DEFAULT_TEMPLATES[width])) as ReceiptTemplate
@@ -139,6 +67,7 @@ function draftFromTemplate(name: string, t: ReceiptTemplate): TemplateDraft {
 }
 
 const draft = reactive<TemplateDraft>(draftFromTemplate('新模板', cloneDefault('80mm')))
+provideTemplateDraft(draft)
 
 const rules: FormRules = {
   name: [{ required: true, whitespace: true, message: '请输入模板名称', trigger: 'blur' }]
@@ -227,24 +156,19 @@ function setColumnWidth(key: keyof ItemColumnWidths, val: number | null | undefi
   draft.items.columnWidths[key] = val ?? undefined
 }
 
-// ── Logo 列表（设置页上传的多 Logo：image 段落选择 + 预览渲染）──
+// ── Logo 列表（设置页上传的多 Logo：image 段落选择 + 预览渲染；
+//    段落行内的选择在 SectionListEditor——列表/上传态由本页下发）──
 
 const logos = ref<LogoInfo[]>([])
 const uploadingLogo = ref(false)
 
-/** logo id → dataURL 映射（ReceiptPreview 预览渲染用） */
+/** logo id → dataURL 映射（预览渲染用） */
 const logoUrlsMap = computed<Record<number, string>>(() =>
   Object.fromEntries(logos.value.map((l) => [l.id, l.data_url]))
 )
 
 async function loadLogos(): Promise<void> {
   logos.value = await window.api.settings.listLogos()
-}
-
-/** image 段落当前选中 logo 的缩略图 dataURL（未选中 → undefined） */
-function logoThumbUrl(logoId: number | undefined): string | undefined {
-  if (logoId === undefined) return undefined
-  return logos.value.find((l) => l.id === logoId)?.data_url
 }
 
 async function onUploadLogo(): Promise<void> {
@@ -256,37 +180,9 @@ async function onUploadLogo(): Promise<void> {
     logos.value = next
     if (added) ElMessage.success('Logo 已上传')
   } catch (err) {
-    ElMessage.error(`Logo 上传失败：${ipcErrorMessage(err)}`)
+    ElMessage.error(`Logo 上传失败：${extractIpcErrorMessage(err)}`)
   } finally {
     uploadingLogo.value = false
-  }
-}
-
-// ── IPC 错误文案（Electron invoke 序列化前缀剥除——T8 模式）──
-
-function ipcErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err)
-  const m = raw.match(/^Error invoking remote method '[^']+': (?:Error: )?([\s\S]*)$/)
-  return m ? (m[1] as string) : raw
-}
-
-// ── 变量说明区（可折叠，默认展开；点击变量复制插槽原文）──
-
-/** 说明区折叠面板展开态（单面板，name='vars'） */
-const varsHelpActive = ref<string[]>(['vars'])
-
-/** 变量插槽原文（与 interpolateVariables 的 `{变量}` 语法一致） */
-function varSlot(name: string): string {
-  return `{${name}}`
-}
-
-/** 点击复制 `{变量}`（file:// 下 clipboard API 可能不可用——静默降级，code 文本可手抄） */
-async function copyVarSlot(name: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(varSlot(name))
-    ElMessage.success('已复制')
-  } catch {
-    // 剪贴板不可用：不弹错（复制是便利非依赖），用户可对照说明手抄
   }
 }
 
@@ -309,39 +205,6 @@ function autoSelect(): void {
   } else {
     newDraft()
   }
-}
-
-// ── 段落行操作（上移/下移/删除/添加——段落级为止，G14）──
-
-type ListTarget = 'header' | 'footer' | 'totals'
-
-function listAt(target: ListTarget): Array<Section | TotalLine> {
-  return draft[target] as Array<Section | TotalLine>
-}
-
-function addLine(target: ListTarget): void {
-  if (target === 'totals') {
-    draft.totals.push({ type: 'total', label: '合计: ￥{total}', align: 'right' })
-  } else {
-    draft[target].push({ type: 'text', content: '', align: 'left' })
-  }
-}
-
-function removeLine(target: ListTarget, idx: number): void {
-  listAt(target).splice(idx, 1)
-}
-
-function moveLine(target: ListTarget, idx: number, step: -1 | 1): void {
-  const arr = listAt(target)
-  const to = idx + step
-  if (to < 0 || to >= arr.length) return
-  const [moved] = arr.splice(idx, 1)
-  arr.splice(to, 0, moved)
-}
-
-function contentPlaceholder(type: Section['type']): string {
-  if (type === 'divider') return '分隔线无需内容'
-  return '文案，支持 {变量} 插槽'
 }
 
 // ── 新建 / 复制 / 保存 / 删除 / 设默认 ──
@@ -391,7 +254,7 @@ async function save(): Promise<void> {
     const current = templates.value.find((t) => t.id === selectedId.value)
     if (current) defaultChoice.value = current.is_default
   } catch (err) {
-    ElMessage.error(`保存失败：${ipcErrorMessage(err)}`)
+    ElMessage.error(`保存失败：${extractIpcErrorMessage(err)}`)
   } finally {
     saving.value = false
   }
@@ -415,7 +278,7 @@ async function removeSelected(): Promise<void> {
     await loadTemplates()
     autoSelect()
   } catch (err) {
-    ElMessage.error(`删除失败：${ipcErrorMessage(err)}`)
+    ElMessage.error(`删除失败：${extractIpcErrorMessage(err)}`)
   }
 }
 
@@ -437,7 +300,7 @@ async function onDefaultChange(val: string | number | boolean | undefined): Prom
     ElMessage.success('已设为默认模板')
   } catch (err) {
     defaultChoice.value = false
-    ElMessage.error(`设置默认失败：${ipcErrorMessage(err)}`)
+    ElMessage.error(`设置默认失败：${extractIpcErrorMessage(err)}`)
   }
 }
 
@@ -446,7 +309,7 @@ onMounted(async () => {
     await loadTemplates()
     autoSelect()
   } catch (err) {
-    ElMessage.error(`模板加载失败：${ipcErrorMessage(err)}`)
+    ElMessage.error(`模板加载失败：${extractIpcErrorMessage(err)}`)
   } finally {
     loading.value = false
   }
@@ -454,7 +317,7 @@ onMounted(async () => {
   try {
     await loadLogos()
   } catch (err) {
-    ElMessage.warning(`Logo 列表加载失败：${ipcErrorMessage(err)}`)
+    ElMessage.warning(`Logo 列表加载失败：${extractIpcErrorMessage(err)}`)
   }
 })
 </script>
@@ -540,33 +403,7 @@ onMounted(async () => {
           </el-button>
         </div>
 
-        <el-collapse v-model="varsHelpActive" class="tpl-vars-help" data-testid="tpl-vars-help">
-          <el-collapse-item name="vars">
-            <template #title>
-              <span class="tpl-vars-help__title" data-testid="tpl-vars-help-toggle">
-                <el-icon class="tpl-vars-help__icon"><QuestionFilled /></el-icon>
-                可用变量（输入 {变量名} 自动替换，点击变量可复制）
-              </span>
-            </template>
-            <p class="tpl-vars-help__intro">
-              变量可输入在头部段落、合计行、底部段落的文案中，打印时替换为实际值；未知变量保留原文。
-            </p>
-            <div class="tpl-vars-help__grid">
-              <button
-                v-for="v in RECEIPT_VAR_DOCS"
-                :key="v.name"
-                type="button"
-                class="tpl-vars-help__item"
-                :title="`点击复制 ${varSlot(v.name)}`"
-                data-testid="tpl-var-item"
-                @click="copyVarSlot(v.name)"
-              >
-                <code>{{ varSlot(v.name) }}</code>
-                <span>{{ v.description }}</span>
-              </button>
-            </div>
-          </el-collapse-item>
-        </el-collapse>
+        <VarDocsPanel />
 
         <el-form :model="draft" :rules="rules" label-position="top">
           <section class="tpl-group">
@@ -602,110 +439,12 @@ onMounted(async () => {
             </div>
           </section>
 
-          <section class="tpl-group">
-            <div class="tpl-group__head">
-              <h4 class="tpl-group__title">
-                头部段落
-                <span class="tpl-group__sub">小票顶部：店名 / 电话 / 分隔线</span>
-              </h4>
-              <el-popover placement="left-start" :width="280" trigger="click">
-                <template #reference>
-                  <el-icon class="tpl-vars-trigger" data-testid="tpl-vars">
-                    <QuestionFilled />
-                  </el-icon>
-                </template>
-                <div class="tpl-vars">
-                  <p class="tpl-vars__title">内容可用变量插槽（打印时替换为实值）</p>
-                  <p v-for="v in RECEIPT_VAR_DOCS" :key="v.name" class="tpl-vars__row">
-                    <code>{{ varSlot(v.name) }}</code>
-                    <span>{{ v.description }}</span>
-                  </p>
-                </div>
-              </el-popover>
-            </div>
-
-            <p v-if="draft.header.length === 0" class="section-list__empty">暂无段落</p>
-            <div
-              v-for="(s, i) in draft.header"
-              :key="`h-${i}`"
-              class="section-row"
-              data-testid="tpl-row-header"
-            >
-              <div class="section-row__main">
-                <el-select v-model="s.type" data-testid="tpl-type">
-                  <el-option v-for="o in TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <!-- image 段落：Logo 选择（多 Logo；清空 = 未指定）+ 缩略图 + 上传入口 -->
-                <div v-if="s.type === 'image'" class="logo-picker">
-                  <el-select
-                    v-model="s.logoId"
-                    data-testid="tpl-logo-select"
-                    class="logo-picker__select"
-                    placeholder="未指定 Logo"
-                    clearable
-                    :disabled="logos.length === 0"
-                  >
-                    <el-option v-for="l in logos" :key="l.id" :value="l.id" :label="l.display_name" />
-                  </el-select>
-                  <el-image
-                    v-if="logoThumbUrl(s.logoId)"
-                    class="logo-picker__thumb"
-                    :src="logoThumbUrl(s.logoId)"
-                    fit="contain"
-                    alt="已选 Logo 缩略图"
-                  />
-                  <el-button
-                    text
-                    type="primary"
-                    :icon="Upload"
-                    data-testid="tpl-logo-upload"
-                    :loading="uploadingLogo"
-                    @click="onUploadLogo"
-                  >
-                    上传
-                  </el-button>
-                  <span v-if="logos.length === 0" class="logo-picker__hint">
-                    请先在 设置→小票Logo 上传
-                  </span>
-                </div>
-                <el-input
-                  v-else
-                  v-model="s.content"
-                  data-testid="tpl-content"
-                  :disabled="s.type !== 'text'"
-                  :placeholder="contentPlaceholder(s.type)"
-                />
-                <el-select v-model="s.align" data-testid="tpl-align" placeholder="对齐">
-                  <el-option v-for="o in ALIGN_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-select v-model="s.size" data-testid="tpl-size" placeholder="字号">
-                  <el-option v-for="o in SIZE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-switch v-model="s.bold" data-testid="tpl-bold" />
-              </div>
-              <div class="section-row__ops">
-                <el-button :icon="ArrowUp" text :disabled="i === 0" @click="moveLine('header', i, -1)" />
-                <el-button
-                  :icon="ArrowDown"
-                  text
-                  :disabled="i === draft.header.length - 1"
-                  @click="moveLine('header', i, 1)"
-                />
-                <el-button :icon="Delete" text type="danger" @click="removeLine('header', i)" />
-              </div>
-            </div>
-
-            <el-button
-              class="section-add"
-              text
-              type="primary"
-              :icon="Plus"
-              data-testid="tpl-add-header"
-              @click="addLine('header')"
-            >
-              添加头部段落
-            </el-button>
-          </section>
+          <SectionListEditor
+            target="header"
+            :logos="logos"
+            :uploading-logo="uploadingLogo"
+            @upload-logo="onUploadLogo"
+          />
 
           <section class="tpl-group">
             <div class="tpl-group__head">
@@ -797,183 +536,29 @@ onMounted(async () => {
             </div>
           </section>
 
-          <section class="tpl-group">
-            <div class="tpl-group__head">
-              <h4 class="tpl-group__title">
-                合计区
-                <span class="tpl-group__sub">小计之后的金额行（label 支持变量插槽）</span>
-              </h4>
-            </div>
+          <SectionListEditor
+            target="totals"
+            :logos="logos"
+            :uploading-logo="uploadingLogo"
+            @upload-logo="onUploadLogo"
+          />
 
-            <p v-if="draft.totals.length === 0" class="section-list__empty">暂无合计行</p>
-            <div
-              v-for="(t, i) in draft.totals"
-              :key="`t-${i}`"
-              class="section-row section-row--total"
-              data-testid="tpl-row-total"
-            >
-              <div class="section-row__main">
-                <el-input
-                  v-model="t.label"
-                  data-testid="tpl-label"
-                  placeholder="行文案，如 合计: ￥{total}"
-                />
-                <el-select v-model="t.align" data-testid="tpl-align" placeholder="对齐">
-                  <el-option v-for="o in ALIGN_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-select v-model="t.size" data-testid="tpl-size" placeholder="字号">
-                  <el-option v-for="o in SIZE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-switch v-model="t.bold" data-testid="tpl-bold" />
-              </div>
-              <div class="section-row__ops">
-                <el-button :icon="ArrowUp" text :disabled="i === 0" @click="moveLine('totals', i, -1)" />
-                <el-button
-                  :icon="ArrowDown"
-                  text
-                  :disabled="i === draft.totals.length - 1"
-                  @click="moveLine('totals', i, 1)"
-                />
-                <el-button :icon="Delete" text type="danger" @click="removeLine('totals', i)" />
-              </div>
-            </div>
-
-            <el-button
-              class="section-add"
-              text
-              type="primary"
-              :icon="Plus"
-              data-testid="tpl-add-total"
-              @click="addLine('totals')"
-            >
-              添加合计行
-            </el-button>
-          </section>
-
-          <section class="tpl-group">
-            <div class="tpl-group__head">
-              <h4 class="tpl-group__title">
-                底部段落
-                <span class="tpl-group__sub">小票尾部：时间 / 致谢 / 备注</span>
-              </h4>
-              <el-popover placement="left-start" :width="280" trigger="click">
-                <template #reference>
-                  <el-icon class="tpl-vars-trigger" data-testid="tpl-vars">
-                    <QuestionFilled />
-                  </el-icon>
-                </template>
-                <div class="tpl-vars">
-                  <p class="tpl-vars__title">内容可用变量插槽（打印时替换为实值）</p>
-                  <p v-for="v in RECEIPT_VAR_DOCS" :key="v.name" class="tpl-vars__row">
-                    <code>{{ varSlot(v.name) }}</code>
-                    <span>{{ v.description }}</span>
-                  </p>
-                </div>
-              </el-popover>
-            </div>
-
-            <p v-if="draft.footer.length === 0" class="section-list__empty">暂无段落</p>
-            <div
-              v-for="(s, i) in draft.footer"
-              :key="`f-${i}`"
-              class="section-row"
-              data-testid="tpl-row-footer"
-            >
-              <div class="section-row__main">
-                <el-select v-model="s.type" data-testid="tpl-type">
-                  <el-option v-for="o in TYPE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <!-- image 段落：Logo 选择（多 Logo；清空 = 未指定）+ 缩略图 + 上传入口 -->
-                <div v-if="s.type === 'image'" class="logo-picker">
-                  <el-select
-                    v-model="s.logoId"
-                    data-testid="tpl-logo-select"
-                    class="logo-picker__select"
-                    placeholder="未指定 Logo"
-                    clearable
-                    :disabled="logos.length === 0"
-                  >
-                    <el-option v-for="l in logos" :key="l.id" :value="l.id" :label="l.display_name" />
-                  </el-select>
-                  <el-image
-                    v-if="logoThumbUrl(s.logoId)"
-                    class="logo-picker__thumb"
-                    :src="logoThumbUrl(s.logoId)"
-                    fit="contain"
-                    alt="已选 Logo 缩略图"
-                  />
-                  <el-button
-                    text
-                    type="primary"
-                    :icon="Upload"
-                    data-testid="tpl-logo-upload"
-                    :loading="uploadingLogo"
-                    @click="onUploadLogo"
-                  >
-                    上传
-                  </el-button>
-                  <span v-if="logos.length === 0" class="logo-picker__hint">
-                    请先在 设置→小票Logo 上传
-                  </span>
-                </div>
-                <el-input
-                  v-else
-                  v-model="s.content"
-                  data-testid="tpl-content"
-                  :disabled="s.type !== 'text'"
-                  :placeholder="contentPlaceholder(s.type)"
-                />
-                <el-select v-model="s.align" data-testid="tpl-align" placeholder="对齐">
-                  <el-option v-for="o in ALIGN_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-select v-model="s.size" data-testid="tpl-size" placeholder="字号">
-                  <el-option v-for="o in SIZE_OPTIONS" :key="o.value" :value="o.value" :label="o.label" />
-                </el-select>
-                <el-switch v-model="s.bold" data-testid="tpl-bold" />
-              </div>
-              <div class="section-row__ops">
-                <el-button :icon="ArrowUp" text :disabled="i === 0" @click="moveLine('footer', i, -1)" />
-                <el-button
-                  :icon="ArrowDown"
-                  text
-                  :disabled="i === draft.footer.length - 1"
-                  @click="moveLine('footer', i, 1)"
-                />
-                <el-button :icon="Delete" text type="danger" @click="removeLine('footer', i)" />
-              </div>
-            </div>
-
-            <el-button
-              class="section-add"
-              text
-              type="primary"
-              :icon="Plus"
-              data-testid="tpl-add-footer"
-              @click="addLine('footer')"
-            >
-              添加底部段落
-            </el-button>
-          </section>
+          <SectionListEditor
+            target="footer"
+            :logos="logos"
+            :uploading-logo="uploadingLogo"
+            @upload-logo="onUploadLogo"
+          />
         </el-form>
       </div>
 
-      <section class="tpl-preview">
-        <div class="tpl-preview__head">
-          <span class="tpl-preview__title">实时预览</span>
-          <span class="tpl-preview__hint">编辑即时刷新，无需保存 · 样例数据（{{ sampleVars.shopName }}）</span>
-        </div>
-        <div class="tpl-preview__stage">
-          <ReceiptPreview
-            :template="previewTemplate"
-            :data="SAMPLE_ITEMS"
-            :vars="sampleVars"
-            :logo-urls="logoUrlsMap"
-          />
-        </div>
-      </section>
+      <TemplatePreviewPane :template="previewTemplate" :logo-urls="logoUrlsMap" />
     </section>
   </div>
 </template>
+
+<!-- 组卡片骨架共享样式（全局加载一次；选择器全部收敛在 .template-editor 命名空间下） -->
+<style src="../assets/template-editor.css"></style>
 
 <style scoped>
 .template-editor {
@@ -1114,160 +699,7 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-/* ── 变量说明区（可折叠紧凑卡片，默认展开——浅底降权，不喧宾夺主）── */
-.tpl-vars-help {
-  margin-top: 14px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-fill-color-lighter);
-}
-
-.tpl-vars-help :deep(.el-collapse-item__header) {
-  height: 40px;
-  padding: 0 16px;
-  border-bottom: none;
-  background: transparent;
-}
-
-.tpl-vars-help :deep(.el-collapse-item__wrap) {
-  border-bottom: none;
-  background: transparent;
-}
-
-.tpl-vars-help :deep(.el-collapse-item__content) {
-  padding-bottom: 12px;
-}
-
-.tpl-vars-help__title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--el-text-color-regular);
-}
-
-.tpl-vars-help__icon {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-.tpl-vars-help__intro {
-  margin: 0 0 8px;
-  padding-left: 16px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-secondary);
-}
-
-.tpl-vars-help__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 4px;
-  padding: 0 8px;
-}
-
-.tpl-vars-help__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-}
-
-.tpl-vars-help__item:hover {
-  background: var(--el-fill-color-light);
-}
-
-.tpl-vars-help__item code {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--el-fill-color);
-  font-family: 'NSimSun', 'SimSun', monospace;
-  font-size: 12px;
-  color: var(--el-color-primary);
-}
-
-.tpl-vars-help__item span {
-  min-width: 0;
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-}
-
-.tpl-group {
-  margin-top: 14px;
-  padding: 14px 16px 16px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-}
-
-.tpl-group__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.tpl-group__title {
-  margin: 0 0 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.tpl-group__head .tpl-group__title {
-  margin: 0;
-}
-
-.tpl-group__sub {
-  margin-left: 8px;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--el-text-color-secondary);
-}
-
-.tpl-vars-trigger {
-  font-size: 16px;
-  color: var(--el-text-color-secondary);
-  cursor: pointer;
-}
-
-.tpl-vars-trigger:hover {
-  color: var(--el-color-primary);
-}
-
-.tpl-vars__title {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.tpl-vars__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0;
-  font-size: 12px;
-}
-
-.tpl-vars__row code {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--el-fill-color);
-  font-family: 'NSimSun', 'SimSun', monospace;
-  color: var(--el-color-primary);
-}
-
-.tpl-vars__row span {
-  color: var(--el-text-color-regular);
-}
-
+/* ── 基本信息网格 ── */
 .tpl-grid-basic {
   display: flex;
   flex-wrap: wrap;
@@ -1283,54 +715,9 @@ onMounted(async () => {
   width: 300px;
 }
 
-/* ── 段落行编辑器 ── */
-.section-list__empty,
+/* ── 明细列（列头文案 + 列宽输入 + 合计提示）── */
 .tpl-items :deep(.el-form-item) {
   margin-bottom: 0;
-}
-
-.section-list__empty {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.section-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 8px;
-  padding: 9px 10px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  background: var(--el-bg-color);
-}
-
-.section-row__main {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 118px minmax(200px, 1fr) 96px 106px 44px;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-
-.section-row--total .section-row__main {
-  grid-template-columns: minmax(220px, 1fr) 96px 106px 44px;
-}
-
-.section-row__ops {
-  display: flex;
-  flex-shrink: 0;
-}
-
-.section-row__ops .el-button {
-  margin: 0;
-  padding: 6px;
-}
-
-.section-add {
-  margin-top: 2px;
 }
 
 .tpl-items {
@@ -1345,7 +732,6 @@ onMounted(async () => {
   margin-bottom: 10px;
 }
 
-/* ── 列宽输入（与列头文案输入同列对齐）+ 合计提示 ── */
 .tpl-width-input {
   width: 100%;
 }
@@ -1363,67 +749,5 @@ onMounted(async () => {
 
 .tpl-items__widths-warn {
   margin-left: 6px;
-}
-
-/* ── image 段落：Logo 选择行（select + 缩略图 + 上传）── */
-.logo-picker {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.logo-picker__select {
-  flex: 1;
-  min-width: 0;
-}
-
-.logo-picker__thumb {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 4px;
-  background: #ffffff;
-}
-
-.logo-picker__hint {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-/* ── 实时预览（底部常驻，T12 ReceiptPreview 同源渲染） ── */
-.tpl-preview {
-  flex: 0 0 auto;
-  padding: 10px 20px 14px;
-  border-top: 1px solid var(--el-border-color-lighter);
-  background: var(--el-fill-color-darker);
-}
-
-.tpl-preview__head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 6px;
-}
-
-.tpl-preview__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.tpl-preview__hint {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.tpl-preview__stage {
-  display: flex;
-  justify-content: center;
-  max-height: 400px;
-  overflow: auto;
-  padding: 12px 0;
 }
 </style>
