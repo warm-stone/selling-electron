@@ -28,6 +28,21 @@ export const FS_HANZI_MODE = Buffer.from([0x1c, 0x26])
 export const FS_HANZI_MODE_OFF = Buffer.from([0x1c, 0x2e])
 
 /**
+ * `FS #`（1c 23）：进入 **UTF-8 汉字模式**（与 `FS &` 的 GB18030 汉字模式互斥的
+ * 另一种双字节解码声明）。出处：Zebra ZQ220/ZQ120 ESC/POS 编程指南把三条列在一起
+ * ——`FS &` Select Kanji Character Mode（GB18030）/ `FS #` Select Kanji character
+ * UTF8 mode / `FS .` Cancel Kanji character mode；部分「云打印」体系的克隆固件
+ * 只实现 UTF-8 那一路（云侧下发一律 UTF-8）。
+ *
+ * 为什么进探针：F1 四段只测了「汉字模式 OFF + UTF-8」（S2）与「汉字模式 ON
+ * (GB18030) + GBK」（S3）两格对角线，从未测「汉字模式 ON (UTF-8) + UTF-8」——
+ * 而这一格恰好能区分两种截然不同的修法：出真中文 = 有字库、只是主机侧用错了
+ * 汉字模式（生产链路改发本指令即可，无需光栅）；出一排空心方框 = 解码器正常但
+ * 字库缺字（无中文字库，中文只能走位图）。退出仍复用 FS_HANZI_MODE_OFF。
+ */
+export const FS_KANJI_UTF8_MODE = Buffer.from([0x1c, 0x23])
+
+/**
  * `GS ! 0x00`（倍宽/倍高放大归一）。按规范字节直发的原因：
  * 库的 setTextSize 把十进制数字当十六进制拼装（(1,1)→0x11 = 2×2），
  * 语义错误，不能用于尺寸控制。

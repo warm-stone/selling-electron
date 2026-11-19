@@ -226,7 +226,8 @@ function probeGuideHtml(): string {
     (v) => `<li style="margin-bottom:4px"><b>${v.when}</b> → ${v.then}</li>`
   ).join('')
   return (
-    '<div style="font-size:13px;line-height:1.6">' +
+    // 探针 v2 起判读表有 8 段：限高 + 滚动，避免弹框超出屏幕（ElMessageBox 不自带滚动）
+    '<div style="font-size:13px;line-height:1.6;max-height:60vh;overflow:auto">' +
     '<table style="border-collapse:collapse;width:100%"><thead><tr>' +
     `<th ${th}>段</th><th ${th}>发的字节</th><th ${th}>通过说明</th><th ${th}>失败说明</th>` +
     `</tr></thead><tbody>${rows}</tbody></table>` +
