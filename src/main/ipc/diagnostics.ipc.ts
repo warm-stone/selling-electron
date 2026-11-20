@@ -18,6 +18,9 @@ import { runRepairAction } from '../printing/diagnostics/repair.runner'
 import { runRenderCheck } from '../printing/diagnostics/render-check'
 import type { DiagnosticReport, RepairActionId } from '../../shared/printing/diagnostics-schema'
 import { typedHandle } from './typed-handle'
+// omo 核验 480ab65 残留 #1：诊断子系统自身失败也要落盘（排障工具失败不落盘反直觉）
+// ——与 printing.ipc 同模式，catch 分支 logError 含栈
+import { logError } from '../common/logger'
 import { generateReceiptHtml, RECEIPT_PRINT_GEOMETRY } from '../printing/driver/receipt-html'
 import { collectSectionLogoIds, parseTemplateRow } from '../printing/print.service'
 import type { SaleReceiptData } from '../../shared/receipt/item-columns'
@@ -360,6 +363,7 @@ export function registerDiagnosticsIpc(db: Database.Database, options: Diagnosti
       const report = await service.diagnose(printerName)
       return { ok: true, report }
     } catch (err) {
+      logError('printing:diagnose', err)
       return { ok: false, error: `诊断失败（printing:diagnose）：${errorDetail(err)}` }
     }
   })
@@ -371,6 +375,7 @@ export function registerDiagnosticsIpc(db: Database.Database, options: Diagnosti
       // outcome/verify 均在契约 res 内（旧版契约缺 outcome、靠消费方手写镜像，已修正）
       return { ok: true, outcome, verify }
     } catch (err) {
+      logError('printing:repair', err)
       return { ok: false, error: `修复失败（printing:repair）：${errorDetail(err)}` }
     }
   })
@@ -380,6 +385,7 @@ export function registerDiagnosticsIpc(db: Database.Database, options: Diagnosti
       const report = parseExportRequest(req)
       return await service.exportReport(report)
     } catch (err) {
+      logError('printing:diagnoseExport', err)
       return { ok: false, error: `导出失败（printing:diagnoseExport）：${errorDetail(err)}` }
     }
   })
