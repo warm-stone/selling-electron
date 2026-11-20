@@ -1,6 +1,7 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db/database'
+import { detectDbState, removeDbFiles } from './db/legacy-db'
 import { initLogger, logError, logWarn } from './common/logger'
 import { registerCustomersIpc } from './ipc/customers.ipc'
 import { registerDiagnosticsIpc } from './ipc/diagnostics.ipc'
@@ -53,6 +54,42 @@ app.on('render-process-gone', (_event, webContents, details) => {
 app.on('child-process-gone', (_event, details) => {
   logWarn('child-process-gone', `type=${details.type} reason=${details.reason}`)
 })
+
+/**
+ * 旧库清理确认（仅 LEGACY_DB_PROMPT_VERSION 版本生效——用户定案「仅本版本有效」）：
+ * 迁移合并后旧增量库不兼容，migrator 守卫会直接报错拒启动；本版本升级为
+ * 启动期确认弹窗引导用户删除旧数据以继续（或退出自行备份）。
+ * 版本号变更后本段自动失效（回落 migrator 报错防线），届时可整体移除。
+ *
+ * @returns true=继续启动；false=用户选择退出（调用方 app.exit）
+ */
+const LEGACY_DB_PROMPT_VERSION = '1.0.0-beta'
+
+function confirmLegacyDbCleanup(): boolean {
+  if (app.getVersion() !== LEGACY_DB_PROMPT_VERSION) return true
+  const dir = app.getPath('userData')
+  if (detectDbState(dir) !== 'legacy') return true
+
+  logWarn('legacy-db', `检测到不兼容旧库，弹窗询问是否删除（userData: ${dir}）`)
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning',
+    title: '检测到旧版本数据',
+    message: `检测到旧版本「销存系统」的数据库，与当前版本（${LEGACY_DB_PROMPT_VERSION}）不兼容。`,
+    detail:
+      '继续使用前需要删除旧数据：库中全部商品、进货与销售记录将被清空，且不可恢复。\n' +
+      '如需保留数据，请点击「退出」，并自行备份数据目录中的 pos.db（含 -wal / -shm 文件）。\n\n' +
+      '是否删除旧数据并继续？',
+    buttons: ['退出', '删除旧数据并继续'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  })
+  if (choice !== 1) return false
+
+  removeDbFiles(dir)
+  logWarn('legacy-db', '旧库已删除（含 -wal/-shm），将按初始化 schema 重建')
+  return true
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -115,6 +152,11 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
+    // 旧库确认（仅 1.0.0-beta 生效）：用户拒绝删除 → 直接退出，不触碰旧数据
+    if (!confirmLegacyDbCleanup()) {
+      app.exit(0)
+      return
+    }
     const db = initDatabase()
     registerProductsIpc(db)
     registerSalesIpc(db)
