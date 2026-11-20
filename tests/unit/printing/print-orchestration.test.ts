@@ -5,6 +5,7 @@ import {
   createPrintOrchestrator,
   parseTemplateRow,
   pngBufferToDataUrl,
+  PrintQueue,
   withVoidedMark,
   type PrintOrchestratorDeps
 } from '../../../src/main/printing/print.service'
@@ -528,5 +529,49 @@ describe('printSale driver 通道（HTML 即字节——云热敏机驱动渲染
 
     await expect(createPrintOrchestrator(deps).printSale(7)).rejects.toThrow(/已自动重试 1 次/)
     expect(send).toHaveBeenCalledTimes(2) // 首发 + 重试各一次（同一 HTML 字节）
+  })
+})
+
+// ─────────────────── P1-1：共享队列注入（printing.ipc 装配形态） ───────────────────
+
+describe('createPrintOrchestrator deps.queue（P1-1 共享队列注入）', () => {
+  it('printSale 经注入队列 enqueue，且显式传 per-job 通道（注入实例无默认通道也能打印）', async () => {
+    const { deps, sent } = makeDeps()
+    const sharedQueue = new PrintQueue() // 无默认通道——编排器必须显式传 settingsBoundChannel
+    const enqueueSpy = vi.spyOn(sharedQueue, 'enqueuePrintJob')
+    const orchestrator = createPrintOrchestrator({ ...deps, queue: sharedQueue })
+
+    await orchestrator.printSale(7)
+
+    expect(enqueueSpy).toHaveBeenCalledTimes(1)
+    expect(enqueueSpy.mock.calls[0]![1]).toBeDefined() // per-job 通道已传（否则无默认通道会 reject）
+    expect(sent).toHaveLength(1) // 字节仍命中按当前设置解析的通道
+    expect(orchestrator.isBusy()).toBe(false)
+  })
+
+  it('busy 门禁可见性：共享队列上直接入队的任务（testPrint/探针路径）→ orchestrator.isBusy() 为 true', async () => {
+    let releaseSend!: () => void
+    const gate = new Promise<void>((r) => {
+      releaseSend = r
+    })
+    const { deps } = makeDeps()
+    const sharedQueue = new PrintQueue({ name: 'spooler', send: () => gate })
+    const orchestrator = createPrintOrchestrator({ ...deps, queue: sharedQueue })
+
+    expect(orchestrator.isBusy()).toBe(false)
+    // 模拟 testPrint 的调用形态：不经编排器、直接向共享队列入队
+    const job = sharedQueue.enqueuePrintJob(new Uint8Array([0x1b]))
+    expect(orchestrator.isBusy()).toBe(true) // 诊断 busy 门禁据此挡 L1 修复/repair
+
+    releaseSend()
+    await job
+    await Promise.resolve()
+    expect(orchestrator.isBusy()).toBe(false)
+  })
+
+  it('不注入 queue 时编排器自建队列（既有装配/单测兼容，行为不变）', async () => {
+    const { deps, sent } = makeDeps()
+    await createPrintOrchestrator(deps).printSale(7)
+    expect(sent).toHaveLength(1)
   })
 })

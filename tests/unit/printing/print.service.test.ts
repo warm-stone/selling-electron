@@ -251,3 +251,75 @@ describe('PrintQueue.busy（在途计数——printer-diagnostics T9 busy 门禁
     expect(queue.busy).toBe(false)
   })
 })
+
+describe('PrintQueue per-job 通道（P1-1：共享队列 + 各 job 走自己的通道）', () => {
+  it('job A 挂起时 job B 不启动（串行）；A/B 字节各自命中自己的通道；busy 全程可见', async () => {
+    const gateA = createDeferred<void>()
+    const receivedA: string[] = []
+    const receivedB: string[] = []
+    const channelA: PrintChannel = {
+      name: 'spooler',
+      send: async (bytes) => {
+        receivedA.push(Buffer.from(bytes).toString('hex'))
+        await gateA.promise
+      }
+    }
+    const sendB = vi.fn(async (bytes: Uint8Array) => {
+      receivedB.push(Buffer.from(bytes).toString('hex'))
+    })
+    const channelB: PrintChannel = { name: 'tcp', send: sendB }
+
+    // 无默认通道的共享实例（printing.ipc 装配形态：所有调用点显式传 per-job 通道）
+    const queue = new PrintQueue()
+    const jobA = queue.enqueuePrintJob(new Uint8Array([0xaa]), channelA)
+    const jobB = queue.enqueuePrintJob(new Uint8Array([0xbb]), channelB)
+
+    await new Promise((r) => setTimeout(r, 20))
+    // A 在途未放行 → B 必须还没启动（串行证明）；busy 对在途任务可见
+    expect(receivedA).toEqual(['aa'])
+    expect(sendB).not.toHaveBeenCalled()
+    expect(queue.busy).toBe(true)
+
+    gateA.resolve()
+    await jobA
+    await jobB
+    // B 命中自己的通道而非 A 的（per-job 语义：testPrint 表单值不被共享队列冻结）
+    expect(receivedB).toEqual(['bb'])
+    expect(receivedA).toEqual(['aa'])
+    await Promise.resolve()
+    expect(queue.busy).toBe(false)
+  })
+
+  it('per-job 通道优先于构造默认通道；不传时回落默认（旧签名兼容）', async () => {
+    const sendDefault = vi.fn(async () => {})
+    const sendPerJob = vi.fn(async () => {})
+    const queue = new PrintQueue({ name: 'spooler', send: sendDefault })
+
+    await queue.enqueuePrintJob(new Uint8Array([0x01]), { name: 'tcp', send: sendPerJob })
+    expect(sendPerJob).toHaveBeenCalledTimes(1)
+    expect(sendDefault).not.toHaveBeenCalled()
+
+    await queue.enqueuePrintJob(new Uint8Array([0x02]))
+    expect(sendDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('per-job 通道上的重试语义不变：失败后同一通道重发 1 次', async () => {
+    const send = vi.fn(async () => {
+      throw new Error('probe timeout')
+    })
+    const queue = new PrintQueue()
+    await expect(
+      queue.enqueuePrintJob(new Uint8Array([0x1b]), { name: 'tcp', send })
+    ).rejects.toThrow(/已自动重试 1 次.*probe timeout/s)
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('默认与 per-job 通道均缺失 → 可诊断 reject（不同步抛、不挂起、busy 不回零假象）', async () => {
+    const queue = new PrintQueue()
+    await expect(queue.enqueuePrintJob(new Uint8Array([0x01]))).rejects.toThrow(
+      /未配置打印通道/
+    )
+    await Promise.resolve()
+    expect(queue.busy).toBe(false) // reject 发生在计数之前，队列可继续使用
+  })
+})

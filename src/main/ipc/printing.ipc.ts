@@ -188,6 +188,12 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
   const logoRepo = createLogoRepo(db)
   const currentSettings = (): AppSettings => rowsToAppSettings(settingsRepo.getAll())
 
+  // ── P1-1：全进程唯一串行打印队列 ──
+  // 结账打印（orchestrator 注入）与 testPrint/rawProbe（per-job 通道传入）
+  // 共用一个队列：不与真实打印并发写同一台机；诊断 busy 门禁（isBusy 转发）
+  // 可见全部在途任务。无默认通道——所有调用点显式传 per-job 通道。
+  const printQueue = new PrintQueue()
+
   /** 生产 readLogoById：logo repo 查行 → 读 userData/logos/<filename>（行/文件缺失 → null） */
   const readLogoById = async (logoId: number): Promise<Buffer | null> => {
     const row = logoRepo.getById(logoId)
@@ -210,7 +216,11 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
     },
     getDefaultTemplate: () => templateRepo.getDefault(),
     getSettings: currentSettings,
-    readLogoById
+    readLogoById,
+    // P1-1：注入共享队列（下方 printQueue）——结账打印与 testPrint/rawProbe
+    // 同队串行不并发写打印机，orchestrator.isBusy（接线给诊断 busy 门禁）
+    // 由此可见在途测试打印/探针任务
+    queue: printQueue
   })
 
   typedHandle(ipcMain, 'printing:printers', async () => {
@@ -238,7 +248,7 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
         settings.printer_channel === 'driver'
           ? await buildTestPrintHtml(testDeps)
           : await buildTestPrintBytes(testDeps)
-      await new PrintQueue(channel).enqueuePrintJob(bytes)
+      await printQueue.enqueuePrintJob(bytes, channel)
       return { ok: true }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -263,7 +273,7 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
     try {
       const channel = getChannel(settings)
       const template = parseTemplateRow(templateRepo.getDefault())
-      await new PrintQueue(channel).enqueuePrintJob(buildRawProbeBytes(template.paperWidth))
+      await printQueue.enqueuePrintJob(buildRawProbeBytes(template.paperWidth), channel)
       return { ok: true }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)

@@ -75,26 +75,37 @@ export function getChannel(settings: PrintSettings): PrintChannel {
 /**
  * 打印任务串行队列（连续结账不交叠）：
  *  - Promise 链保证 job 严格按入队顺序执行，前一个 settle 后一个才开始；
- *  - 失败自动重试 1 次（同一字节重发）；
+ *  - 失败自动重试 1 次（同一字节、同一通道重发）；
  *  - 二次失败：向调用方 reject（UI 引导重打，销售已落库不受影响——G3），队列继续；
  *  - busy 只读查询（printer-diagnostics T9 busy 门禁的数据源）：入队即 true，
  *    job 定局（成功/失败）后一个微任务回 false——诊断据此挡 L1 修复/repair。
+ *
+ * P1-1（共享队列 + per-job 通道）：全进程只装配一个实例（printing.ipc），
+ * 结账打印与测试打印/编码探针同队串行、busy 门禁可见全部在途任务。
+ * 通道解析 per-job 优先：enqueuePrintJob(bytes, channel) 的显式通道 >
+ * 构造默认通道——测试打印/探针传 renderer 表单值（可能未保存）现场构造的
+ * 通道，结账打印走编排器的 settingsBoundChannel（send 时惰性解析 DB 设置）。
  */
 export class PrintQueue {
   private queueTail: Promise<unknown> = Promise.resolve()
   /** 在途任务计数（busy 的数据源；吞链两个回调各递减一次，成败同权） */
   private activeJobs = 0
 
-  constructor(private readonly channel: PrintChannel) {}
+  constructor(private readonly channel?: PrintChannel) {}
 
   /** 是否有打印任务在途（连续结账的串行窗口内持续 true） */
   get busy(): boolean {
     return this.activeJobs > 0
   }
 
-  enqueuePrintJob(bytes: Uint8Array): Promise<void> {
+  enqueuePrintJob(bytes: Uint8Array, channel?: PrintChannel): Promise<void> {
+    const target = channel ?? this.channel
+    if (!target) {
+      // 装配错误（构造默认与 per-job 均未提供通道）：可诊断 reject，不静默
+      return Promise.reject(new Error('PrintQueue 未配置打印通道（per-job 与默认通道均缺失）'))
+    }
     this.activeJobs += 1
-    const run = this.queueTail.then(() => this.sendWithRetry(bytes))
+    const run = this.queueTail.then(() => this.sendWithRetry(bytes, target))
     // ★ 队尾吞掉失败：确保后续 job 不被前序 rejection 阻断（死锁防线）；
     //   失败本身仍通过返回的 run 交给调用方。busy 计数挂在吞链的两个回调上
     //   （注册先于任何调用方 await）——run 定局后第一个微任务即递减，无论成败。
@@ -109,12 +120,12 @@ export class PrintQueue {
     return run
   }
 
-  private async sendWithRetry(bytes: Uint8Array): Promise<void> {
+  private async sendWithRetry(bytes: Uint8Array, channel: PrintChannel): Promise<void> {
     try {
-      await this.channel.send(bytes)
+      await channel.send(bytes)
     } catch {
       try {
-        await this.channel.send(bytes)
+        await channel.send(bytes)
       } catch (secondError) {
         const detail = secondError instanceof Error ? secondError.message : String(secondError)
         throw new Error(`打印任务失败（已自动重试 1 次）：${detail}`)
@@ -137,6 +148,12 @@ export interface PrintOrchestratorDeps {
   readLogoById(logoId: number): Promise<Buffer | null>
   /** 通道工厂：缺省 getChannel；测试注入 mock 通道捕获字节 */
   createChannel?(settings: PrintSettings): PrintChannel
+  /**
+   * 共享串行队列（P1-1）：printing.ipc 装配唯一实例注入——结账打印与
+   * testPrint/rawProbe 同队串行，诊断 busy 门禁可见全部在途任务。
+   * 缺省编排器自建（既有单测/独立使用不受影响）。
+   */
+  queue?: PrintQueue
 }
 
 /**
@@ -234,9 +251,10 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
     send: (bytes: Uint8Array): Promise<void> => resolveChannel().send(bytes)
   }
 
-  // 串行队列：编排器实例级单例——生产装配一次（printing.ipc），连续结账的
-  // 打印任务经同一队列严格串行不交叠（计划 MUST NOT：打印不得并行）。
-  const queue = new PrintQueue(settingsBoundChannel)
+  // 串行队列：优先用注入的共享实例（P1-1：printing.ipc 装配唯一一份，
+  // testPrint/rawProbe 同队）；缺省自建保持既有单测/独立使用兼容。
+  // 无论哪种，printSale 均显式传 settingsBoundChannel（注入实例无默认通道）。
+  const queue = deps.queue ?? new PrintQueue(settingsBoundChannel)
 
   /**
    * 组装打印载荷（G7 唯一数据源）：sale 明细 → 默认模板 → settings →
@@ -325,7 +343,7 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
           logoBuffers: payload.logoBuffers
         })
     // G3：入队失败向上抛（ipc 层转 { ok:false, error }），已落库销售不受影响
-    await queue.enqueuePrintJob(bytes)
+    await queue.enqueuePrintJob(bytes, settingsBoundChannel)
   }
 
   // isBusy：队列 busy 的转发（printer-diagnostics T9 busy 门禁消费——registerPrintingIpc
