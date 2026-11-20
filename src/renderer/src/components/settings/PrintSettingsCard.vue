@@ -16,6 +16,12 @@ import {
  * 卡片自治（SettingsView 拆分）：自持表单态与打印机列表，挂载时并行
  * settings:get / printing:printers；保存/测试打印/探针的 IPC 与 toast 本组件闭环。
  * 探针判读表 HTML 内联样式（ElMessageBox 内容在 scoped CSS 之外）。
+ *
+ * 取舍定案（不引共享 settings store）：与 ShopInfoCard 同页各 settings:get 一次
+ * （双加载）。保存键集零重叠——本卡只写 printer_channel/printer_name/tcp_host/
+ * tcp_port/com_port/auto_cut/driver_*，ShopInfoCard 只写 shop_name/shop_phone/
+ * receipt_note（SettingsPatch 为 Partial，互不覆盖），双加载无一致性风险；
+ * 换 store 的收益不抵自治卡片闭环被打破的成本（omo 评估取证，用户裁决）。
  */
 
 interface PrinterEntry {

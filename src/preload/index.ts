@@ -19,6 +19,15 @@ const api: PosApi = {
   /**
    * 底层类型化 IPC 入口（G8）：renderer 侧经 shared/types/ipc.ts 的
    * createTypedInvoke 包装后按 IpcChannels 契约调用，通道名不散落裸字符串。
+   *
+   * 已接受风险（P3，本批不收窄——omo 评估 + 用户裁决）：本入口对 preload
+   * 暴露面是 string 通道（类型约束在 renderer 侧 wrapper）。不做运行时通道
+   * 白名单的理由是成本收益：renderer 不加载远程内容 + contextIsolation +
+   * nodeIntegration:false 已闭合主要威胁面，收窄需改 5 个 createTypedInvoke
+   * 调用点，属纵深防御而非补缺口。
+   * ★ 触发重估条件：一旦未来任何页面开始加载远程内容（http 页面/远程组件），
+   *   立即改为按 typedHandle 运行时注册集（typed-handle.getRegisteredChannels）
+   *   做通道白名单校验。
    */
   invoke: (channel, payload) => ipcRenderer.invoke(channel, payload),
 

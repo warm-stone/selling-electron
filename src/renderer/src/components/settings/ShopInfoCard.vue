@@ -10,6 +10,10 @@ import type { AppSettings } from '../../../../shared/types'
  * 挂载时 settings:get 回显、保存走 settings:set、toast 本组件闭环。
  * 卡片骨架样式（settings-card/card-head/card-foot/form-grid/settings-form）
  * 在 assets/settings-cards.css，由 SettingsView 全局加载。
+ *
+ * 取舍定案（不引共享 settings store）：与 PrintSettingsCard 双加载共存——
+ * 两卡保存键集零重叠（本卡只写 shop_name/shop_phone/receipt_note），
+ * 互不覆盖；详见 PrintSettingsCard 头注释。
  */
 
 const loading = ref(true)

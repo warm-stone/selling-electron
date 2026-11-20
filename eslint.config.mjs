@@ -183,7 +183,12 @@ export default defineConfigWithVueTs(
     // 存量白名单（递减型——只准降不准升）：TemplateEditorView 批次 4 已拆出
     // 变量说明区/三组段落行编辑器/实时预览面板（1429 → 753 总行 / 723 有效行），
     // 余量为模板列表侧栏 + draft 工厂/CRUD 编排 + 明细列组；再拆「明细列」组
-    // 即回 650 以内（后续批次移除本条目）
+    // 即回 650 以内（后续批次移除本条目）。
+    //
+    // 「递减型」再拆候选登记（N-3：本轮拆分产物已逼近 650 上限的 74-83%，
+    // 尚未越线、暂不加白名单——越线即必须先拆再进）：
+    //   DiagnosisDialog 537（83%）/ PrintSettingsCard 488（75%）/
+    //   ReportsView 480（74%）/ PurchaseCreateDialog 479（74%）
     name: 'selling-electron/max-lines-whitelist',
     files: ['src/renderer/src/views/TemplateEditorView.vue'],
     rules: {
