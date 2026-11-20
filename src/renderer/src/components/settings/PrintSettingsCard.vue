@@ -438,6 +438,9 @@ function probeGuideHtml(): string {
 /* ── 通道单选卡（四选一带描述）── */
 .channel-group {
   display: flex;
+  /* 覆盖 el-radio-group 默认 align-items:center——否则描述文字折行数不同的
+     选项按内容高度居中排列，卡片高矮不一（如「驱动渲染」单行描述矮一截） */
+  align-items: stretch;
   gap: 10px;
   width: 100%;
 }
