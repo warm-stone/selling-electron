@@ -24,6 +24,9 @@ import { PurchaseServiceError } from '../../common/errors'
  *   （partial unique index 允许）；已售 SN 拒绝并提示原销售单号。
  * - getDetail：只读 purchase_items 快照列，**不 join products**（G4 快照不可变）。
  * - list：头表 + 行两段查询组装（品种数 = items.length）。
+ * - voidOrder：整单作废单事务（守卫先全扫后执行——PURCHASE_SN_SOLD 拒绝态
+ *   零残留；SN 台账按 purchase_item_id 定位防误回滚他单重新入库的同名 SN；
+ *   冲减流水 source='purchase_void'；软删商品照冲减、批量计可为负——D2）。
  *
  * 领地规则：本文件是入库事务 owner，product_sns 的读写 SQL 直接写在这里
  * （不 import product.repo 方法——事务所有者直写自己的 SQL 的库惯例）。
@@ -51,9 +54,22 @@ interface SnLedgerRow {
   sale_no: string | null
 }
 
-const SELECT_ORDER_COLS = 'id, order_no, note, created_at'
+const SELECT_ORDER_COLS = 'id, order_no, note, status, voided_at, void_reason, created_at'
 const SELECT_ITEM_COLS =
   'id, order_id, product_id, product_name, barcode, quantity, cost_price_cents, sn'
+
+/** voidOrder 执行期的商品库存原始行（含软删商品——进货作废不跳过，照冲减） */
+interface RawStockRow {
+  id: number
+  stock: number
+}
+
+/** 按来源行定位的 SN 台账 active 行（守卫/回滚共用；已售行带销售单号供文案） */
+interface SnByPurchaseItemRow {
+  id: number
+  status: 'in_stock' | 'sold'
+  sale_no: string | null
+}
 
 export function createPurchaseRepo(db: Database.Database) {
   // ── 预编译语句 ──
@@ -109,6 +125,42 @@ export function createPurchaseRepo(db: Database.Database) {
     `SELECT ${SELECT_ITEM_COLS} FROM purchase_items WHERE order_id = ? ORDER BY id`
   )
   const stmtGetOrder = db.prepare(`SELECT ${SELECT_ORDER_COLS} FROM purchase_orders WHERE id = ?`)
+
+  // ── 整单作废（voidOrder）──
+  // SN 台账按来源行（purchase_item_id）定位，不按 SN 字符串查：SN 被 deleteSn
+  // 软删后可能在别的进货单重新入库（新台账行归属新单），按串查会误回滚他单 SN。
+  const stmtFindSnByPurchaseItem = db.prepare(
+    `SELECT ps.id, ps.status, s.sale_no
+       FROM product_sns ps
+       LEFT JOIN sale_items si ON si.id = ps.sale_item_id
+       LEFT JOIN sales s ON s.id = si.sale_id
+      WHERE ps.purchase_item_id = ? AND ps.deleted = 0`
+  )
+  const stmtSoftDeleteSnByVoid = db.prepare(
+    `UPDATE product_sns
+        SET deleted = 1, updated_at = datetime('now', 'localtime')
+      WHERE id = ?`
+  )
+  // 库存读取含软删商品（deleted 不过滤——进货作废对软删商品照冲减，
+  // 保证与 source='purchase' 入库流水一一对应；与 voidSale 跳过策略的
+  // 不一致为既存可商榷点，不在本次范围）
+  const stmtGetRawStock = db.prepare('SELECT id, stock FROM products WHERE id = ?')
+  const stmtSetStock = db.prepare(
+    `UPDATE products
+        SET stock = ?, updated_at = datetime('now', 'localtime')
+      WHERE id = ?`
+  )
+  const stmtInsertVoidMovement = db.prepare(
+    `INSERT INTO stock_movements (product_id, change_qty, before_stock, after_stock, source, source_id)
+     VALUES (?, ?, ?, ?, 'purchase_void', ?)`
+  )
+  const stmtMarkOrderVoided = db.prepare(
+    `UPDATE purchase_orders
+        SET status = 'voided',
+            voided_at = datetime('now', 'localtime'),
+            void_reason = ?
+      WHERE id = ?`
+  )
 
   function getItems(orderId: number): PurchaseItem[] {
     return stmtGetItemsByOrder.all(orderId) as unknown as PurchaseItem[]
@@ -229,6 +281,79 @@ export function createPurchaseRepo(db: Database.Database) {
     }
   )
 
+  /**
+   * 整单作废（单事务，参照 sale.repo voidSale 先例——D3 哲学：不物理删除行）。
+   *
+   * 守卫顺序（拒绝态全部先于任何写入，失败零残留）：
+   * 1. 单不存在 → PURCHASE_NOT_FOUND；已作废 → PURCHASE_ALREADY_VOIDED。
+   * 2. SN 先全扫（按 purchase_item_id 定位 active 台账行）：任一已售 →
+   *    PURCHASE_SN_SOLD（文案含 SN 与原销售单号，引导先作废销售单）。
+   *
+   * 执行（逐行冲减，change_qty 为负 → movements source='purchase_void'）：
+   * - SN 行：active 且在库 → 台账软删 + stock-1；已被 deleteSn 软删 →
+   *   跳过（stock 已扣过，防双重冲减）；商品已软删时台账已级联软删 → 同样跳过。
+   * - 批量计行：product_id NULL 断链行跳过；否则 stock -= quantity，
+   *   允许冲成负值（D2 定案：已售部分不阻止作废，UI 负库存标红）。
+   * - 软删商品不跳过（照冲减，入库/冲减流水成对，审计链自洽）。
+   */
+  const voidOrderTx = db.transaction(
+    (orderId: number, reason: string): PurchaseOrderWithItems => {
+    const order = stmtGetOrder.get(orderId) as unknown as PurchaseOrder | undefined
+    if (!order) {
+      throw new PurchaseServiceError('PURCHASE_NOT_FOUND', `进货单不存在（id=${orderId}）`)
+    }
+    if (order.status === 'voided') {
+      throw new PurchaseServiceError('PURCHASE_ALREADY_VOIDED', '该进货单已作废')
+    }
+
+    const items = getItems(orderId)
+
+    // 守卫先全扫：任一 SN 行存在 active 且已售的台账行 → 拒绝整单（零残留）
+    for (const item of items) {
+      if (item.sn == null) continue
+      const ledger = stmtFindSnByPurchaseItem.get(item.id) as SnByPurchaseItemRow | undefined
+      if (ledger && ledger.status === 'sold') {
+        throw new PurchaseServiceError(
+          'PURCHASE_SN_SOLD',
+          `SN ${item.sn} 已售出（销售单 ${ledger.sale_no ?? '未知'}），请先作废对应销售单`
+        )
+      }
+    }
+
+    // 逐行冲减
+    for (const item of items) {
+      if (item.sn != null) {
+        const ledger = stmtFindSnByPurchaseItem.get(item.id) as SnByPurchaseItemRow | undefined
+        // 无 active 行 = 已被 deleteSn / 商品软删级联清除 → 跳过（stock 已处理或不可达）
+        if (!ledger || ledger.status !== 'in_stock') continue
+        if (item.product_id == null) continue
+        const product = stmtGetRawStock.get(item.product_id) as RawStockRow | undefined
+        if (!product) continue
+        stmtSoftDeleteSnByVoid.run(ledger.id)
+        const afterStock = product.stock - 1
+        stmtSetStock.run(afterStock, product.id)
+        stmtInsertVoidMovement.run(product.id, -1, product.stock, afterStock, orderId)
+      } else {
+        if (item.product_id == null) continue
+        const product = stmtGetRawStock.get(item.product_id) as RawStockRow | undefined
+        if (!product) continue
+        const afterStock = product.stock - item.quantity
+        stmtSetStock.run(afterStock, product.id)
+        stmtInsertVoidMovement.run(
+          product.id,
+          -item.quantity,
+          product.stock,
+          afterStock,
+          orderId
+        )
+      }
+    }
+
+    stmtMarkOrderVoided.run(reason, orderId)
+    const voided = stmtGetOrder.get(orderId) as unknown as PurchaseOrder
+    return attachItems(voided)
+  })
+
   return {
     /**
      * 创建进货单（单事务）。items 已通过 service 结构校验与归一化（SN 已 trim、
@@ -255,6 +380,15 @@ export function createPurchaseRepo(db: Database.Database) {
     getDetail(id: number): PurchaseOrderWithItems | undefined {
       const order = stmtGetOrder.get(id) as unknown as PurchaseOrder | undefined
       return order ? attachItems(order) : undefined
+    },
+
+    /**
+     * 整单作废（单事务；reason 已由 service 校验非空）。守卫拒绝态全部先于
+     * 写入（PURCHASE_NOT_FOUND / PURCHASE_ALREADY_VOIDED / PURCHASE_SN_SOLD），
+     * 失败零残留；成功返回作废后完整单据（含 status/voided_at/void_reason）。
+     */
+    voidOrder(orderId: number, reason: string): PurchaseOrderWithItems {
+      return voidOrderTx(orderId, reason)
     }
   }
 }

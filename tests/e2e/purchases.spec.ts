@@ -272,4 +272,85 @@ test.describe.serial('Task 9：进货入库全链路', () => {
     ).toBeVisible()
     await page.screenshot({ path: '.omo/evidence/task-9-purchase-e2e.png', fullPage: true })
   })
+
+  test('整单作废：原因必填 → 状态已作废 + 库存冲减 + purchase_void 流水 + 明细留档', async () => {
+    const { page } = app
+    // 上一用例遗留的明细弹窗先关闭
+    const leftover = page.locator('.el-dialog').filter({ hasText: '进货明细' })
+    if (await leftover.isVisible()) {
+      await leftover.locator('.el-dialog__close').click()
+      await expect(leftover).toBeHidden()
+    }
+
+    const row = page
+      .locator('.purchases-view__table .el-table__row')
+      .filter({ hasText: `${localYmd()}-0001` })
+    await expect(row.getByTestId('order-status-voided')).toHaveCount(0) // 作废前状态为「正常」
+    await row.getByTestId('void-purchase').click()
+
+    const box = page.locator('.el-message-box')
+    await expect(box).toContainText('确定作废进货单')
+    await expect(box).toContainText('库存可冲成负值')
+    // 原因必填：空原因被 inputValidator 拦截
+    await box.getByRole('button', { name: '作废' }).click()
+    await expect(box).toContainText('作废原因不能为空')
+    await box.locator('textarea').fill('E2E：录错整单作废')
+    await box.getByRole('button', { name: '作废' }).click()
+
+    await expect(
+      page.locator('.el-message--success').filter({ hasText: '已作废' }).first()
+    ).toBeVisible()
+    await expect(row.getByTestId('order-status-voided')).toHaveText('已作废')
+    await expect(row).toHaveClass(/order-voided/)
+    await expect(row.getByTestId('void-purchase')).toHaveCount(0) // 已作废单不再提供作废入口
+
+    // 明细弹窗：作废时间 + 原因留档展示
+    await row.getByRole('button', { name: '查看明细' }).click()
+    const detail = page.locator('.el-dialog').filter({ hasText: '进货明细' })
+    await expect(detail.getByTestId('detail-voided-info')).toContainText('本单已作废')
+    await expect(detail.getByTestId('detail-voided-info')).toContainText('E2E：录错整单作废')
+    await detail.locator('.el-dialog__close').click()
+
+    // DB 权威：头表留档 + 库存冲减归零 + purchase_void 流水 2 条 + 明细行不物理删除
+    const db = new Database(app.dbPath)
+    try {
+      const order = db
+        .prepare(
+          'SELECT id, status, void_reason, voided_at FROM purchase_orders WHERE order_no = ?'
+        )
+        .get(`${localYmd()}-0001`) as {
+        id: number
+        status: string
+        void_reason: string | null
+        voided_at: string | null
+      }
+      expect(order.status).toBe('voided')
+      expect(order.void_reason).toBe('E2E：录错整单作废')
+      expect(order.voided_at).not.toBeNull()
+
+      const stocks = db
+        .prepare('SELECT id, stock FROM products ORDER BY id')
+        .all() as Array<{ id: number; stock: number }>
+      expect(stocks).toEqual([
+        { id: colaId, stock: 0 }, // 10-10
+        { id: spriteId, stock: 0 } // 5-5
+      ])
+
+      const voidMv = db
+        .prepare(
+          `SELECT product_id, change_qty, source, source_id FROM stock_movements
+            WHERE source = 'purchase_void' ORDER BY id`
+        )
+        .all() as Array<{ product_id: number; change_qty: number; source: string; source_id: number }>
+      expect(voidMv).toEqual([
+        { product_id: colaId, change_qty: -10, source: 'purchase_void', source_id: order.id },
+        { product_id: spriteId, change_qty: -5, source: 'purchase_void', source_id: order.id }
+      ])
+
+      const itemCount = db.prepare('SELECT COUNT(*) AS n FROM purchase_items').get() as { n: number }
+      expect(itemCount.n).toBe(2) // 作废不物理删除行（D3 哲学）
+    } finally {
+      db.close()
+    }
+  })
 })

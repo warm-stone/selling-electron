@@ -34,5 +34,11 @@ export function registerProductsIpc(db: Database.Database): void {
     productService.listSns(req.product_id, req.include_sold)
   )
 
-  typedHandle(ipcMain, 'products:deleteSn', (req) => productService.deleteSn(req.sn_id))
+  typedHandle(ipcMain, 'products:deleteSn', (req) =>
+    productService.deleteSn(req.sn_id, req.reason)
+  )
+
+  typedHandle(ipcMain, 'products:listChangeLogs', (req) =>
+    productService.listChangeLogs(req.product_id, req.limit)
+  )
 }

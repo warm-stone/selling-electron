@@ -116,7 +116,7 @@ export interface CheckoutItem {
 // ══════════════ 客户与订单附加信息 ══════════════
 
 /**
- * 客户（customers 表——005 迁移，7 列一一对应）。
+ * 客户（customers 表，7 列一一对应）。
  * phone NOT NULL UNIQUE：散客空串占位只可插一行（二插 UNIQUE 报错，repo 侧防）。
  */
 export interface Customer {
@@ -194,12 +194,20 @@ export interface SaleListItem extends Sale {
 
 // ══════════════ 进货 ══════════════
 
+/** 进货单状态（purchase_orders.status；作废不物理删除行——同销售 D3 哲学） */
+export type PurchaseStatus = 'completed' | 'voided'
+
 /** 进货单头（purchase_orders 表） */
 export interface PurchaseOrder {
   id: number
   /** yyyyMMdd-NNNN（D18，与销售独立日序列） */
   order_no: string
   note: string | null
+  status: PurchaseStatus
+  /** 作废时间（status='voided' 时非空） */
+  voided_at: string | null
+  /** 作废原因（作废时必填落库） */
+  void_reason: string | null
   created_at: string
 }
 
@@ -244,10 +252,57 @@ export interface ProductSn {
   created_at: string
 }
 
+// ══════════════ 商品改动记录 ══════════════
+
+/**
+ * 改动动作（product_change_logs.action CHECK 约束）：
+ * - 'update' 编辑保存（名称/售价/SN 前缀，批量计可含库存联动——单事务一条记录）
+ * - 'stock' 独立手动调库（products:updateStock 通道）
+ * - 'delete' 删除商品（软删）
+ * - 'sn_delete' 删除在库 SN（stock-1 联动）
+ */
+export type ProductChangeAction = 'update' | 'stock' | 'delete' | 'sn_delete'
+
+/**
+ * 单字段变更明细（changes_json 数组元素）：old/new 保留原始类型
+ * （金额=整数分、null 保留 null、字符串原样）；元浮点只在 UI 边界转换（G1）。
+ * field='sn' 仅 sn_delete 动作（old=被删 SN，new=null）。
+ */
+export interface ProductChangeEntry {
+  field: 'name' | 'default_price_cents' | 'sn_prefix' | 'stock' | 'sn'
+  old: string | number | null
+  new: string | number | null
+}
+
+/**
+ * 商品改动记录（product_change_logs 表 DTO）：一次保存一条（用户定案），
+ * changes 由 main 侧解析 changes_json 产出（renderer 不碰 JSON 字符串；
+ * 脏 JSON 防御性回落空数组）。软删商品行仍在，FK 有效、历史可查。
+ */
+export interface ProductChangeLog {
+  id: number
+  product_id: number
+  action: ProductChangeAction
+  /** 改动原因（必填非空——service 层校验） */
+  reason: string
+  /** 逐字段旧→新明细（delete 动作为空数组） */
+  changes: ProductChangeEntry[]
+  created_at: string
+}
+
 // ══════════════ 库存流水 ══════════════
 
-/** 流水来源（stock_movements.source CHECK 约束） */
-export type StockMovementSource = 'sale' | 'purchase' | 'manual' | 'void'
+/**
+ * 流水来源（stock_movements.source CHECK 约束）：
+ * sale_void=销售作废回滚 / purchase_void=进货作废冲减（source_id 各指
+ * sale_id / purchase order_id，来源类型自包含、无需 JOIN 推断）
+ */
+export type StockMovementSource =
+  | 'sale'
+  | 'purchase'
+  | 'manual'
+  | 'sale_void'
+  | 'purchase_void'
 
 /** 库存流水（stock_movements 表；审计链全覆盖——G5） */
 export interface StockMovement {

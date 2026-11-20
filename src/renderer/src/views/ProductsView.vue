@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue'
+import { Delete, Document, Edit, Plus, Search } from '@element-plus/icons-vue'
 import ProductFormDialog from '@renderer/components/products/ProductFormDialog.vue'
+import ProductChangeLogDialog from '@renderer/components/products/ProductChangeLogDialog.vue'
 import SnLedgerPanel from '@renderer/components/products/SnLedgerPanel.vue'
 import type { ProductRow, ProductSn } from '../../../shared/types'
 import { extractIpcErrorMessage } from '@renderer/utils/ipc-error'
 
 /**
- * 商品管理页（Task 8 + SN Wave 3C）：搜索（防抖 300ms）+ 列表（负库存标红 D2 +
- * 前端分页 20/页）+ 删除（软删——004 迁移：willOrphan 引用提示 + 在库 SN 守卫
- * D-SN15，历史单据/审计链完整保留）+ 展开行 SN 台账编排。
+ * 商品管理页（Task 8 + SN Wave 3C + 改动记录）：搜索（防抖 300ms）+ 列表
+ * （负库存标红 D2 + 前端分页 20/页）+ 删除（软删：willOrphan 引用提示 +
+ * 在库 SN 守卫 D-SN15；原因必填落改动记录）+ 改动记录弹窗 + 展开行 SN 台账编排。
  *
  * 拆分（巨型视图治理批次 2）：
  * - 新增/编辑弹窗 → components/products/ProductFormDialog.vue（自治：表单态 +
- *   元分转换 + create/update/updateStock IPC 闭环，saved 后本页刷新）
+ *   元分转换 + 原因必填 + update 单次调用闭环，saved 后本页刷新）
+ * - 改动记录弹窗 → components/products/ProductChangeLogDialog.vue（自治取数）
  * - 展开行台账面板 → components/products/SnLedgerPanel.vue（受控展示：数据/
  *   筛选态缓存留本页 snLedgers——toggle 状态跨列表刷新保留的原设计不变）
  *
@@ -33,6 +35,15 @@ const page = ref(1)
 const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const editingRow = ref<ProductRow | null>(null)
+
+// ── 改动记录弹窗编排（取数与展示在 ProductChangeLogDialog 内闭环）──
+const logDialogVisible = ref(false)
+const logRow = ref<ProductRow | null>(null)
+
+function openChangeLogs(row: ProductRow): void {
+  logRow.value = row
+  logDialogVisible.value = true
+}
 
 const total = computed(() => rows.value.length)
 const pagedRows = computed(() =>
@@ -94,7 +105,7 @@ function openEdit(row: ProductRow): void {
   dialogVisible.value = true
 }
 
-// ── 删除（软删：行保留、历史单据/审计链完整；弹窗明示引用数与不可恢复）──
+// ── 删除（软删：行保留、历史单据/审计链完整；prompt 明示引用数 + 原因必填落改动记录）──
 
 function deleteMessage(row: ProductRow): ReturnType<typeof h> {
   return h('div', { class: 'delete-confirm' }, [
@@ -110,20 +121,32 @@ function deleteMessage(row: ProductRow): ReturnType<typeof h> {
   ])
 }
 
+/** 原因必填输入校验（ElMessageBox.prompt inputValidator；service 层 assertValidReason 兜底） */
+function reasonValidator(value: string | undefined): true | string {
+  return typeof value === 'string' && value.trim().length > 0 ? true : '改动原因不能为空'
+}
+
+const REASON_PROMPT_OPTIONS = {
+  inputType: 'textarea' as const,
+  inputPlaceholder: '改动原因（必填，将记入改动记录）',
+  inputValidator: reasonValidator,
+  inputErrorMessage: '改动原因不能为空'
+}
+
 async function handleDelete(row: ProductRow): Promise<void> {
-  const confirmed = await ElMessageBox.confirm(deleteMessage(row), '删除商品', {
+  const result = await ElMessageBox.prompt(deleteMessage(row), '删除商品', {
     type: 'warning',
     confirmButtonText: '删除',
     cancelButtonText: '取消',
     confirmButtonClass: 'el-button--danger',
-    autofocus: false
-  })
-    .then(() => true)
-    .catch(() => false)
-  if (!confirmed) return
+    autofocus: false,
+    ...REASON_PROMPT_OPTIONS
+  }).catch(() => null)
+  if (result === null) return
+  const reason = (result.value ?? '').trim()
 
   try {
-    await window.api.products.delete(row.id)
+    await window.api.products.delete(row.id, reason)
     ElMessage.success('商品已删除')
     if (pagedRows.value.length === 0 && page.value > 1) page.value -= 1
     await load()
@@ -204,25 +227,25 @@ function onLedgerFilterChange(row: ProductRow, includeSold: boolean): void {
   void fetchLedger(row)
 }
 
-/** 删在库 SN：确认弹窗明示后果 → deleteSn（主进程事务：逻辑删 + stock-1 + manual 流水） */
+/** 删在库 SN：prompt 明示后果 + 原因必填 → deleteSn（主进程事务：逻辑删 + stock-1 + manual 流水 + 改动记录） */
 async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
-  const confirmed = await ElMessageBox.confirm(
-    `确定删除 SN「${sn.sn}」吗？该商品库存将减 1，并记录一条手动库存流水。`,
+  const result = await ElMessageBox.prompt(
+    `确定删除 SN「${sn.sn}」吗？该商品库存将减 1，并记录一条手动库存流水与改动记录。`,
     '删除 SN',
     {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
       confirmButtonClass: 'el-button--danger',
-      autofocus: false
+      autofocus: false,
+      ...REASON_PROMPT_OPTIONS
     }
-  )
-    .then(() => true)
-    .catch(() => false)
-  if (!confirmed) return
+  ).catch(() => null)
+  if (result === null) return
+  const reason = (result.value ?? '').trim()
 
   try {
-    await window.api.products.deleteSn(sn.id)
+    await window.api.products.deleteSn(sn.id, reason)
     ElMessage.success('SN 已删除')
     // 刷新台账 + 外层列表（stock -1；row-key 使展开态在数据替换后保留）
     await Promise.all([fetchLedger(row), load()])
@@ -342,7 +365,7 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
       </el-table-column>
       <el-table-column
         label="操作"
-        width="150"
+        width="220"
         align="center"
         fixed="right"
       >
@@ -354,6 +377,15 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
             @click="openEdit(row)"
           >
             编辑
+          </el-button>
+          <el-button
+            text
+            type="info"
+            :icon="Document"
+            data-testid="open-change-logs"
+            @click="openChangeLogs(row)"
+          >
+            记录
           </el-button>
           <el-button
             text
@@ -389,6 +421,11 @@ async function handleDeleteSn(row: ProductRow, sn: ProductSn): Promise<void> {
       :mode="dialogMode"
       :row="editingRow"
       @saved="load"
+    />
+
+    <ProductChangeLogDialog
+      v-model:visible="logDialogVisible"
+      :row="logRow"
     />
   </section>
 </template>

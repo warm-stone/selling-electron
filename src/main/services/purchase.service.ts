@@ -23,6 +23,11 @@ export interface PurchaseService {
   list(dateFrom?: string, dateTo?: string): PurchaseOrderWithItems[]
   /** 单张明细；不存在抛错 */
   getDetail(id: number): PurchaseOrderWithItems
+  /**
+   * 整单作废（reason 必填；单事务冲减库存可为负 D2 + SN 台账回滚 +
+   * movements 'purchase_void'；存在已售 SN 拒绝整单——先作废对应销售单）。
+   */
+  voidPurchase(orderId: number, reason: string): PurchaseOrderWithItems
 }
 
 // P1-2 分层修复：错误类下沉 common/errors（repo → common ← service，打断运行时环；
@@ -34,6 +39,14 @@ function normalizeNote(note: string | null | undefined): string | null {
   if (note === undefined || note === null) return null
   const trimmed = String(note).trim()
   return trimmed === '' ? null : trimmed
+}
+
+/** 作废原因：trim 后非空（必填——用户定案；事务前快速失败） */
+function assertValidVoidReason(reason: unknown): string {
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    throw new PurchaseServiceError('INVALID_REASON', '作废原因不能为空')
+  }
+  return reason.trim()
 }
 
 /** SN 长度上限（结构校验；台账/明细列均为 TEXT，此处防超长脏数据） */
@@ -153,6 +166,14 @@ export function createPurchaseService(db: Database.Database, repo?: PurchaseRepo
         throw new PurchaseServiceError('PURCHASE_NOT_FOUND', `进货单不存在（id=${id}）`)
       }
       return detail
+    },
+
+    voidPurchase(orderId: number, reason: string): PurchaseOrderWithItems {
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        throw new PurchaseServiceError('PURCHASE_NOT_FOUND', `进货单不存在（id=${orderId}）`)
+      }
+      const trimmedReason = assertValidVoidReason(reason)
+      return repository.voidOrder(orderId, trimmedReason)
     }
   }
 }

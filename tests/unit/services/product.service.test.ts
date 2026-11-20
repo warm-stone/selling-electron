@@ -6,7 +6,7 @@
  *   参数校验（name 非空、stock 整数、price 整数分 ≥0、barcode 空串归一为 null）
  * - updateStock：before/after 快照流水（验收原文 5→3 → {change_qty:-2, before:5, after:3, source:'manual'}）
  * - update / delete：存在性校验、willOrphan（sale_items + purchase_items 关联计数）
- * - delete（软删——004 迁移）：行保留 deleted=1 + barcode 置 NULL（UNIQUE 占位释放）、
+ * - delete（软删）：行保留 deleted=1 + barcode 置 NULL（UNIQUE 占位释放）、
  *   单据行 product_id 不断链（FK 持续有效）、stock_movements 审计链保留、
  *   product_sns 级联软删、删除后商品对全部读路径不可见、条码/SN 前缀可复用
  * - list：名称 LIKE 子串 / 条码前缀 / LIKE 通配符转义
@@ -343,7 +343,7 @@ describe('productService.update', () => {
       id: created.id,
       name: '新名',
       default_price_cents: 500
-    })
+    , reason: '测试原因' })
 
     expect(updated.name).toBe('新名')
     expect(updated.default_price_cents).toBe(500)
@@ -358,17 +358,17 @@ describe('productService.update', () => {
       stock: 0,
       tracking: 'quantity'
     })
-    expect(service.update({ id: created.id, name: 'X', default_price_cents: null }).default_price_cents).toBeNull()
+    expect(service.update({ id: created.id, name: 'X', default_price_cents: null , reason: '测试原因' }).default_price_cents).toBeNull()
   })
 
   it('name 为空抛 INVALID_NAME；price 非法抛 INVALID_PRICE', () => {
     const created = service.create({ barcode: null, name: 'X', default_price_cents: null, stock: 0, tracking: 'quantity' })
-    expectServiceError(() => service.update({ id: created.id, name: ' ', default_price_cents: null }), 'INVALID_NAME')
-    expectServiceError(() => service.update({ id: created.id, name: 'X', default_price_cents: -5 }), 'INVALID_PRICE')
+    expectServiceError(() => service.update({ id: created.id, name: ' ', default_price_cents: null , reason: '测试原因' }), 'INVALID_NAME')
+    expectServiceError(() => service.update({ id: created.id, name: 'X', default_price_cents: -5 , reason: '测试原因' }), 'INVALID_PRICE')
   })
 
   it('不存在的 id 抛 PRODUCT_NOT_FOUND', () => {
-    expectServiceError(() => service.update({ id: 999, name: 'X', default_price_cents: null }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.update({ id: 999, name: 'X', default_price_cents: null , reason: '测试原因' }), 'PRODUCT_NOT_FOUND')
   })
 })
 
@@ -378,7 +378,7 @@ describe('productService.updateStock', () => {
   it('验收原文：5→3 后流水 {change_qty:-2, before:5, after:3, source:manual}', () => {
     const created = service.create({ barcode: null, name: 'X', default_price_cents: null, stock: 5, tracking: 'quantity' })
 
-    const updated = service.updateStock({ id: created.id, stock: 3 })
+    const updated = service.updateStock({ id: created.id, stock: 3 , reason: '测试原因' })
 
     expect(updated.stock).toBe(3)
     const movements = movementsOf(created.id)
@@ -395,7 +395,7 @@ describe('productService.updateStock', () => {
 
   it('调为负库存允许（D2）：3→-5 流水 {change_qty:-8, before:3, after:-5}', () => {
     const created = service.create({ barcode: null, name: 'X', default_price_cents: null, stock: 3, tracking: 'quantity' })
-    const updated = service.updateStock({ id: created.id, stock: -5 })
+    const updated = service.updateStock({ id: created.id, stock: -5 , reason: '测试原因' })
     expect(updated.stock).toBe(-5)
     expect(movementsOf(created.id).at(-1)).toMatchObject({
       change_qty: -8,
@@ -407,7 +407,7 @@ describe('productService.updateStock', () => {
 
   it('同值调整也记录流水（change_qty=0，留审计痕迹）', () => {
     const created = service.create({ barcode: null, name: 'X', default_price_cents: null, stock: 5, tracking: 'quantity' })
-    service.updateStock({ id: created.id, stock: 5 })
+    service.updateStock({ id: created.id, stock: 5 , reason: '测试原因' })
     expect(movementsOf(created.id).at(-1)).toMatchObject({
       change_qty: 0,
       before_stock: 5,
@@ -417,15 +417,15 @@ describe('productService.updateStock', () => {
 
   it('非整数库存抛 INVALID_STOCK（允许负值但必须整数——D2/D4）', () => {
     const created = service.create({ barcode: null, name: 'X', default_price_cents: null, stock: 5, tracking: 'quantity' })
-    expectServiceError(() => service.updateStock({ id: created.id, stock: 4.2 }), 'INVALID_STOCK')
+    expectServiceError(() => service.updateStock({ id: created.id, stock: 4.2 , reason: '测试原因' }), 'INVALID_STOCK')
     expectServiceError(
-      () => service.updateStock({ id: created.id, stock: NaN }),
+      () => service.updateStock({ id: created.id, stock: NaN , reason: '测试原因' }),
       'INVALID_STOCK'
     )
   })
 
   it('不存在的 id 抛 PRODUCT_NOT_FOUND', () => {
-    expectServiceError(() => service.updateStock({ id: 999, stock: 1 }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.updateStock({ id: 999, stock: 1 , reason: '测试原因' }), 'PRODUCT_NOT_FOUND')
   })
 
   it('调整库存不影响名称/售价/条码', () => {
@@ -436,7 +436,7 @@ describe('productService.updateStock', () => {
       stock: 5,
       tracking: 'quantity'
     })
-    const updated = service.updateStock({ id: created.id, stock: 9 })
+    const updated = service.updateStock({ id: created.id, stock: 9 , reason: '测试原因' })
     expect(updated.name).toBe('X')
     expect(updated.barcode).toBe('6901234567890')
     expect(updated.default_price_cents).toBe(100)
@@ -445,10 +445,10 @@ describe('productService.updateStock', () => {
 
 // ══════════════ delete ══════════════
 
-describe('productService.delete（软删——004 迁移）', () => {
+describe('productService.delete（软删）', () => {
   it('无引用商品删除：willOrphan=0，行保留且 deleted=1、barcode 置 NULL', () => {
     const created = service.create({ barcode: '6901234567890', name: 'X', default_price_cents: null, stock: 5, tracking: 'quantity' })
-    const result = service.delete({ id: created.id })
+    const result = service.delete({ id: created.id , reason: '测试原因' })
 
     expect(result).toEqual({ ok: true, willOrphan: 0 })
     // 软删：行保留（不物理删除），deleted=1；barcode 置 NULL 释放 UNIQUE 占位
@@ -465,7 +465,7 @@ describe('productService.delete（软删——004 迁移）', () => {
     insertSaleItemRef(created.id, '可乐')
     insertPurchaseItemRef(created.id, '可乐')
 
-    const result = service.delete({ id: created.id })
+    const result = service.delete({ id: created.id , reason: '测试原因' })
 
     expect(result).toEqual({ ok: true, willOrphan: 3 })
     // 商品软删：行保留 deleted=1 + barcode NULL
@@ -492,27 +492,27 @@ describe('productService.delete（软删——004 迁移）', () => {
   })
 
   it('不存在的 id 抛 PRODUCT_NOT_FOUND', () => {
-    expectServiceError(() => service.delete({ id: 999 }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.delete({ id: 999 , reason: '测试原因' }), 'PRODUCT_NOT_FOUND')
   })
 
   it('删除后商品不可见：list/搜索/条码查/id 查均无结果；update/updateStock 抛 PRODUCT_NOT_FOUND', () => {
     const created = service.create({ barcode: '6901234567890', name: '可口可乐 330ml', default_price_cents: 350, stock: 10, tracking: 'quantity' })
-    service.delete({ id: created.id })
+    service.delete({ id: created.id , reason: '测试原因' })
 
     expect(service.list()).toHaveLength(0)
     expect(service.list('可口可乐')).toHaveLength(0)
     expect(service.list('6901234567890')).toHaveLength(0)
     // requireProduct 守卫路径（getById 过滤 deleted=0）
-    expectServiceError(() => service.update({ id: created.id, name: '改名', default_price_cents: null }), 'PRODUCT_NOT_FOUND')
-    expectServiceError(() => service.updateStock({ id: created.id, stock: 3 }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.update({ id: created.id, name: '改名', default_price_cents: null , reason: '测试原因' }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.updateStock({ id: created.id, stock: 3 , reason: '测试原因' }), 'PRODUCT_NOT_FOUND')
     expectServiceError(() => service.listSns(created.id, false), 'PRODUCT_NOT_FOUND')
     // 重复删除同样 PRODUCT_NOT_FOUND（软删行对读不可见）
-    expectServiceError(() => service.delete({ id: created.id }), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.delete({ id: created.id , reason: '测试原因' }), 'PRODUCT_NOT_FOUND')
   })
 
   it('条码占位释放：软删后同条码可再建新商品', () => {
     const first = service.create({ barcode: '6901234567890', name: '老可乐', default_price_cents: 350, stock: 0, tracking: 'quantity' })
-    service.delete({ id: first.id })
+    service.delete({ id: first.id , reason: '测试原因' })
 
     // 同条码再建成功（软删行 barcode 已置 NULL，不占用 UNIQUE 槽位）
     const second = service.create({ barcode: '6901234567890', name: '新可乐', default_price_cents: 400, stock: 1, tracking: 'quantity' })
@@ -524,7 +524,7 @@ describe('productService.delete（软删——004 迁移）', () => {
 
   it('SN 前缀占位释放：软删商品的前缀不再冲突，同前缀新商品可建', () => {
     const first = service.create({ barcode: null, name: '老手机', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'SNP' })
-    service.delete({ id: first.id })
+    service.delete({ id: first.id , reason: '测试原因' })
 
     // 软删商品前缀已释放（listSnPrefixes 过滤 deleted=0）
     const second = service.create({ barcode: null, name: '新手机', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'SNP' })
@@ -725,7 +725,7 @@ describe('productService（SN 前缀互斥——D-SN14）', () => {
     })
     const updated = service.update({
       id: created.id, name: 'A 改名', default_price_cents: 100, sn_prefix: 'SN1'
-    })
+    , reason: '测试原因' })
     expect(updated.sn_prefix).toBe('SN1')
     expect(updated.name).toBe('A 改名')
   })
@@ -738,7 +738,7 @@ describe('productService（SN 前缀互斥——D-SN14）', () => {
       barcode: null, name: 'B', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'SN2'
     })
     expectServiceError(
-      () => service.update({ id: b.id, name: 'B', default_price_cents: null, sn_prefix: 'SN12' }),
+      () => service.update({ id: b.id, name: 'B', default_price_cents: null, sn_prefix: 'SN12' , reason: '测试原因' }),
       'PRODUCT_SN_PREFIX_CONFLICT',
       'SN 前缀与商品「A」的前缀冲突（SN1 / SN12）'
     )
@@ -751,13 +751,13 @@ describe('productService（SN 前缀互斥——D-SN14）', () => {
     const created = service.create({
       barcode: null, name: 'A', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'SN1'
     })
-    const kept = service.update({ id: created.id, name: 'A', default_price_cents: null })
+    const kept = service.update({ id: created.id, name: 'A', default_price_cents: null , reason: '测试原因' })
     expect(kept.sn_prefix).toBe('SN1')
 
-    const cleared = service.update({ id: created.id, name: 'A', default_price_cents: null, sn_prefix: '' })
+    const cleared = service.update({ id: created.id, name: 'A', default_price_cents: null, sn_prefix: '' , reason: '测试原因' })
     expect(cleared.sn_prefix).toBe('')
 
-    const changed = service.update({ id: created.id, name: 'A', default_price_cents: null, sn_prefix: 'ZZ9' })
+    const changed = service.update({ id: created.id, name: 'A', default_price_cents: null, sn_prefix: 'ZZ9' , reason: '测试原因' })
     expect(changed.sn_prefix).toBe('ZZ9')
     expect(rawProduct(created.id)['sn_prefix']).toBe('ZZ9')
   })
@@ -768,7 +768,7 @@ describe('productService（SN 前缀互斥——D-SN14）', () => {
     })
     const updated = service.update({
       id: created.id, name: '可乐', default_price_cents: 300, sn_prefix: 'NOPE'
-    })
+    , reason: '测试原因' })
     expect(updated.sn_prefix).toBe('')
     expect(rawProduct(created.id)['sn_prefix']).toBe('')
   })
@@ -782,7 +782,7 @@ describe('productService.updateStock（SN 守卫——D-SN11）', () => {
       barcode: null, name: '手机', default_price_cents: null, stock: 0, tracking: 'sn'
     })
     expectServiceError(
-      () => service.updateStock({ id: created.id, stock: 5 }),
+      () => service.updateStock({ id: created.id, stock: 5 , reason: '测试原因' }),
       'PRODUCT_SN_NO_MANUAL_STOCK',
       'SN 商品不支持手动调整库存，请通过 SN 增删管理'
     )
@@ -793,7 +793,7 @@ describe('productService.updateStock（SN 守卫——D-SN11）', () => {
     const created = service.create({
       barcode: null, name: '可乐', default_price_cents: null, stock: 5, tracking: 'quantity'
     })
-    expect(service.updateStock({ id: created.id, stock: 3 }).stock).toBe(3)
+    expect(service.updateStock({ id: created.id, stock: 3 , reason: '测试原因' }).stock).toBe(3)
   })
 })
 
@@ -807,7 +807,7 @@ describe('productService.delete（SN 守卫——D-SN15）', () => {
     seedSns(created.id, ['SN-A', 'SN-B'])
 
     expectServiceError(
-      () => service.delete({ id: created.id }),
+      () => service.delete({ id: created.id , reason: '测试原因' }),
       'PRODUCT_SN_HAS_STOCK',
       '该 SN 商品仍有 2 个在库 SN，请先删除在库 SN'
     )
@@ -820,7 +820,7 @@ describe('productService.delete（SN 守卫——D-SN15）', () => {
     })
     const { snId, saleNo } = insertSoldSn(created.id, '手机', 'SN-SOLD')
 
-    const result = service.delete({ id: created.id })
+    const result = service.delete({ id: created.id , reason: '测试原因' })
 
     expect(result).toEqual({ ok: true, willOrphan: 1 })
     // 商品软删：行保留 deleted=1
@@ -845,7 +845,7 @@ describe('productService.delete（SN 守卫——D-SN15）', () => {
     const created = service.create({
       barcode: null, name: '空台账', default_price_cents: null, stock: 0, tracking: 'sn'
     })
-    expect(service.delete({ id: created.id }).ok).toBe(true)
+    expect(service.delete({ id: created.id , reason: '测试原因' }).ok).toBe(true)
     expect(rawProduct(created.id)!['deleted']).toBe(1)
   })
 })
@@ -967,7 +967,7 @@ describe('productService.deleteSn', () => {
   it('删在库 SN：逻辑删除 + stock-1 + 流水 {source=manual, change_qty=-1, before/after}', () => {
     const [snId] = seedSns(productId, ['SN-A', 'SN-B'])
 
-    const result = service.deleteSn(snId)
+    const result = service.deleteSn(snId, '测试原因')
 
     expect(result).toEqual({ ok: true })
     // 逻辑删除（deleted=1，updated_at 刷新）
@@ -991,7 +991,7 @@ describe('productService.deleteSn', () => {
 
   it('删后同 SN 可重新入库（partial unique index 仅约束未删除行——D-SN4）', () => {
     const [snId] = seedSns(productId, ['SN-A'])
-    service.deleteSn(snId)
+    service.deleteSn(snId, '测试原因')
 
     const reinsert = db
       .prepare('INSERT INTO product_sns (product_id, sn) VALUES (?, ?)')
@@ -1003,7 +1003,7 @@ describe('productService.deleteSn', () => {
   it('已售 SN 拒绝删除（PRODUCT_SN_NOT_DELETABLE）', () => {
     const { snId } = insertSoldSn(productId, '手机', 'SN-SOLD')
     expectServiceError(
-      () => service.deleteSn(snId),
+      () => service.deleteSn(snId, '测试原因'),
       'PRODUCT_SN_NOT_DELETABLE',
       '该 SN 已售出或已删除，不可删除'
     )
@@ -1013,19 +1013,208 @@ describe('productService.deleteSn', () => {
 
   it('已删 SN / 不存在 id 拒绝删除', () => {
     const [snId] = seedSns(productId, ['SN-A'])
-    service.deleteSn(snId)
-    expectServiceError(() => service.deleteSn(snId), 'PRODUCT_SN_NOT_DELETABLE')
-    expectServiceError(() => service.deleteSn(99999), 'PRODUCT_SN_NOT_DELETABLE')
+    service.deleteSn(snId, '测试原因')
+    expectServiceError(() => service.deleteSn(snId, '测试原因'), 'PRODUCT_SN_NOT_DELETABLE')
+    expectServiceError(() => service.deleteSn(99999, '测试原因'), 'PRODUCT_SN_NOT_DELETABLE')
   })
 
   it('连续删除保持一致性（D-SN13）：2→1→0，每次后 stock === 在库计数', () => {
     const [idA, idB] = seedSns(productId, ['SN-A', 'SN-B'])
-    service.deleteSn(idA)
+    service.deleteSn(idA, '测试原因')
     expect(rawProduct(productId)!['stock']).toBe(1)
     expectStockConsistent(productId)
-    service.deleteSn(idB)
+    service.deleteSn(idB, '测试原因')
     expect(rawProduct(productId)!['stock']).toBe(0)
     expectStockConsistent(productId)
     expect(service.listSns(productId, true)).toHaveLength(0)
+  })
+})
+
+// ══════════════ 改动记录（product_change_logs——全部改动必填原因，一次保存一条）══════════════
+
+describe('productService：改动记录（product_change_logs）', () => {
+  function rawLogRows(productId: number): Array<{ id: number; action: string; reason: string; changes_json: string }> {
+    return db
+      .prepare('SELECT id, action, reason, changes_json FROM product_change_logs WHERE product_id = ? ORDER BY id')
+      .all(productId) as Array<{ id: number; action: string; reason: string; changes_json: string }>
+  }
+
+  function createQuantity(stock = 5): ReturnType<typeof service.create> {
+    return service.create({ barcode: null, name: '可乐', default_price_cents: 350, stock, tracking: 'quantity' })
+  }
+
+  it('update 改名+改价 → 一条日志 action=update，逐字段旧→新 + 原因落库', () => {
+    const created = createQuantity()
+
+    service.update({ id: created.id, name: '雪碧', default_price_cents: 400, reason: ' 信息录错修正 ' })
+
+    const logs = service.listChangeLogs(created.id)
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({
+      product_id: created.id,
+      action: 'update',
+      reason: '信息录错修正' // trim 归一
+    })
+    expect(logs[0]!.changes).toEqual([
+      { field: 'name', old: '可乐', new: '雪碧' },
+      { field: 'default_price_cents', old: 350, new: 400 }
+    ])
+    expect(logs[0]!.created_at).toBeTruthy()
+  })
+
+  it('一次保存一条记录（定案）：字段 + 库存同事务合并为单条日志，stock 旧→新在明细内', () => {
+    const created = createQuantity(5)
+
+    service.update({ id: created.id, name: '芬达', default_price_cents: 350, stock: 8, reason: '盘点后修正' })
+
+    const logs = service.listChangeLogs(created.id)
+    expect(logs).toHaveLength(1) // 不是 update + stock 两条
+    expect(logs[0]!.action).toBe('update')
+    expect(logs[0]!.changes).toEqual([
+      { field: 'name', old: '可乐', new: '芬达' },
+      { field: 'stock', old: 5, new: 8 }
+    ])
+    // 库存联动流水照写（source='manual'——G5）
+    expect(movementsOf(created.id).at(-1)).toMatchObject({
+      change_qty: 3,
+      before_stock: 5,
+      after_stock: 8,
+      source: 'manual'
+    })
+    expect(rawProduct(created.id)!['stock']).toBe(8)
+  })
+
+  it('仅改库存（字段未变）→ 单条日志仅 stock entry，不产生字段噪音', () => {
+    const created = createQuantity(5)
+
+    service.update({ id: created.id, name: '可乐', default_price_cents: 350, stock: 2, reason: '盘亏' })
+
+    const logs = service.listChangeLogs(created.id)
+    expect(logs).toHaveLength(1)
+    expect(logs[0]!.changes).toEqual([{ field: 'stock', old: 5, new: 2 }])
+  })
+
+  it('无任何变更的保存 → 不写日志、不写流水（审计降噪），正常返回商品', () => {
+    const created = createQuantity(5)
+
+    const result = service.update({ id: created.id, name: '可乐', default_price_cents: 350, stock: 5, reason: '误点保存' })
+
+    expect(result.id).toBe(created.id)
+    expect(rawLogRows(created.id)).toHaveLength(0)
+    expect(movementsOf(created.id)).toHaveLength(1) // 仅建档初始库存流水
+  })
+
+  it('reason 空白/缺失 → INVALID_REASON 且零写入（update/updateStock/delete/deleteSn 四通道）', () => {
+    const created = createQuantity(5)
+    const sn = service.create({ barcode: null, name: '手机', default_price_cents: null, stock: 0, tracking: 'sn' })
+    const [snId] = seedSns(sn.id, ['SN-R'])
+
+    expectServiceError(
+      () => service.update({ id: created.id, name: '改名', default_price_cents: null, reason: '   ' }),
+      'INVALID_REASON',
+      '改动原因不能为空'
+    )
+    expectServiceError(
+      () => service.updateStock({ id: created.id, stock: 9, reason: '' }),
+      'INVALID_REASON'
+    )
+    expectServiceError(() => service.delete({ id: created.id, reason: '' }), 'INVALID_REASON')
+    expectServiceError(() => service.deleteSn(snId, '  '), 'INVALID_REASON')
+
+    expect(rawLogRows(created.id)).toHaveLength(0)
+    expect(rawLogRows(sn.id)).toHaveLength(0)
+    expect(rawProduct(created.id)!['name']).toBe('可乐')
+    expect(rawProduct(created.id)!['stock']).toBe(5)
+  })
+
+  it('SN 商品 update 携带 stock → 静默忽略（D-SN11）：库存不动、日志无 stock entry、无流水', () => {
+    const sn = service.create({ barcode: null, name: '手机', default_price_cents: null, stock: 0, tracking: 'sn', sn_prefix: 'PH' })
+    seedSns(sn.id, ['SN-X'])
+    expect(rawProduct(sn.id)!['stock']).toBe(1)
+
+    service.update({ id: sn.id, name: '手机 Pro', default_price_cents: null, stock: 99, reason: '改名，stock 应被忽略' })
+
+    expect(rawProduct(sn.id)!['stock']).toBe(1) // 未被改成 99
+    const logs = service.listChangeLogs(sn.id)
+    expect(logs).toHaveLength(1)
+    expect(logs[0]!.changes).toEqual([{ field: 'name', old: '手机', new: '手机 Pro' }])
+    expect(movementsOf(sn.id)).toHaveLength(0) // 无 manual 流水
+  })
+
+  it('updateStock 独立通道 → action=stock 日志（由几改为几）+ manual 流水；同值也记录（既有定案对齐）', () => {
+    const created = createQuantity(5)
+
+    service.updateStock({ id: created.id, stock: 3, reason: '盘点差异' })
+    service.updateStock({ id: created.id, stock: 3, reason: '复核确认' })
+
+    const logs = service.listChangeLogs(created.id)
+    expect(logs).toHaveLength(2)
+    expect(logs[0]!.action).toBe('stock') // 最新在前
+    expect(logs[0]!.changes).toEqual([{ field: 'stock', old: 3, new: 3 }])
+    expect(logs[1]!.changes).toEqual([{ field: 'stock', old: 5, new: 3 }])
+    expect(movementsOf(created.id)).toHaveLength(3) // 建档 + 2 次调整（含 change_qty=0）
+  })
+
+  it('delete → action=delete 日志 changes=[]；软删后记录仍可查（审计链完整）', () => {
+    const created = createQuantity()
+
+    service.delete({ id: created.id, reason: '商品停售' })
+
+    const logs = service.listChangeLogs(created.id) // 软删商品不抛错、记录可查
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({ action: 'delete', reason: '商品停售', changes: [] })
+  })
+
+  it('deleteSn → action=sn_delete 日志：SN 值 + stock 旧→新', () => {
+    const sn = service.create({ barcode: null, name: '手机', default_price_cents: null, stock: 0, tracking: 'sn' })
+    const [snId] = seedSns(sn.id, ['SN-DEL'])
+
+    service.deleteSn(snId, 'SN 录入错误')
+
+    const logs = service.listChangeLogs(sn.id)
+    expect(logs).toHaveLength(1)
+    expect(logs[0]!.action).toBe('sn_delete')
+    expect(logs[0]!.changes).toEqual([
+      { field: 'sn', old: 'SN-DEL', new: null },
+      { field: 'stock', old: 1, new: 0 }
+    ])
+  })
+
+  it('listChangeLogs：最新在前、limit 生效（仅最近 N 条）、非法 product_id 抛 PRODUCT_NOT_FOUND', () => {
+    const created = createQuantity(0)
+    service.updateStock({ id: created.id, stock: 1, reason: '第一次' })
+    service.updateStock({ id: created.id, stock: 2, reason: '第二次' })
+    service.updateStock({ id: created.id, stock: 3, reason: '第三次' })
+
+    const all = service.listChangeLogs(created.id)
+    expect(all.map((l) => l.reason)).toEqual(['第三次', '第二次', '第一次'])
+
+    const limited = service.listChangeLogs(created.id, 2)
+    expect(limited.map((l) => l.reason)).toEqual(['第三次', '第二次'])
+
+    expectServiceError(() => service.listChangeLogs(0), 'PRODUCT_NOT_FOUND')
+    expectServiceError(() => service.listChangeLogs(1.5), 'PRODUCT_NOT_FOUND')
+  })
+
+  it('listChangeLogs limit 钳制：0/负数/非整数 → 默认 100；>500 → 500（P2 补测）', () => {
+    const created = createQuantity(0)
+    // 直插 501 条日志（绕过 service，仅测 normalizeLogLimit 钳制边界）
+    const insert = db.prepare(
+      "INSERT INTO product_change_logs (product_id, action, reason, changes_json) VALUES (?, 'stock', '批量', '[]')"
+    )
+    db.transaction(() => {
+      for (let i = 0; i < 501; i++) insert.run(created.id)
+    })()
+
+    expect(service.listChangeLogs(created.id, 0)).toHaveLength(100)
+    expect(service.listChangeLogs(created.id, -5)).toHaveLength(100)
+    expect(service.listChangeLogs(created.id, 1.5)).toHaveLength(100)
+    expect(service.listChangeLogs(created.id, 9999)).toHaveLength(500)
+    expect(service.listChangeLogs(created.id)).toHaveLength(100) // 缺省即 100
+  })
+
+  it('建档（create）不写改动记录（定案：建档非改动、无旧值）', () => {
+    const created = createQuantity()
+    expect(rawLogRows(created.id)).toHaveLength(0)
   })
 })

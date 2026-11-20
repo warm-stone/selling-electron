@@ -39,7 +39,7 @@ function localDateStr(): string {
   ].join('-')
 }
 
-describe('customer.repo：客户 DAL（customers 表，005 迁移）', () => {
+describe('customer.repo：客户 DAL（customers 表）', () => {
   it('insert + findByPhone 精确命中：回读完整行、id 一致', () => {
     const repo = createCustomerRepo(freshDb())
     const created = repo.insert({

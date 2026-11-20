@@ -6,7 +6,7 @@
  *   自成原子；被 service 层大事务包裹时 better-sqlite3 自动降级为 SAVEPOINT。
  * - `updateStock`：UPDATE products + INSERT stock_movements（before/after 快照，
  *   source 由调用方指定——G5 审计链）。
- * - `delete`：商品逻辑删除（软删——004 迁移）。软删行保留 → sale_items /
+ * - `delete`：商品逻辑删除（软删）。软删行保留 → sale_items /
  *   purchase_items 的 product_id FK 全部持续有效（历史单据可完整追溯），
  *   stock_movements 审计链原样保留；product_sns 级联软删（D-SN15 原始意图
  *   就地实现——行存续、deleted=1）；barcode 置 NULL 释放表级 UNIQUE 占位
@@ -14,11 +14,17 @@
  * - 全部读方法仅见 deleted=0 行（软删商品对应用不可见）；SN 台账读方法
  *   （findSnActive/listSns）亦仅 deleted=0（D-SN3/4 逻辑删除语义），已售行经
  *   sale_item_id LEFT JOIN sales 补 sale_id/sale_no（提示原单号用——D-SN17）。
+ * - 改动记录（product_change_logs）：insertChangeLog 单条 INSERT（被 service
+ *   事务包裹保证与业务改动同生共死）；listChangeLogs 解析 changes_json 为
+ *   结构化 DTO（脏 JSON 防御性回落空数组——审计列表不因单条炸全表）。
  */
 
 import type Database from 'better-sqlite3'
 import type {
   Product,
+  ProductChangeAction,
+  ProductChangeEntry,
+  ProductChangeLog,
   ProductRow,
   ProductSn,
   ProductTracking,
@@ -81,6 +87,16 @@ const WILL_ORPHAN_EXPR =
 /** LIKE 通配符按字面匹配（用户输入 % _ \ 不做模糊语义） */
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+}
+
+/** changes_json 防御性解析：非法 JSON / 非数组 → 空数组（DDL CHECK+service 写入保证正常路径合法） */
+function parseChangeEntries(json: string): ProductChangeEntry[] {
+  try {
+    const parsed: unknown = JSON.parse(json)
+    return Array.isArray(parsed) ? (parsed as ProductChangeEntry[]) : []
+  } catch {
+    return []
+  }
 }
 
 export function createProductRepo(db: Database.Database) {
@@ -193,6 +209,19 @@ export function createProductRepo(db: Database.Database) {
      ORDER BY id`
   )
 
+  // ── 商品改动记录（product_change_logs）──
+  const insertChangeLogStmt = db.prepare(
+    `INSERT INTO product_change_logs (product_id, action, reason, changes_json)
+      VALUES (?, ?, ?, ?)`
+  )
+  const listChangeLogsStmt = db.prepare(
+    `SELECT id, product_id, action, reason, changes_json, created_at
+       FROM product_change_logs
+      WHERE product_id = ?
+      ORDER BY id DESC
+      LIMIT ?`
+  )
+
   function rowById(id: number): Product | undefined {
     return getByIdStmt.get(id) as Product | undefined
   }
@@ -276,7 +305,7 @@ export function createProductRepo(db: Database.Database) {
     },
 
     /**
-     * 逻辑删除商品（软删——004 迁移）。事务：软删商品行（barcode 置 NULL 释放
+     * 逻辑删除商品（软删）。事务：软删商品行（barcode 置 NULL 释放
      * UNIQUE 占位）→ 级联软删 SN 台账（active 行全部 deleted=1，行存续）。
      * 历史单据（sale_items/purchase_items）的 product_id FK 保持有效——
      * 快照行可完整追溯；stock_movements 审计链原样保留（不删任何行）。
@@ -337,6 +366,44 @@ export function createProductRepo(db: Database.Database) {
           ? listSnPrefixesStmt.all()
           : listSnPrefixesExcludingStmt.all(excludeProductId)
       ) as ProductPrefixRow[]
+    },
+
+    // ── 商品改动记录（审计层：一次保存一条，changes 序列化落 changes_json）──
+
+    /**
+     * 写入改动记录（单条 INSERT，无自有事务——必须被 service 层业务事务包裹，
+     * 与字段更新/库存流水同生共死）。
+     */
+    insertChangeLog(
+      productId: number,
+      action: ProductChangeAction,
+      reason: string,
+      changes: readonly ProductChangeEntry[]
+    ): void {
+      insertChangeLogStmt.run(productId, action, reason, JSON.stringify(changes))
+    },
+
+    /**
+     * 改动记录列表（最新在前，仅最近 limit 条——定案不翻页）。
+     * 软删商品的记录仍可查（product_id FK 有效，不走 deleted=0 过滤）。
+     */
+    listChangeLogs(productId: number, limit: number): ProductChangeLog[] {
+      const rows = listChangeLogsStmt.all(productId, limit) as Array<{
+        id: number
+        product_id: number
+        action: ProductChangeAction
+        reason: string
+        changes_json: string
+        created_at: string
+      }>
+      return rows.map((row) => ({
+        id: row.id,
+        product_id: row.product_id,
+        action: row.action,
+        reason: row.reason,
+        changes: parseChangeEntries(row.changes_json),
+        created_at: row.created_at
+      }))
     }
   }
 }

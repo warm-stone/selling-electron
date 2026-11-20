@@ -14,7 +14,7 @@ import type { Sale, SaleDetail, SaleListItem, SaleStatus } from '../../../shared
  *
  * - 金额铁律 G1：IPC 全程整数分；元换算只发生在本页显示边界（(cents/100).toFixed(2)）。
  * - 明细读 T10 sales:detail 返回的快照列（product_name/barcode），不实时 join products——
- *   商品改名/删除不影响历史明细（G4；删除为软删——004 迁移，快照列恒可读）。
+ *   商品改名/删除不影响历史明细（G4；删除为软删，快照列恒可读）。
  * - 分页为本地分页（T10 sales:list IPC 未暴露 page 参数，单次最多返回 50 条；
  *   POS 场景按日筛选下足够，真正服务端分页待契约扩展）。
  * - 列表平铺附加五列 + 三筛选（需求变更 W1，契约 sales:list req/res 已扩展）：

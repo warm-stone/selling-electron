@@ -6,10 +6,6 @@ import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
 import { closeDatabase, initDatabase, getDatabase } from '../../../src/main/db/database'
 import { rmTempDirSync } from '../../helpers/cleanup'
-import initSql from '../../../src/main/db/migrations/001_init.sql?raw'
-import logosSql from '../../../src/main/db/migrations/002_logos.sql?raw'
-import snProductsSql from '../../../src/main/db/migrations/003_sn_products.sql?raw'
-import productSoftDeleteSql from '../../../src/main/db/migrations/004_product_soft_delete.sql?raw'
 
 const USER_TABLES = [
   'products',
@@ -18,12 +14,13 @@ const USER_TABLES = [
   'sales',
   'sale_items',
   'stock_movements',
-  'print_templates',
-  'settings',
-  'logos',
   'product_sns',
+  'product_change_logs',
   'customers',
-  'sale_extras'
+  'sale_extras',
+  'logos',
+  'print_templates',
+  'settings'
 ] as const
 
 function tableNames(db: Database.Database): string[] {
@@ -42,6 +39,10 @@ function countTable(db: Database.Database, name: string): number {
     .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?")
     .get(name) as { n: number }
   return row.n
+}
+
+function columns(db: Database.Database, table: string): string[] {
+  return (db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name)
 }
 
 let dir: string
@@ -68,21 +69,21 @@ afterEach(() => {
   rmTempDirSync(dir)
 })
 
-describe('migrator：迁移执行器', () => {
-  it('全新 DB 迁移后 user_version=5 且 12 张用户表按具名断言齐全（含 002 logos / 003 product_sns / 005 customers、sale_extras）', () => {
+describe('migrator：迁移执行器（合并版单文件初始化）', () => {
+  it('全新 DB 迁移后 user_version=1 且 13 张用户表按具名断言齐全', () => {
     const db = newDb()
     migrate(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(db.pragma('user_version', { simple: true })).toBe(1)
 
     const names = tableNames(db)
     for (const t of USER_TABLES) {
       expect(names, `缺少用户表 ${t}`).toContain(t)
     }
-    expect(namedUserTables(db)).toHaveLength(12)
+    expect(namedUserTables(db)).toHaveLength(13)
   })
 
-  it('幂等：同一文件二次迁移不重复建表、user_version 保持 5', () => {
+  it('幂等：同一文件二次迁移不重复建表、user_version 保持 1', () => {
     const dbPath = join(dir, 'pos.db')
 
     const first = new Database(dbPath)
@@ -92,7 +93,7 @@ describe('migrator：迁移执行器', () => {
     const second = newDb()
     migrate(second)
 
-    expect(second.pragma('user_version', { simple: true })).toBe(5)
+    expect(second.pragma('user_version', { simple: true })).toBe(1)
     for (const t of USER_TABLES) {
       expect(countTable(second, t), `${t} 应只存在一份`).toBe(1)
     }
@@ -117,80 +118,66 @@ describe('migrator：迁移执行器', () => {
   })
 })
 
-// ══════════════ 003_sn_products（SN 商品：存量无感升级 + partial unique index）══════════════
+// ══════════════ 旧库守卫（合并迁移定案：无线上数据，旧增量库一律拒绝）══════════════
 
-/** 建一个停在 version=2 的存量库（001+002 已应用、003 未应用） */
-function legacyDbV2(): Database.Database {
-  const db = newDb()
-  db.exec(initSql)
-  db.exec(logosSql)
-  db.pragma('user_version = 2')
-  return db
-}
+describe('migrator：旧增量库启动守卫', () => {
+  it('user_version=5 的旧增量库 → 抛错并指引删库', () => {
+    const db = newDb()
+    db.pragma('user_version = 5')
 
-describe('migrator：003_sn_products（存量升级）', () => {
-  it("存量商品无感升级：tracking 全部 'quantity'、sn_prefix 空串；新列存在", () => {
-    const db = legacyDbV2()
-    const insertProduct = db.prepare(
-      'INSERT INTO products (barcode, name, default_price_cents, stock) VALUES (?, ?, ?, ?)'
-    )
-    insertProduct.run('6901234567890', '可口可乐 330ml', 350, 24)
-    insertProduct.run(null, '无码面包', null, -3)
+    expect(() => migrate(db)).toThrowError(/旧版本数据库/)
+    expect(() => migrate(db)).toThrowError(/pos\.db/)
+  })
 
-    migrate(db)
-
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
-
-    const productCols = (
-      db.pragma('table_info(products)') as Array<{ name: string }>
-    ).map((c) => c.name)
-    expect(productCols).toContain('tracking')
-    expect(productCols).toContain('sn_prefix')
-
-    const rows = db
-      .prepare('SELECT tracking, sn_prefix FROM products ORDER BY id')
-      .all() as Array<{ tracking: string; sn_prefix: string }>
-    expect(rows).toHaveLength(2)
-    for (const row of rows) {
-      expect(row.tracking).toBe('quantity')
-      expect(row.sn_prefix).toBe('')
+  it('user_version=2~4 的旧增量库同样拒绝', () => {
+    for (const version of [2, 3, 4]) {
+      const path = join(dir, `legacy-v${version}.db`)
+      const db = new Database(path)
+      openDbs.push(db)
+      db.pragma(`user_version = ${version}`)
+      expect(() => migrate(db), `v${version} 应被拒绝`).toThrowError(/旧版本数据库/)
     }
   })
 
-  it('存量明细行无感升级：sale_items.sn / purchase_items.sn 列存在且为 NULL', () => {
-    const db = legacyDbV2()
-    db.prepare('INSERT INTO products (barcode, name) VALUES (?, ?)').run('6901', '可乐')
-    db.prepare(
-      "INSERT INTO purchase_orders (order_no, note) VALUES ('20261101-0001', NULL)"
-    ).run()
-    db.prepare(
-      `INSERT INTO purchase_items (order_id, product_id, product_name, barcode, quantity, cost_price_cents)
-       VALUES (1, 1, '可乐', '6901', 24, 200)`
-    ).run()
-    db.prepare("INSERT INTO sales (sale_no, total_cents, item_count) VALUES ('20261101-0001', 700, 2)").run()
-    db.prepare(
-      `INSERT INTO sale_items (sale_id, product_id, product_name, barcode, quantity, unit_price_cents, subtotal_cents)
-       VALUES (1, 1, '可乐', '6901', 2, 350, 700)`
-    ).run()
+  it('user_version=1 但缺哨兵表 product_change_logs（旧 001 时代库）→ 抛错', () => {
+    const db = newDb()
+    db.exec('CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+    db.pragma('user_version = 1')
 
-    migrate(db)
-
-    const saleCols = (db.pragma('table_info(sale_items)') as Array<{ name: string }>).map(
-      (c) => c.name
-    )
-    const purchaseCols = (
-      db.pragma('table_info(purchase_items)') as Array<{ name: string }>
-    ).map((c) => c.name)
-    expect(saleCols).toContain('sn')
-    expect(purchaseCols).toContain('sn')
-
-    const saleSn = db.prepare('SELECT sn FROM sale_items').get() as { sn: string | null }
-    const purchaseSn = db.prepare('SELECT sn FROM purchase_items').get() as { sn: string | null }
-    expect(saleSn.sn).toBeNull()
-    expect(purchaseSn.sn).toBeNull()
+    expect(() => migrate(db)).toThrowError(/旧版本数据库/)
   })
 
-  it('product_sns 表 + partial unique index 存在；active 行同 SN 唯一、deleted 行可重入', () => {
+  it('合并版新库（user_version=1 + 哨兵表在）二次 migrate 正常通过', () => {
+    const db = newDb()
+    migrate(db)
+
+    expect(() => migrate(db)).not.toThrow()
+    expect(db.pragma('user_version', { simple: true })).toBe(1)
+  })
+})
+
+// ══════════════ 合并 schema 保真（原 003/005 行为断言 + 本次新增结构）══════════════
+
+describe('migrator：合并 schema 保真', () => {
+  it('products 直接含 tracking/sn_prefix/deleted 列（默认值兜底，新行免显式赋值）', () => {
+    const db = newDb()
+    migrate(db)
+
+    const cols = columns(db, 'products')
+    expect(cols).toContain('tracking')
+    expect(cols).toContain('sn_prefix')
+    expect(cols).toContain('deleted')
+
+    db.prepare('INSERT INTO products (name) VALUES (?)').run('默认值抽查')
+    const row = db
+      .prepare('SELECT tracking, sn_prefix, deleted FROM products WHERE name = ?')
+      .get('默认值抽查') as { tracking: string; sn_prefix: string; deleted: number }
+    expect(row.tracking).toBe('quantity')
+    expect(row.sn_prefix).toBe('')
+    expect(row.deleted).toBe(0)
+  })
+
+  it('product_sns：partial unique index 存在；active 行同 SN 唯一、deleted 行可重入', () => {
     const db = newDb()
     migrate(db)
 
@@ -211,124 +198,84 @@ describe('migrator：003_sn_products（存量升级）', () => {
     db.prepare("UPDATE product_sns SET deleted = 1 WHERE sn = 'SN-A'").run()
     expect(() => insertSn.run('SN-A')).not.toThrow()
   })
-})
 
-// ══════════════ 004_product_soft_delete（商品软删：存量行无感升级）══════════════
-
-/** 建一个停在 version=3 的存量库（001~003 已应用、004 未应用） */
-function legacyDbV3(): Database.Database {
-  const db = newDb()
-  db.exec(initSql)
-  db.exec(logosSql)
-  db.exec(snProductsSql)
-  db.pragma('user_version = 3')
-  return db
-}
-
-describe('migrator：004_product_soft_delete（存量升级）', () => {
-  it('products.deleted 列存在（NOT NULL DEFAULT 0）且存量行全部 deleted=0', () => {
-    const db = legacyDbV3()
-    const insertProduct = db.prepare(
-      `INSERT INTO products (barcode, name, default_price_cents, stock, tracking, sn_prefix)
-       VALUES (?, ?, ?, ?, 'quantity', '')`
-    )
-    insertProduct.run('6901234567890', '可口可乐 330ml', 350, 24)
-    insertProduct.run(null, '无码面包', null, -3)
-
-    migrate(db)
-
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
-
-    const productCols = (
-      db.pragma('table_info(products)') as Array<{ name: string; notnull: number; dflt_value: string | null }>
-    ).find((c) => c.name === 'deleted')
-    expect(productCols, 'products 应有 deleted 列').toBeDefined()
-    expect(productCols!.notnull).toBe(1)
-    expect(productCols!.dflt_value).toBe('0')
-
-    const rows = db
-      .prepare('SELECT deleted FROM products ORDER BY id')
-      .all() as Array<{ deleted: number }>
-    expect(rows).toHaveLength(2)
-    for (const row of rows) {
-      expect(row.deleted).toBe(0)
-    }
-  })
-
-  it('全新 DB 迁移后 deleted 列同样就位（DEFAULT 0 兜底，新行免显式赋值）', () => {
+  it('purchase_orders 直接含 status/voided_at/void_reason；新单默认 completed', () => {
     const db = newDb()
     migrate(db)
 
-    db.prepare('INSERT INTO products (name) VALUES (?)').run('新行免赋值')
+    const cols = columns(db, 'purchase_orders')
+    expect(cols).toContain('status')
+    expect(cols).toContain('voided_at')
+    expect(cols).toContain('void_reason')
+
+    db.prepare("INSERT INTO purchase_orders (order_no, note) VALUES ('20261101-0001', NULL)").run()
     const row = db
-      .prepare('SELECT deleted FROM products WHERE name = ?')
-      .get('新行免赋值') as { deleted: number }
-    expect(row.deleted).toBe(0)
+      .prepare('SELECT status, voided_at, void_reason FROM purchase_orders WHERE id = 1')
+      .get() as { status: string; voided_at: string | null; void_reason: string | null }
+    expect(row.status).toBe('completed')
+    expect(row.voided_at).toBeNull()
+    expect(row.void_reason).toBeNull()
+
+    expect(() =>
+      db
+        .prepare("UPDATE purchase_orders SET status = 'cancelled' WHERE id = 1")
+        .run()
+    ).toThrowError(/CHECK constraint failed/)
   })
-})
 
-// ══════════════ 005_customer_order_extras（结账客户信息 + 订单附加信息：sales 表零改动）══════════════
-
-/** 建一个停在 version=4 的存量库（001~004 已应用、005 未应用） */
-function legacyDbV4(): Database.Database {
-  const db = newDb()
-  db.exec(initSql)
-  db.exec(logosSql)
-  db.exec(snProductsSql)
-  db.exec(productSoftDeleteSql)
-  db.pragma('user_version = 4')
-  return db
-}
-
-describe('migrator：005_customer_order_extras（客户档案 + 订单附加）', () => {
-  it('空库 v0 直升 5：user_version=5 且 customers / sale_extras 两表存在', () => {
+  it("stock_movements source 五值 CHECK：'void' 被拒，'sale_void'/'purchase_void' 可写", () => {
     const db = newDb()
     migrate(db)
-
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
-    expect(countTable(db, 'customers')).toBe(1)
-    expect(countTable(db, 'sale_extras')).toBe(1)
-  })
-
-  it('v4 存量库升级：001~004 数据原样、升 5 后两表同样就位（FK 实约束可用）', () => {
-    const db = legacyDbV4()
-    db.prepare('INSERT INTO products (barcode, name) VALUES (?, ?)').run('6901', '可乐')
-    db.prepare(
-      "INSERT INTO sales (sale_no, total_cents, item_count) VALUES ('20261101-0001', 700, 2)"
-    ).run()
-
-    migrate(db)
-
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
-    expect(countTable(db, 'customers')).toBe(1)
-    expect(countTable(db, 'sale_extras')).toBe(1)
-
-    // sales 表零改动：存量行原样保留
-    const sale = db
-      .prepare('SELECT sale_no, total_cents FROM sales')
-      .get() as { sale_no: string; total_cents: number }
-    expect(sale.sale_no).toBe('20261101-0001')
-    expect(sale.total_cents).toBe(700)
-
-    // FK 实约束：sale_extras 挂到真实 sale_id 可写入
-    db.prepare(
-      'INSERT INTO sale_extras (sale_id, is_national_subsidy, order_note, salesperson) VALUES (1, 0, ?, ?)'
-    ).run('客户要求送货', '张三')
-    const extra = db
-      .prepare('SELECT order_note, salesperson FROM sale_extras WHERE sale_id = 1')
-      .get() as { order_note: string; salesperson: string }
-    expect(extra.order_note).toBe('客户要求送货')
-    expect(extra.salesperson).toBe('张三')
-  })
-
-  it('列保真：customers 7 列 / sale_extras 5 列（DTO↔DB snake_case 一一对应）', () => {
-    const db = newDb()
-    migrate(db)
-
-    const customerCols = (db.pragma('table_info(customers)') as Array<{ name: string }>).map(
-      (c) => c.name
+    db.prepare('INSERT INTO products (name, stock) VALUES (?, 10)').run('流水校验')
+    const insert = db.prepare(
+      `INSERT INTO stock_movements (product_id, change_qty, before_stock, after_stock, source, source_id)
+       VALUES (1, -1, 10, 9, ?, NULL)`
     )
-    expect(customerCols).toEqual([
+
+    for (const source of ['sale', 'purchase', 'manual', 'sale_void', 'purchase_void']) {
+      expect(() => insert.run(source), `source=${source} 应合法`).not.toThrow()
+    }
+    expect(() => insert.run('void')).toThrowError(/CHECK constraint failed/)
+  })
+
+  it('product_change_logs：列齐全、action CHECK 约束、changes_json 默认空数组', () => {
+    const db = newDb()
+    migrate(db)
+
+    expect(columns(db, 'product_change_logs')).toEqual([
+      'id',
+      'product_id',
+      'action',
+      'reason',
+      'changes_json',
+      'created_at'
+    ])
+
+    db.prepare('INSERT INTO products (name) VALUES (?)').run('改动记录抽查')
+    db.prepare(
+      "INSERT INTO product_change_logs (product_id, action, reason) VALUES (1, 'delete', '测试')"
+    ).run()
+    const row = db
+      .prepare('SELECT changes_json FROM product_change_logs WHERE product_id = 1')
+      .get() as { changes_json: string }
+    expect(row.changes_json).toBe('[]')
+
+    expect(() =>
+      db
+        .prepare("INSERT INTO product_change_logs (product_id, action, reason) VALUES (1, 'rename', '测试')")
+        .run()
+    ).toThrowError(/CHECK constraint failed/)
+    expect(() =>
+      db.prepare('INSERT INTO product_change_logs (product_id, action, reason) VALUES (1, NULL)')
+        .run()
+    ).toThrow()
+  })
+
+  it('customers 7 列 / sale_extras 5 列（DTO↔DB snake_case 一一对应）', () => {
+    const db = newDb()
+    migrate(db)
+
+    expect(columns(db, 'customers')).toEqual([
       'id',
       'name',
       'phone',
@@ -338,10 +285,7 @@ describe('migrator：005_customer_order_extras（客户档案 + 订单附加）'
       'updated_at'
     ])
 
-    const saleExtraCols = (db.pragma('table_info(sale_extras)') as Array<{ name: string }>).map(
-      (c) => c.name
-    )
-    expect(saleExtraCols).toEqual([
+    expect(columns(db, 'sale_extras')).toEqual([
       'sale_id',
       'customer_id',
       'is_national_subsidy',
@@ -366,15 +310,15 @@ describe('database：连接初始化', () => {
 
     expect(db.pragma('journal_mode', { simple: true })).toBe('wal')
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
-    expect(namedUserTables(db)).toHaveLength(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(1)
+    expect(namedUserTables(db)).toHaveLength(13)
   })
 
   it('initDatabase 同目录重复调用幂等（复用同一连接）', () => {
     const a = initDatabase(dir)
     const b = initDatabase(dir)
     expect(b).toBe(a)
-    expect(namedUserTables(b)).toHaveLength(12)
+    expect(namedUserTables(b)).toHaveLength(13)
   })
 
   it('getDatabase 返回当前连接；未初始化的模块实例抛错', async () => {
@@ -407,10 +351,12 @@ describe('database：连接初始化', () => {
       "INSERT INTO sales (sale_no, total_cents, item_count) VALUES ('20261101-0001', 100, 1)"
     ).run()
     expect(() =>
-      db.prepare(
-        `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price_cents, subtotal_cents)
-         VALUES (1, NULL, '零数量', 0, 100, 0)`
-      ).run()
+      db
+        .prepare(
+          `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price_cents, subtotal_cents)
+          VALUES (1, NULL, '零数量', 0, 100, 0)`
+        )
+        .run()
     ).toThrowError(/CHECK constraint failed/)
   })
 })

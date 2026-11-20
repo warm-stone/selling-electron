@@ -37,6 +37,7 @@ import type {
   PrintTemplate,
   PrintTestRequest,
   Product,
+  ProductChangeLog,
   ProductRow,
   ProductSn,
   ProductTracking,
@@ -100,19 +101,40 @@ export interface IpcChannels {
       default_price_cents: number | null
       /** SN 前缀可改（影响以后进货匹配）；tracking 不可改（D-SN1） */
       sn_prefix?: string
+      /**
+       * 批量计商品可同事务调库存（绝对目标值；与字段更新合并为一次保存
+       * 一条改动记录）。SN 商品携带时静默忽略（D-SN11 禁手动调库）。
+       */
+      stock?: number
+      /** 改动原因（必填非空；落 product_change_logs——审计留痕） */
+      reason: string
     }
     res: Product
   }
-  /** 逻辑删除；willOrphan = 删除时关联的历史单据行数（弹窗文案用） */
-  'products:delete': { req: { id: number }; res: { ok: true; willOrphan: number } }
-  /** 手动改库存（绝对目标值；service 内写 stock_movements source='manual'——G5） */
-  'products:updateStock': { req: { id: number; stock: number }; res: Product }
+  /** 逻辑删除；willOrphan = 删除时关联的历史单据行数（弹窗文案用）；reason 必填 */
+  'products:delete': {
+    req: { id: number; reason: string }
+    res: { ok: true; willOrphan: number }
+  }
+  /** 手动改库存（绝对目标值；service 内写 stock_movements source='manual'——G5）；reason 必填 */
+  'products:updateStock': {
+    req: { id: number; stock: number; reason: string }
+    res: Product
+  }
   /** 按 SN 精查（仅 deleted=0；收银扫码第一优先级 D-SN5 + SN 弹窗校验共用） */
   'products:findSn': { req: { sn: string }; res: { sn: ProductSn; product: Product } | null }
   /** 商品 SN 列表（默认在库；include_sold 含已售，已售行带关联单号——D-SN16） */
   'products:listSns': { req: { product_id: number; include_sold: boolean }; res: ProductSn[] }
-  /** 删在库 SN（逻辑删除 + stock-1 + movements source='manual'；已售拒绝——D-SN16） */
-  'products:deleteSn': { req: { sn_id: number }; res: { ok: true } }
+  /** 删在库 SN（逻辑删除 + stock-1 + movements source='manual'；已售拒绝——D-SN16）；reason 必填 */
+  'products:deleteSn': { req: { sn_id: number; reason: string }; res: { ok: true } }
+  /**
+   * 商品改动记录（最新在前；limit 默认 100，只取最近 N 条不翻页——定案）。
+   * 软删商品的记录仍可查（product_id FK 有效）。
+   */
+  'products:listChangeLogs': {
+    req: { product_id: number; limit?: number }
+    res: ProductChangeLog[]
+  }
 
   // ── 客户 ──
   /** 分页搜索（keyword 匹配名称/电话；total 供分页条） */
@@ -175,6 +197,15 @@ export interface IpcChannels {
   // ── 进货 ──
   'purchases:create': { req: { note: string | null; items: PurchaseInputItem[] }; res: PurchaseOrderWithItems }
   'purchases:list': { req: { date_from?: string; date_to?: string }; res: PurchaseOrderWithItems[] }
+  /**
+   * 整单作废（单事务：SN 已售守卫先全扫拒绝 → 逐行冲减库存可为负 D2 +
+   * movements source='purchase_void' → 头表 voided/时间/原因；不物理删除行——D3 哲学）。
+   * reason 必填非空。
+   */
+  'purchases:void': {
+    req: { order_id: number; reason: string }
+    res: PurchaseOrderWithItems
+  }
 
   // ── 报表 ──
   'reports:daily': { req: { date: string }; res: DailyReport }
@@ -324,6 +355,8 @@ export interface PosApi {
     create: (req: IpcReq<'purchases:create'>) => Promise<IpcRes<'purchases:create'>>
     /** 进货单列表（头+明细，最新在前；可选日期过滤） */
     list: (filters?: IpcReq<'purchases:list'>) => Promise<IpcRes<'purchases:list'>>
+    /** 整单作废（reason 必填；返回作废后单据——含 status/voided_at/void_reason） */
+    void: (orderId: number, reason: string) => Promise<IpcRes<'purchases:void'>>
   }
 
   products: {
@@ -331,16 +364,18 @@ export interface PosApi {
     list: (keyword?: string) => Promise<IpcRes<'products:list'>>
     create: (req: IpcReq<'products:create'>) => Promise<IpcRes<'products:create'>>
     update: (req: IpcReq<'products:update'>) => Promise<IpcRes<'products:update'>>
-    /** 手动调整库存为绝对目标值（主进程写流水 source='manual'——G5） */
+    /** 手动调整库存为绝对目标值（主进程写流水 source='manual'——G5；reason 必填） */
     updateStock: (req: IpcReq<'products:updateStock'>) => Promise<IpcRes<'products:updateStock'>>
-    /** 逻辑删除（软删）商品 */
-    delete: (id: number) => Promise<IpcRes<'products:delete'>>
+    /** 逻辑删除（软删）商品（reason 必填，落改动记录） */
+    delete: (id: number, reason: string) => Promise<IpcRes<'products:delete'>>
     /** 按 SN 精查（收银扫码第一优先级 D-SN5；未命中/已删除返回 null） */
     findSn: (sn: string) => Promise<IpcRes<'products:findSn'>>
     /** 商品 SN 列表（默认在库；includeSold 含已售，已售行带关联单号） */
     listSns: (productId: number, includeSold: boolean) => Promise<IpcRes<'products:listSns'>>
-    /** 删在库 SN（逻辑删除 + stock-1 + manual 流水；已售拒绝） */
-    deleteSn: (snId: number) => Promise<IpcRes<'products:deleteSn'>>
+    /** 删在库 SN（逻辑删除 + stock-1 + manual 流水；已售拒绝；reason 必填） */
+    deleteSn: (snId: number, reason: string) => Promise<IpcRes<'products:deleteSn'>>
+    /** 商品改动记录（最新在前；limit 默认 100=仅最近 N 条） */
+    listChangeLogs: (productId: number, limit?: number) => Promise<IpcRes<'products:listChangeLogs'>>
   }
 
   customers: {

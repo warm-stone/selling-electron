@@ -86,6 +86,7 @@ const EXPECTED_CHANNELS = [
   'products:findSn',
   'products:listSns',
   'products:deleteSn',
+  'products:listChangeLogs',
   // 客户
   'customers:list',
   'customers:create',
@@ -99,6 +100,7 @@ const EXPECTED_CHANNELS = [
   // 进货
   'purchases:create',
   'purchases:list',
+  'purchases:void',
   // 报表
   'reports:daily',
   'reports:monthly',

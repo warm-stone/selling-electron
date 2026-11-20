@@ -209,6 +209,7 @@ test.describe.serial('F3 QA · B：边界案例', () => {
     await expect(box).toContainText('删除商品')
     await expect(box).toContainText(/关联 \d+ 条历史单据/)
     await page.screenshot({ path: `${EVIDENCE}/b9-delete-referenced.png` })
+    await box.locator('textarea').fill('QA 用例：清理引用商品') // 改动原因必填（落 product_change_logs）
     await box.getByRole('button', { name: '删除', exact: true }).click()
     await expect(box).toBeHidden()
 

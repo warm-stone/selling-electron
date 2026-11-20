@@ -10,7 +10,7 @@
  * 销售人员历史写 settings——散客快单零追加）。
  * voidSale：单事务 = 校验 → status='voided' + voided_at → 逐行 stock += qty
  * → SN 行台账回滚 sold→in_stock（D-SN8，按明细行自身 id 定位）→
- * movements(source='void')。作废不物理删除任何行（D3）。
+ * movements(source='sale_void')。作废不物理删除任何行（D3）。
  * updateExtra：单事务 = 校验（综合已有 sale_extras 行的最终状态——Q5）→
  * 客户解绑/find-or-create → sale_extras.upsert（全空结果行保留）→
  * 销售人员历史（非空时）→ 返回装配 extras 的明细。
@@ -374,9 +374,9 @@ export function createSaleService(db: Database.Database) {
 
     /**
      * 整单作废（D3）：单事务 = 校验 → status='voided' + voided_at →
-     * 逐行 stock += qty → movements(source='void')。不物理删除任何行。
+     * 逐行 stock += qty → movements(source='sale_void')。不物理删除任何行。
      * 商品不可达的明细行跳过库存复原（两条路径并存）：
-     * product_id 为 NULL（历史断链行）或商品已软删（deleted=1——004 迁移后
+     * product_id 为 NULL（历史断链行）或商品已软删（deleted=1——软删后
      * 快照行保留但 getProductSnapshot 不可见）。
      */
     voidSale(saleId: number): Sale {
@@ -409,7 +409,7 @@ export function createSaleService(db: Database.Database) {
             change_qty: item.quantity,
             before_stock: product.stock,
             after_stock: product.stock + item.quantity,
-            source: 'void',
+            source: 'sale_void',
             source_id: saleId
           })
         }

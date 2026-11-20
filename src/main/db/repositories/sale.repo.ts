@@ -17,7 +17,8 @@ import type {
   SaleDetail,
   SaleItem,
   SaleListItem,
-  SaleStatus
+  SaleStatus,
+  StockMovementSource
 } from '../../../shared/types'
 
 /** 新销售单头（落库前形态；status 固定 'completed' 由 DDL DEFAULT 承担） */
@@ -64,7 +65,7 @@ export interface MovementInput {
   change_qty: number
   before_stock: number
   after_stock: number
-  source: 'sale' | 'purchase' | 'manual' | 'void'
+  source: StockMovementSource
   source_id: number | null
 }
 

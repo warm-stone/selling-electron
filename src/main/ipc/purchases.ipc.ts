@@ -18,4 +18,6 @@ export function registerPurchasesIpc(db: Database.Database): void {
   typedHandle(ipcMain, 'purchases:create', (req) => service.createPurchase(req?.items ?? [], req?.note))
 
   typedHandle(ipcMain, 'purchases:list', (req) => service.list(req?.date_from, req?.date_to))
+
+  typedHandle(ipcMain, 'purchases:void', (req) => service.voidPurchase(req.order_id, req.reason))
 }

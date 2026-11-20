@@ -455,7 +455,7 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
       const movements = d
         .prepare(
           `SELECT change_qty, before_stock, after_stock, source FROM stock_movements
-             WHERE source = 'void'`
+             WHERE source = 'sale_void'`
         )
         .all() as Array<{
         change_qty: number
@@ -464,7 +464,7 @@ test.describe.serial('F3 QA · A：跨任务集成全链路', () => {
         source: string
       }>
       expect(movements).toEqual([
-        { change_qty: 1, before_stock: 17, after_stock: 18, source: 'void' }
+        { change_qty: 1, before_stock: 17, after_stock: 18, source: 'sale_void' }
       ])
     } finally {
       d.close()

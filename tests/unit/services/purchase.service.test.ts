@@ -143,8 +143,8 @@ describe('purchase.service：入库事务原子性', () => {
     expect(getStock(colaId)).toBe(100)
   })
 
-  it('软删商品进货 → 同样商品不存在拒绝且整单回滚（004 迁移：读过滤 deleted=0）', () => {
-    createProductService(db).delete({ id: spriteId })
+  it('软删商品进货 → 同样商品不存在拒绝且整单回滚（软删读过滤 deleted=0）', () => {
+    createProductService(db).delete({ id: spriteId, reason: '测试原因' })
 
     expect(() =>
       service.createPurchase([
@@ -552,5 +552,238 @@ describe('purchase.service：SN 行结构校验（事务外快速失败）', () 
     expect(countRows('purchase_items')).toBe(0)
     expect(countRows('product_sns')).toBe(0)
     expect(countRows('stock_movements')).toBe(0)
+  })
+})
+
+// ═══════════ 整单作废（voidPurchase——定案：批量计冲减可为负 D2；SN 已售拒整单）═══════════
+
+describe('purchase.service：voidPurchase（整单作废）', () => {
+  /** 构造已售 SN（raw SQL 模拟销售链——与台账查重套件同款既有模式；固定 phoneId 商品） */
+  function markSnSold(sn: string, saleNo: string): void {
+    const saleId = Number(
+      db
+        .prepare('INSERT INTO sales (sale_no, total_cents, item_count) VALUES (?, 2999, 1)')
+        .run(saleNo).lastInsertRowid
+    )
+    const saleItemId = Number(
+      db
+        .prepare(
+          `INSERT INTO sale_items (sale_id, product_id, product_name, barcode, quantity, unit_price_cents, subtotal_cents, sn)
+           VALUES (?, ?, '测试手机', NULL, 1, 2999, 2999, ?)`
+        )
+        .run(saleId, phoneId, sn).lastInsertRowid
+    )
+    db.prepare("UPDATE product_sns SET status = 'sold', sale_item_id = ? WHERE sn = ?").run(saleItemId, sn)
+    db.prepare('UPDATE products SET stock = stock - 1 WHERE id = ?').run(phoneId)
+  }
+
+  function voidMovements(): StockMovement[] {
+    return allMovements().filter((m) => m.source === 'purchase_void')
+  }
+
+  it('批量计作废：库存冲减可为负（D2）+ purchase_void 流水 + 头表 voided；明细行不物理删除', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: colaId, quantity: 50, cost_price_cents: 200 }
+    ])
+    // 模拟已售出 120（直减库存，绕过 sale.service——非本套件范围）：150-120=30
+    db.prepare('UPDATE products SET stock = stock - 120 WHERE id = ?').run(colaId)
+    const before = getStock(colaId)
+    expect(before).toBe(30)
+
+    const voided = service.voidPurchase(order.id, '录错整单作废')
+
+    expect(voided.status).toBe('voided')
+    expect(voided.voided_at).not.toBeNull()
+    expect(voided.void_reason).toBe('录错整单作废')
+    expect(voided.items).toHaveLength(1) // 行保留（D3 哲学：作废不物理删除）
+    expect(getStock(colaId)).toBe(-20) // 已售部分不阻止作废 → 冲减为负
+    const mv = voidMovements()
+    expect(mv).toHaveLength(1)
+    expect(mv[0]).toMatchObject({
+      product_id: colaId,
+      change_qty: -50,
+      before_stock: 30,
+      after_stock: -20,
+      source_id: order.id
+    })
+    // 原入库流水原样保留（审计链成对可追溯）
+    expect(allMovements().filter((m) => m.source === 'purchase')).toHaveLength(1)
+  })
+
+  it('重复作废 → PURCHASE_ALREADY_VOIDED；单不存在 → PURCHASE_NOT_FOUND；reason 空白 → INVALID_REASON', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: colaId, quantity: 5, cost_price_cents: 200 }
+    ])
+    service.voidPurchase(order.id, '第一次作废')
+    const stockAfter = getStock(colaId)
+
+    expect(() => service.voidPurchase(order.id, '再作废一次')).toThrow(/该进货单已作废/)
+    expect(() => service.voidPurchase(99999, '单不存在')).toThrow(/进货单不存在/)
+    expect(() => service.voidPurchase(order.id, '   ')).toThrow(/作废原因不能为空/)
+    expect(getStock(colaId)).toBe(stockAfter)
+    expect(voidMovements()).toHaveLength(1) // 仅第一次作废的流水
+  })
+
+  it('SN 单作废（全在库）：台账全软删 + 库存逐 SN 归零 + 流水链式衔接，D-SN13 一致性保持', () => {
+    const order = service.createPurchase([
+      { kind: 'sn', product_id: phoneId, sns: ['SN-A', 'SN-B', 'SN-C'], cost_price_cents: 100 }
+    ])
+    expect(getStock(phoneId)).toBe(3)
+
+    const voided = service.voidPurchase(order.id, 'SN 录错单')
+
+    expect(voided.status).toBe('voided')
+    expect(getStock(phoneId)).toBe(0)
+    expect(inStockSnCount(phoneId)).toBe(0)
+    const rows = activeSnRows(phoneId)
+    expect(rows).toHaveLength(3) // 行保留，仅软删
+    expect(rows.every((r) => r.deleted === 1)).toBe(true)
+    const mv = voidMovements()
+    expect(mv).toHaveLength(3)
+    expect(mv.map((m) => m.change_qty)).toEqual([-1, -1, -1])
+    expect(mv.map((m) => [m.before_stock, m.after_stock])).toEqual([
+      [3, 2],
+      [2, 1],
+      [1, 0]
+    ])
+  })
+
+  it('SN 单含已售 SN → PURCHASE_SN_SOLD 拒绝整单（文案含 SN + 销售单号），零残留', () => {
+    const order = service.createPurchase([
+      { kind: 'sn', product_id: phoneId, sns: ['SN-A', 'SN-B'], cost_price_cents: 100 }
+    ])
+    markSnSold('SN-B', '20261101-0077')
+    const stockBefore = getStock(phoneId)
+
+    expect(() => service.voidPurchase(order.id, '想作废')).toThrow(
+      /SN SN-B 已售出（销售单 20261101-0077），请先作废对应销售单/
+    )
+
+    // 守卫先全扫 → 拒绝态零残留：头表未标、台账未删、库存未冲、无作废流水
+    const raw = db
+      .prepare('SELECT status, voided_at FROM purchase_orders WHERE id = ?')
+      .get(order.id) as { status: string; voided_at: string | null }
+    expect(raw.status).toBe('completed')
+    expect(raw.voided_at).toBeNull()
+    expect(getStock(phoneId)).toBe(stockBefore)
+    expect(voidMovements()).toHaveLength(0)
+    expect(activeSnRows(phoneId).filter((r) => r.deleted === 0)).toHaveLength(2)
+  })
+
+  it('SN 已售后销售又被作废（台账回 in_stock）→ 可正常作废', () => {
+    const order = service.createPurchase([
+      { kind: 'sn', product_id: phoneId, sns: ['SN-A'], cost_price_cents: 100 }
+    ])
+    markSnSold('SN-A', '20261101-0078')
+    // 模拟销售作废的台账/库存效果（sale.service voidSale 语义）
+    db.prepare("UPDATE product_sns SET status = 'in_stock', sale_item_id = NULL WHERE sn = 'SN-A'").run()
+    db.prepare('UPDATE products SET stock = stock + 1 WHERE id = ?').run(phoneId)
+
+    service.voidPurchase(order.id, '销售单已作废，随后作废进货')
+
+    expect(getStock(phoneId)).toBe(0)
+    expect(inStockSnCount(phoneId)).toBe(0)
+    expect(voidMovements()).toHaveLength(1)
+  })
+
+  it('SN 已被 deleteSn 删除 → 作废跳过该 SN 不双重冲减，其余 SN 正常回滚', () => {
+    const order = service.createPurchase([
+      { kind: 'sn', product_id: phoneId, sns: ['SN-A', 'SN-B'], cost_price_cents: 100 }
+    ])
+    const snAId = (db.prepare("SELECT id FROM product_sns WHERE sn = 'SN-A'").get() as { id: number }).id
+    createProductService(db).deleteSn(snAId, '台账清理') // 软删 + stock-1 + manual 流水
+    expect(getStock(phoneId)).toBe(1)
+
+    service.voidPurchase(order.id, '整单作废')
+
+    // SN-A 已由 deleteSn 扣过 → 作废只冲 SN-B（防双重扣减）
+    expect(getStock(phoneId)).toBe(0)
+    const mv = voidMovements()
+    expect(mv).toHaveLength(1)
+    expect(mv[0]).toMatchObject({ change_qty: -1, before_stock: 1, after_stock: 0 })
+    expect(inStockSnCount(phoneId)).toBe(0)
+  })
+
+  it('作废后同一 SN 可重新进货（软删释放 partial unique index 占位——D-SN4 语义延伸）', () => {
+    const order = service.createPurchase([
+      { kind: 'sn', product_id: phoneId, sns: ['SN-A'], cost_price_cents: 100 }
+    ])
+    service.voidPurchase(order.id, '进错单')
+
+    const order2 = service.createPurchase([
+      { kind: 'sn', product_id: phoneId, sns: ['SN-A'], cost_price_cents: 120 }
+    ])
+    expect(order2.items[0]?.sn).toBe('SN-A')
+    expect(getStock(phoneId)).toBe(1)
+    expect(inStockSnCount(phoneId)).toBe(1)
+  })
+
+  it('软删商品的批量计行 → 照冲减库存（与入库流水成对，审计链自洽；与 voidSale 跳过策略的差异为定案）', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: spriteId, quantity: 10, cost_price_cents: 150 }
+    ])
+    db.prepare('UPDATE products SET deleted = 1 WHERE id = ?').run(spriteId)
+
+    service.voidPurchase(order.id, '商品已删仍作废单据')
+
+    expect(getStock(spriteId)).toBe(50) // 50+10-10
+    expect(
+      voidMovements().filter((m) => m.product_id === spriteId)
+    ).toHaveLength(1)
+  })
+
+  it('断链行（product_id NULL）→ 跳过，其余行正常冲减', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: colaId, quantity: 5, cost_price_cents: 200 }
+    ])
+    // 直插断链行（防御路径：真实入库 product_id 恒存在）
+    db.prepare(
+      `INSERT INTO purchase_items (order_id, product_id, product_name, barcode, quantity, cost_price_cents)
+       VALUES (?, NULL, '幽灵商品', NULL, 3, 100)`
+    ).run(order.id)
+
+    service.voidPurchase(order.id, '含断链行作废')
+
+    expect(getStock(colaId)).toBe(100) // 100+5-5
+    expect(voidMovements()).toHaveLength(1) // 仅 cola 行
+  })
+
+  it('混合单（批量计 + SN 行）→ 各归各冲减', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: breadId, quantity: 8, cost_price_cents: 300 },
+      { kind: 'sn', product_id: padId, sns: ['PAD-1', 'PAD-2'], cost_price_cents: 1999 }
+    ])
+
+    const voided = service.voidPurchase(order.id, '整单录错')
+
+    expect(voided.status).toBe('voided')
+    expect(getStock(breadId)).toBe(20) // 20+8-8
+    expect(getStock(padId)).toBe(0) // 2-2
+    expect(inStockSnCount(padId)).toBe(0)
+    expect(voidMovements()).toHaveLength(3) // bread 1 条 + pad 2 条
+  })
+
+  it('list / getDetail：作废单含 status/voided_at/void_reason（DTO 扩展列）', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: colaId, quantity: 2, cost_price_cents: 200 }
+    ])
+    service.voidPurchase(order.id, '原因留档')
+
+    const listed = service.list().find((o) => o.id === order.id)!
+    expect(listed.status).toBe('voided')
+    expect(listed.void_reason).toBe('原因留档')
+    expect(listed.voided_at).not.toBeNull()
+    const detail = service.getDetail(order.id)
+    expect(detail.status).toBe('voided')
+    expect(detail.void_reason).toBe('原因留档')
+  })
+
+  it('新建单默认 status=completed、voided_at/void_reason 为 null（DDL DEFAULT 承担）', () => {
+    const order = service.createPurchase([
+      { kind: 'quantity', product_id: colaId, quantity: 1, cost_price_cents: 200 }
+    ])
+    expect(order.status).toBe('completed')
+    expect(order.voided_at).toBeNull()
+    expect(order.void_reason).toBeNull()
   })
 })

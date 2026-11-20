@@ -1,5 +1,5 @@
 /**
- * 客户 DAL（计划任务 4）：customers 表（005 迁移，7 列）读写。
+ * 客户 DAL（计划任务 4）：customers 表（7 列）读写。
  *
  * 事务边界（与 product.repo 的内嵌事务惯例**刻意相反**——D-SN8 跨 repo 豁免前提）：
  * - 全部方法各自单条语句、**无自有 db.transaction**：insert/update 将被结账事务

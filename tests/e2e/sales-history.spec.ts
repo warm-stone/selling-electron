@@ -124,7 +124,7 @@ function readVoidMovements(): MovementRow[] {
     return db
       .prepare(
         `SELECT product_id, change_qty, before_stock, after_stock, source, source_id
-           FROM stock_movements WHERE source = 'void' ORDER BY id`
+           FROM stock_movements WHERE source = 'sale_void' ORDER BY id`
       )
       .all() as MovementRow[]
   } finally {
@@ -277,7 +277,7 @@ test.describe.serial('Task 13：销售记录查询与作废', () => {
         change_qty: 1,
         before_stock: 10,
         after_stock: 11,
-        source: 'void',
+        source: 'sale_void',
         source_id: sale2Id
       }
     ])
@@ -307,7 +307,7 @@ test.describe.serial('Task 13：销售记录查询与作废', () => {
           `[sales] status=${sale2.status} voided_at=${sale2.voided_at}（期望 voided + 非空时间）`,
           `[products] 作废前 stock: 可乐=${before.cola} 雪碧=${before.sprite}`,
           `[products] 作废后 stock: 可乐=${after.cola} 雪碧=${after.sprite}（期望 +1 / 不变）`,
-          '[stock_movements] source=void:',
+          '[stock_movements] source=sale_void:',
           JSON.stringify(movements, null, 2),
           '',
           `断言结果: 全部通过（${sale2.status === 'voided' && after.cola === before.cola + 1 ? 'PASS' : 'FAIL'}）`

@@ -35,6 +35,8 @@ interface ProductFormState {
   tracking: ProductTracking
   /** SN 前缀（仅 SN 商品；提交前 trim，空串=不启用——D-SN2） */
   snPrefix: string
+  /** 改动原因（仅编辑模式；必填非空——落 product_change_logs 审计留痕） */
+  reason: string
 }
 
 /** 建档默认「SN 商品」（一物一码为主业态）；批量计需显式切换 */
@@ -49,7 +51,8 @@ const form = reactive<ProductFormState>({
   stock: 0,
   price: null,
   tracking: DEFAULT_TRACKING,
-  snPrefix: ''
+  snPrefix: '',
+  reason: ''
 })
 
 const rules: FormRules = {
@@ -59,6 +62,19 @@ const rules: FormRules = {
       validator: (_rule, value: string, callback) => {
         if (typeof value !== 'string' || value.trim().length === 0) {
           callback(new Error('商品名称不能为空'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
+  reason: [
+    {
+      required: true,
+      validator: (_rule, value: string, callback) => {
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          callback(new Error('改动原因不能为空'))
         } else {
           callback()
         }
@@ -90,7 +106,8 @@ watch(
         stock: 0,
         price: null,
         tracking: DEFAULT_TRACKING,
-        snPrefix: ''
+        snPrefix: '',
+        reason: ''
       })
     } else {
       const row = props.row
@@ -100,7 +117,8 @@ watch(
         stock: row.stock,
         price: centsToYuan(row.default_price_cents),
         tracking: row.tracking,
-        snPrefix: row.sn_prefix
+        snPrefix: row.sn_prefix,
+        reason: ''
       })
     }
   }
@@ -129,17 +147,17 @@ async function save(): Promise<void> {
       )
     } else {
       const row = props.row!
+      // 一次保存一条改动记录（定案）：字段 + 批量计库存联动合并为单次 update，
+      // 主进程单事务写一条 product_change_logs；SN 商品不传 stock（D-SN11 禁手动调库）
       await window.api.products.update({
         id: row.id,
         name: form.name.trim(),
         default_price_cents: cents,
         // update 契约：sn_prefix 省略=保持现值，显式传值（含 ''）才覆盖——SN 商品必传
-        ...(row.tracking === 'sn' ? { sn_prefix: form.snPrefix.trim() } : {})
+        ...(row.tracking === 'sn' ? { sn_prefix: form.snPrefix.trim() } : {}),
+        ...(row.tracking === 'quantity' ? { stock: form.stock } : {}),
+        reason: form.reason.trim()
       })
-      // SN 商品禁手动调库（D-SN11，主进程同侧拒绝）；批量计保持原逻辑
-      if (row.tracking === 'quantity' && form.stock !== row.stock) {
-        await window.api.products.updateStock({ id: row.id, stock: form.stock })
-      }
       ElMessage.success('商品已保存')
     }
     emit('update:visible', false)
@@ -244,6 +262,12 @@ function close(): void {
         <div class="form-hint">
           允许负值（盘点差异可记负，行标红提示）
         </div>
+        <div
+          v-if="mode === 'edit'"
+          class="form-hint form-hint--advice"
+        >
+          手动调增库存建议在「进货管理」新建进货单入库，可留下成本记录
+        </div>
       </el-form-item>
       <!-- SN 商品：SN 前缀（可改，影响以后进货匹配——D-SN2） -->
       <el-form-item
@@ -274,6 +298,22 @@ function close(): void {
           单位元；留空表示不设加购默认价
         </div>
       </el-form-item>
+      <!-- 改动原因（仅编辑模式必填——一次保存一条改动记录，落 product_change_logs） -->
+      <el-form-item
+        v-if="mode === 'edit'"
+        label="改动原因"
+        prop="reason"
+      >
+        <el-input
+          v-model="form.reason"
+          type="textarea"
+          :rows="2"
+          maxlength="200"
+          show-word-limit
+          placeholder="必填：本次改动的原因（将记入商品改动记录）"
+          data-testid="product-change-reason"
+        />
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="close">
@@ -301,5 +341,10 @@ function close(): void {
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
+}
+
+/* 进货入库建议（用户定案文案：仅编辑弹窗提示，不写入改动记录） */
+.form-hint--advice {
+  color: var(--el-color-warning);
 }
 </style>

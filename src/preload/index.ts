@@ -56,12 +56,15 @@ const api: PosApi = {
       ipcRenderer.invoke('sales:updateExtra', { sale_id: saleId, ...patch })
   },
 
-  // ── 进货（Task 9：入库单 + 库存联动 + 流水）──
+  // ── 进货（Task 9：入库单 + 库存联动 + 流水；作废：整单冲减 + purchase_void 流水）──
   purchases: {
     /** 新建进货单（单事务：单据+快照明细+库存累加+流水；金额整数分） */
     create: (req) => ipcRenderer.invoke('purchases:create', req),
     /** 进货单列表（头+明细，最新在前；可选日期过滤） */
-    list: (filters) => ipcRenderer.invoke('purchases:list', filters ?? {})
+    list: (filters) => ipcRenderer.invoke('purchases:list', filters ?? {}),
+    /** 整单作废（reason 必填；单事务冲减库存+SN 回滚+头表 voided） */
+    void: (orderId, reason) =>
+      ipcRenderer.invoke('purchases:void', { order_id: orderId, reason })
   },
 
   // ── 商品（Task 8：CRUD + 搜索 + 手动库存调整流水）──
@@ -74,8 +77,8 @@ const api: PosApi = {
     update: (req) => ipcRenderer.invoke('products:update', req),
     /** 手动调整库存为绝对目标值（主进程写流水 source='manual'——G5） */
     updateStock: (req) => ipcRenderer.invoke('products:updateStock', req),
-    /** 逻辑删除（软删）商品；返回 willOrphan=删除时关联的历史单据行数 */
-    delete: (id) => ipcRenderer.invoke('products:delete', { id }),
+    /** 逻辑删除（软删）商品；返回 willOrphan=删除时关联的历史单据行数；reason 必填 */
+    delete: (id, reason) => ipcRenderer.invoke('products:delete', { id, reason }),
     /** 按 SN 精查（收银扫码第一优先级 D-SN5；未命中/已删除返回 null） */
     findSn: (sn) => ipcRenderer.invoke('products:findSn', { sn }),
     /** 商品 SN 列表（默认在库；includeSold 含已售，已售行带关联单号） */
@@ -84,8 +87,11 @@ const api: PosApi = {
         product_id: productId,
         include_sold: includeSold
       }),
-    /** 删在库 SN（逻辑删除 + stock-1 + manual 流水；已售拒绝） */
-    deleteSn: (snId) => ipcRenderer.invoke('products:deleteSn', { sn_id: snId })
+    /** 删在库 SN（逻辑删除 + stock-1 + manual 流水；已售拒绝；reason 必填） */
+    deleteSn: (snId, reason) => ipcRenderer.invoke('products:deleteSn', { sn_id: snId, reason }),
+    /** 商品改动记录（最新在前；limit 默认 100=仅最近 N 条，软删商品仍可查） */
+    listChangeLogs: (productId, limit) =>
+      ipcRenderer.invoke('products:listChangeLogs', { product_id: productId, limit })
   },
 
   // ── 客户（Task 2 契约层：结账客户信息）──

@@ -40,6 +40,7 @@ export type ProductErrorCode =
   | 'INVALID_STOCK'
   | 'INVALID_TRACKING'
   | 'INVALID_SN_PREFIX'
+  | 'INVALID_REASON'
   | 'BARCODE_CONFLICT'
   | 'PRODUCT_NOT_FOUND'
   | 'PRODUCT_SN_PREFIX_CONFLICT'
@@ -64,7 +65,10 @@ export type PurchaseErrorCode =
   | 'PURCHASE_TYPE_MISMATCH' // 行类型与商品 tracking 不符（D-SN9）
   | 'PURCHASE_SN_EXISTS' // SN 已在库 / 已售（事务内台账检查——D-SN4/17）
   | 'PRODUCT_NOT_FOUND' // 商品不存在（事务内）
-  | 'PURCHASE_NOT_FOUND' // 进货单不存在（getDetail）
+  | 'PURCHASE_NOT_FOUND' // 进货单不存在（getDetail / 作废）
+  | 'PURCHASE_ALREADY_VOIDED' // 进货单已作废（重复作废防护）
+  | 'PURCHASE_SN_SOLD' // 单内存在已售 SN，拒绝整单作废（先作废对应销售单）
+  | 'INVALID_REASON' // 作废原因为空（service 层必填校验）
 
 /** 带 code 的业务错误（message 为面向用户的中文文案） */
 export class PurchaseServiceError extends Error {

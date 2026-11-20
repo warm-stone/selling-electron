@@ -330,7 +330,7 @@ describe('checkout：负库存允许（D2）', () => {
 // ── 3. 作废：库存复原 + 审计链（D3 整单作废）────────────────
 
 describe('voidSale：整单作废（D3）', () => {
-  it('作废后 stock 复原 + movements 2 行 source=void + status/voided_at + 明细不物理删除', () => {
+  it('作废后 stock 复原 + movements 2 行 source=sale_void + status/voided_at + 明细不物理删除', () => {
     const cola = addProduct('可口可乐', { barcode: '6903', stock: 10 })
     const water = addProduct('矿泉水', { barcode: '6904', stock: 5 })
     const service = svc()
@@ -356,15 +356,15 @@ describe('voidSale：整单作废（D3）', () => {
     expect(stockOf(cola)).toBe(10)
     expect(stockOf(water)).toBe(5)
 
-    // ── movements：+2 行 source='void'，change_qty 为正、before/after 复原衔接 ──
-    const voidMv = movements("WHERE source = 'void'")
+    // ── movements：+2 行 source='sale_void'，change_qty 为正、before/after 复原衔接 ──
+    const voidMv = movements("WHERE source = 'sale_void'")
     expect(voidMv).toHaveLength(2)
     expect(voidMv[0]).toMatchObject({
       product_id: cola,
       change_qty: 2,
       before_stock: 8,
       after_stock: 10,
-      source: 'void',
+      source: 'sale_void',
       source_id: receipt.id
     })
     expect(voidMv[1]).toMatchObject({
@@ -372,7 +372,7 @@ describe('voidSale：整单作废（D3）', () => {
       change_qty: 1,
       before_stock: 4,
       after_stock: 5,
-      source: 'void',
+      source: 'sale_void',
       source_id: receipt.id
     })
     // 出库+入库审计链完整（sale 2 + void 2）
@@ -595,7 +595,7 @@ describe('checkout/voidSale 边界校验', () => {
     expect(stockOf(bread)).toBe(5) // 存活商品复原
     expect(stockOf(cola)).toBe(8) // 断链商品不复原（库存随硬删废弃）
     expect(
-      movements("WHERE source = 'void'").map((m) => m.product_id)
+      movements("WHERE source = 'sale_void'").map((m) => m.product_id)
     ).toEqual([bread]) // 断链行不写复原流水
     expect(count('sale_items')).toBe(2) // 快照行不删
   })
@@ -1061,14 +1061,14 @@ describe('voidSale：SN 回滚（D-SN8）', () => {
     expect(stockOf(phone)).toBe(inStockSnCount(phone)) // D-SN13 一致性（作废后）
 
     // ── 流水：sale 2 + void 2（SN 行 +1）──
-    const voidMv = movements("WHERE source = 'void'")
+    const voidMv = movements("WHERE source = 'sale_void'")
     expect(voidMv).toHaveLength(2)
     expect(voidMv[0]).toMatchObject({
       product_id: phone,
       change_qty: 1,
       before_stock: 0,
       after_stock: 1,
-      source: 'void',
+      source: 'sale_void',
       source_id: receipt.id
     })
     expect(voidMv[1]).toMatchObject({
@@ -1123,10 +1123,10 @@ describe('voidSale：SN 回滚（D-SN8）', () => {
     expect(inStockSnCount(phone)).toBe(0)
 
     // 断链行不写复原流水（既有 skip 语义）
-    expect(movements("WHERE source = 'void'")).toHaveLength(0)
+    expect(movements("WHERE source = 'sale_void'")).toHaveLength(0)
   })
 
-  it('作废时商品已软删（004 迁移链路，经 product.service 删除）：不崩溃、单据正常作废、SN 不复活（级联软删行 WHERE deleted=0 命中 0 行）、库存不复原', () => {
+  it('作废时商品已软删（软删链路，经 product.service 删除）：不崩溃、单据正常作废、SN 不复活（级联软删行 WHERE deleted=0 命中 0 行）、库存不复原', () => {
     const phone = addSnProduct('红米手机')
     const snId = addSn(phone, 'SN001')
     const service = svc()
@@ -1138,7 +1138,7 @@ describe('voidSale：SN 回滚（D-SN8）', () => {
 
     // 已售 SN 不阻删（D-SN15 只拦在库）→ 经 product.service 软删商品
     const productService = createProductService(db)
-    expect(productService.delete({ id: phone })).toEqual({ ok: true, willOrphan: 1 })
+    expect(productService.delete({ id: phone , reason: '测试原因' })).toEqual({ ok: true, willOrphan: 1 })
 
     expect(() => service.voidSale(receipt.id)).not.toThrow()
 
@@ -1163,7 +1163,7 @@ describe('voidSale：SN 回滚（D-SN8）', () => {
     // 软删商品对 getProductSnapshot 不可见 → 库存不复原、不写复原流水
     // （与 product_id=NULL 断链行同款 skip 语义——两条路径并存）
     expect(stockOf(phone)).toBe(0)
-    expect(movements("WHERE source = 'void'")).toHaveLength(0)
+    expect(movements("WHERE source = 'sale_void'")).toHaveLength(0)
 
     // 快照行保留且 product_id 保持指向软删商品（FK 有效——软删链路的意义所在）
     expect(snItem.product_id).toBe(phone)

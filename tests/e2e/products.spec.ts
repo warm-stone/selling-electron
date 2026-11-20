@@ -162,6 +162,11 @@ test.describe.serial('商品管理全链路', () => {
       .filter({ hasText: '库存' })
       .locator('.el-input-number input')
       .fill('80')
+    // 改动原因必填（未填保存被表单校验拦截）
+    await dialog.getByRole('button', { name: '保存' }).click()
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('改动原因不能为空')
+    await dialog.getByTestId('product-change-reason').fill('盘点调整')
     await submitDialog(page)
 
     const row = rowByName(page, NAME)
@@ -203,6 +208,9 @@ test.describe.serial('商品管理全链路', () => {
       .filter({ hasText: '库存' })
       .locator('.el-input-number input')
       .fill('-5')
+    // 编辑弹窗含进货建议提示（定案：仅提示文案，不写入记录）
+    await expect(dialog).toContainText('建议在「进货管理」新建进货单入库')
+    await dialog.getByTestId('product-change-reason').fill('负库存演示')
     await submitDialog(page)
 
     const row = rowByName(page, NAME)
@@ -213,7 +221,41 @@ test.describe.serial('商品管理全链路', () => {
     await page.screenshot({ path: '.omo/evidence/task-8-error-cases.png' })
   })
 
-  test('删除（无引用）：确认弹窗明示不可恢复 → 行消失（软删：DB 行保留 deleted=1）', async () => {
+  test('改动记录：「记录」弹窗展示旧→新与原因；一次保存一条（DB 断言）', async () => {
+    const { page } = app
+    await rowByName(page, NAME).getByTestId('open-change-logs').click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '改动记录' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('仅显示最近 100 条记录')
+    // 两次编辑保存（最新在前）：库存 80→-5、100→80，原因逐条留档
+    await expect(dialog).toContainText('库存：80 → -5')
+    await expect(dialog).toContainText('库存：100 → 80')
+    await expect(dialog).toContainText('负库存演示')
+    await expect(dialog).toContainText('盘点调整')
+
+    // DB：一次保存一条记录（非 update+stock 两条），action='update'、明细含 stock 旧→新
+    const productId = productIdByBarcode(app.dbPath, BARCODE)
+    const verify = new Database(app.dbPath, { readonly: true })
+    try {
+      const logs = verify
+        .prepare(
+          'SELECT action, reason, changes_json FROM product_change_logs WHERE product_id = ? ORDER BY id'
+        )
+        .all(productId) as Array<{ action: string; reason: string; changes_json: string }>
+      expect(logs).toHaveLength(2)
+      expect(logs[0]!.action).toBe('update')
+      expect(JSON.parse(logs[0]!.changes_json)).toEqual([{ field: 'stock', old: 100, new: 80 }])
+      expect(logs[0]!.reason).toBe('盘点调整')
+      expect(JSON.parse(logs[1]!.changes_json)).toEqual([{ field: 'stock', old: 80, new: -5 }])
+    } finally {
+      verify.close()
+    }
+
+    await dialog.locator('.el-dialog__headerbtn').click()
+    await expect(dialog).toBeHidden()
+  })
+
+  test('删除（无引用）：确认弹窗明示不可恢复 + 原因必填 → 行消失（软删：DB 行保留 deleted=1）', async () => {
     const { page } = app
     // 软删后 barcode 置 NULL → 删除前先按条码捕获 productId
     const productId = productIdByBarcode(app.dbPath, BARCODE)
@@ -223,12 +265,16 @@ test.describe.serial('商品管理全链路', () => {
     await expect(box).toBeVisible()
     await expect(box).toContainText(`确定删除商品「${NAME}」吗？`)
     await expect(box).toContainText('此操作不可恢复')
+    // 原因必填：空原因点删除被 inputValidator 拦截
+    await box.getByRole('button', { name: '删除' }).click()
+    await expect(box).toContainText('改动原因不能为空')
+    await box.locator('textarea').fill('停售清理')
     await box.getByRole('button', { name: '删除' }).click()
 
     await expect(rowByName(page, NAME)).toHaveCount(0)
     await expect(page.locator('.page-title__count')).toContainText('共 0 款商品')
 
-    // 软删：行保留 deleted=1、barcode 置 NULL（不物理删除）
+    // 软删：行保留 deleted=1、barcode 置 NULL（不物理删除）；删除动作落改动记录
     const verify = new Database(app.dbPath, { readonly: true })
     try {
       const row = verify.prepare('SELECT deleted, barcode FROM products WHERE id = ?').get(productId) as {
@@ -237,6 +283,11 @@ test.describe.serial('商品管理全链路', () => {
       }
       expect(row.deleted).toBe(1)
       expect(row.barcode).toBeNull()
+      const log = verify
+        .prepare("SELECT action, reason FROM product_change_logs WHERE product_id = ? AND action = 'delete'")
+        .get(productId) as { action: string; reason: string } | undefined
+      expect(log).toBeDefined()
+      expect(log!.reason).toBe('停售清理')
     } finally {
       verify.close()
     }
@@ -273,6 +324,7 @@ test.describe.serial('商品管理全链路', () => {
     const box = page.locator('.el-message-box')
     await expect(box).toContainText('该商品关联 1 条历史单据')
     await expect(box).toContainText('单据完整保留')
+    await box.locator('textarea').fill('重复建档清理')
     await box.getByRole('button', { name: '删除' }).click()
 
     await expect(rowByName(page, '农夫山泉 550ml')).toHaveCount(0)
