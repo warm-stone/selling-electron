@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { initDatabase } from './db/database'
+import { initLogger, logError, logWarn } from './common/logger'
 import { registerCustomersIpc } from './ipc/customers.ipc'
 import { registerDiagnosticsIpc } from './ipc/diagnostics.ipc'
 import { registerReportsExportIpc } from './ipc/reports-export.ipc'
@@ -19,6 +20,40 @@ if (process.env['E2E_USER_DATA_DIR']) {
   app.setPath('userData', process.env['E2E_USER_DATA_DIR'])
 }
 
+// ── P2-3：进程级异常兜底 + 文件日志（userData/logs/main.log，同步写 + 1MB 轮转）──
+// 此前主进程零日志、零异常兜底：崩溃无现场、renderer 进程消失白屏无恢复。
+initLogger(join(app.getPath('userData'), 'logs'))
+
+// uncaughtException：主进程状态已不可信——同步落日志后受控退出（不带病运行；
+// 销售已落库不受影响，重开应用可从销售记录重打小票——G3 既有语义）
+process.on('uncaughtException', (error) => {
+  logError('uncaughtException', error)
+  app.exit(1)
+})
+
+// unhandledRejection：多为 IPC/打印链路的漏网 Promise——记录后继续运行
+// （业务失败本就有 { ok:false } / reject 回传 renderer，此处仅兜「没人接」的）
+process.on('unhandledRejection', (reason) => {
+  logError('unhandledRejection', reason)
+})
+
+// renderer 进程崩溃（OOM/原生崩溃）：记录后重载页面降级恢复——renderer 无
+// 持久状态（购物车不持久化是已知设计边界），重载成本低、白屏不可接受
+app.on('render-process-gone', (_event, webContents, details) => {
+  logError(
+    'render-process-gone',
+    new Error(`reason=${details.reason} exitCode=${details.exitCode}`)
+  )
+  if (!webContents.isDestroyed()) {
+    webContents.reload()
+  }
+})
+
+// GPU/utility 等子进程消失：仅留痕（Electron 会自动重启必要子进程，不干预）
+app.on('child-process-gone', (_event, details) => {
+  logWarn('child-process-gone', `type=${details.type} reason=${details.reason}`)
+})
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -36,9 +71,20 @@ function createWindow(): void {
     mainWindow.show()
   })
 
-  // 拒绝新窗口，外部链接交给系统默认浏览器
+  // 拒绝新窗口，外部链接交给系统默认浏览器。
+  // P3 安全：scheme 白名单——仅放行 http/https；file://、自定义协议处理程序等
+  // 一律拒绝（renderer 不加载远程内容，此为纵深防御；非法 URL 同样拒绝）
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    void shell.openExternal(details.url)
+    try {
+      const protocol = new URL(details.url).protocol
+      if (protocol === 'http:' || protocol === 'https:') {
+        void shell.openExternal(details.url)
+      } else {
+        logWarn('window-open', `已拒绝非 http(s) 协议的外链打开：${protocol}`)
+      }
+    } catch {
+      logWarn('window-open', `已拒绝非法 URL 的外链打开：${details.url}`)
+    }
     return { action: 'deny' }
   })
 

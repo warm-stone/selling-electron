@@ -65,7 +65,7 @@ main (Electron 主进程)
 | 存储 | better-sqlite3 v13（N-API prebuilds，免 rebuild；WAL 模式；`PRAGMA user_version` 迁移） |
 | 打印 | node-thermal-printer（ESC/POS 指令生成，纯函数零 I/O） |
 | 导出 | exceljs（xlsx）/ docx（.docx）/ 原生 txt（UTF-8 BOM + CRLF） |
-| 测试 | vitest（单元 + golden 字节矩阵，1064 用例）+ Playwright `_electron`（E2E 103 场景，含打印机诊断 11 场景） |
+| 测试 | vitest（单元 + golden 字节矩阵，1069 用例）+ Playwright `_electron`（E2E 103 场景，含打印机诊断 11 场景） |
 | 质量护栏 | ESLint 10（vue3 recommended + TS recommended + no-restricted-imports 架构分层锁 + max-lines） |
 | 打包 | electron-builder 26（NSIS） |
 
@@ -78,7 +78,7 @@ npm install        # postinstall 自动补齐 Electron 二进制（install-elect
 npm run dev        # 启动开发（HMR）
 npm run typecheck  # 类型检查（node + web 两侧）
 npm run lint       # ESLint（vue3 + TS recommended + 架构分层/文件行数护栏）
-npm test           # vitest 单元测试（1064 用例）
+npm test           # vitest 单元测试（1069 用例）
 npm run test:e2e   # Playwright E2E（globalSetup 自动先构建 out/）
 npm run build      # 构建 out/（main/preload/renderer）
 ```
