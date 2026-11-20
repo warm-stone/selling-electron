@@ -22,6 +22,7 @@ jobs:
           node-version: "22"
 
       - run: cd repo_workspace && npm ci
+      - run: cd repo_workspace && npm run lint
       - run: cd repo_workspace && npm run typecheck
       - run: cd repo_workspace && npm test
       - run: cd repo_workspace && npm run build
