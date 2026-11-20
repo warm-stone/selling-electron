@@ -6,7 +6,7 @@ import type {
   PurchaseOrder,
   PurchaseOrderWithItems
 } from '../../../shared/types'
-import { PurchaseServiceError } from '../../services/purchase.service'
+import { PurchaseServiceError } from '../../common/errors'
 
 /**
  * 进货 DAL（Task 9 + SN 商品 T1.3）。

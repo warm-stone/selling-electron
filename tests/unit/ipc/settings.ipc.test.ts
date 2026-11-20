@@ -16,7 +16,7 @@ import {
   rowsToLogoInfos,
   rowsToAppSettings,
   validateSettingsPatch
-} from '../../../src/main/ipc/settings.ipc'
+} from '../../../src/main/services/settings.service'
 import { buildTestPrintBytes, TEST_PRINT_SALE, toPrintSettings } from '../../../src/main/ipc/printing.ipc'
 import { DEFAULT_TEMPLATES } from '../../../src/shared/receipt/default-template'
 import type { AppSettings, PrintTemplate } from '../../../src/shared/types'

@@ -22,10 +22,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { migrate } from '../../../src/main/db/migrator'
-import {
-  createProductService,
-  ProductServiceError
-} from '../../../src/main/services/product.service'
+import { createProductService } from '../../../src/main/services/product.service'
+// P1-2：错误类已下沉 common/errors（repo/service 共同词汇）
+import { ProductServiceError } from '../../../src/main/common/errors'
 
 let db: Database.Database
 let service: ReturnType<typeof createProductService>

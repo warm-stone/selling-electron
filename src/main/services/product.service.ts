@@ -18,28 +18,8 @@ import type Database from 'better-sqlite3'
 import type { Product, ProductSn, ProductTracking } from '../../shared/types'
 import { createProductRepo } from '../db/repositories/product.repo'
 import type { NewProduct, ProductRow } from '../db/repositories/product.repo'
-
-/** service 错误码（IPC 层透传 message 给 renderer；测试断言 code） */
-export type ProductErrorCode =
-  | 'INVALID_NAME'
-  | 'INVALID_PRICE'
-  | 'INVALID_STOCK'
-  | 'INVALID_TRACKING'
-  | 'INVALID_SN_PREFIX'
-  | 'BARCODE_CONFLICT'
-  | 'PRODUCT_NOT_FOUND'
-  | 'PRODUCT_SN_PREFIX_CONFLICT'
-  | 'PRODUCT_SN_HAS_STOCK'
-  | 'PRODUCT_SN_NO_MANUAL_STOCK'
-  | 'PRODUCT_SN_NOT_DELETABLE'
-
-/** 带 code 的业务错误（message 为面向用户的中文文案） */
-export class ProductServiceError extends Error {
-  constructor(readonly code: ProductErrorCode, message: string) {
-    super(message)
-    this.name = 'ProductServiceError'
-  }
-}
+// P1-2 分层修复：错误类下沉 common/errors（见该文件头注释）
+import { ProductServiceError } from '../common/errors'
 
 /** IpcChannels['products:create'] req 形状（snake_case，与契约逐字一致） */
 export interface ProductCreateInput {

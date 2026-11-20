@@ -4,10 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type Database from 'better-sqlite3'
 import { closeDatabase, initDatabase } from '../../../src/main/db/database'
-import {
-  CustomerServiceError,
-  createCustomerService
-} from '../../../src/main/services/customer.service'
+import { createCustomerService } from '../../../src/main/services/customer.service'
+// P1-2：错误类已下沉 common/errors（repo/service 共同词汇）
+import { CustomerServiceError } from '../../../src/main/common/errors'
 import { rmTempDirSync } from '../../helpers/cleanup'
 import type { Customer } from '../../../src/shared/types'
 

@@ -108,6 +108,62 @@ export default defineConfigWithVueTs(
     }
   },
 
+  // ── main 进程内部分层锁（P1-2/P1-3：db ← services ← ipc 单向依赖；
+  //    跨层共享词汇（业务错误类等）住 main/common，谁都可以 import 它）──
+  {
+    name: 'selling-electron/layering-main-db',
+    files: ['src/main/db/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/services/**', '**/ipc/**'],
+              message:
+                'db（DAL）是 main 内最底层，禁止反向 import services / ipc——repo 需要抛的业务错误类住 main/common/errors（P1-2 循环依赖修复的守卫）'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    name: 'selling-electron/layering-main-services',
+    files: ['src/main/services/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/ipc/**'],
+              message: 'services 不得 import ipc（装配层）——依赖方向是 ipc → services → db 单向'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    name: 'selling-electron/layering-main-ipc',
+    files: ['src/main/ipc/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/*.ipc', './*.ipc', './**/*.ipc'],
+              message:
+                'ipc 之间禁止横向 import——复用逻辑下沉 services 层（P1-3：printing→settings 的 rowsToAppSettings 已下沉 settings.service 的守卫；typed-handle 等装配基建不以 .ipc 结尾，不受影响）'
+            }
+          ]
+        }
+      ]
+    }
+  },
+
   // ── 巨型文件护栏（批次 1–5 拆分成果防回潮；超限白名单显式列出）──
   {
     name: 'selling-electron/max-lines-src',

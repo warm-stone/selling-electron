@@ -24,7 +24,8 @@ import { createTemplateRepo } from '../db/repositories/template.repo'
 import { createLogoRepo } from '../db/repositories/logo.repo'
 import type { AppSettings, PrintTemplate, PrintTestRequest } from '../../shared/types'
 import { typedHandle } from './typed-handle'
-import { rowsToAppSettings } from './settings.ipc'
+// P1-3 分层修复：settings 纯映射住 service 层（不再横向 import 兄弟 ipc）
+import { rowsToAppSettings } from '../services/settings.service'
 
 /**
  * 打印 IPC 薄层（Task 19 打印设置 + Task 15 打印编排）。

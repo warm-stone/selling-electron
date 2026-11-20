@@ -42,29 +42,8 @@ import {
   parseRecentSalespersons,
   pushRecentSalesperson
 } from './salesperson-history'
-
-/** service 错误码（IPC 层透传 message 给 renderer） */
-export type SaleErrorCode =
-  | 'SALE_EMPTY_CART'
-  | 'SALE_INVALID_ITEM'
-  | 'PRODUCT_NOT_FOUND'
-  | 'SALE_NOT_FOUND'
-  | 'SALE_ALREADY_VOIDED'
-  | 'SALE_SN_REQUIRED'
-  | 'SALE_SN_NOT_FOUND'
-  | 'SALE_SN_SOLD'
-  | 'SALE_SN_PRODUCT_MISMATCH'
-  | 'SALE_EXTRAS_PHONE_REQUIRED'
-  | 'SALE_EXTRAS_PHONE_INVALID'
-  | 'SALE_EXTRAS_SUBSIDY_REQUIRES_CUSTOMER'
-
-/** 带 code 的业务错误（message 为面向用户的中文文案） */
-export class SaleServiceError extends Error {
-  constructor(readonly code: SaleErrorCode, message: string) {
-    super(message)
-    this.name = 'SaleServiceError'
-  }
-}
+// P1-2 分层修复：错误类下沉 common/errors（见该文件头注释）
+import { SaleServiceError } from '../common/errors'
 
 /** IpcChannels['sales:list'] req 形状（date_from/date_to/status + 三筛选键） */
 export interface SaleListQuery {

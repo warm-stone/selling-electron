@@ -4,11 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type Database from 'better-sqlite3'
 import { closeDatabase, initDatabase } from '../../../src/main/db/database'
-import {
-  SaleServiceError,
-  createSaleService
-} from '../../../src/main/services/sale.service'
-import type { SaleErrorCode } from '../../../src/main/services/sale.service'
+import { createSaleService } from '../../../src/main/services/sale.service'
+// P1-2：错误类已下沉 common/errors（repo/service 共同词汇）
+import { SaleServiceError, type SaleErrorCode } from '../../../src/main/common/errors'
 import { createProductService } from '../../../src/main/services/product.service'
 import { rmTempDirSync } from '../../helpers/cleanup'
 import type { Sale, StockMovement } from '../../../src/shared/types'

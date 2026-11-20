@@ -25,22 +25,9 @@ export interface PurchaseService {
   getDetail(id: number): PurchaseOrderWithItems
 }
 
-/** service 错误码（IPC 层透传 message 给 renderer；repo 事务内抛出同款——见 purchase.repo） */
-export type PurchaseErrorCode =
-  | 'PURCHASE_INVALID_ITEM' // 行结构非法（数量/成本价/SN 结构等，message 指明字段）
-  | 'PURCHASE_SN_DUP_IN_ORDER' // 本单内 SN 重复（跨所有 sn 行收集后统一判重）
-  | 'PURCHASE_TYPE_MISMATCH' // 行类型与商品 tracking 不符（D-SN9）
-  | 'PURCHASE_SN_EXISTS' // SN 已在库 / 已售（事务内台账检查——D-SN4/17）
-  | 'PRODUCT_NOT_FOUND' // 商品不存在（事务内）
-  | 'PURCHASE_NOT_FOUND' // 进货单不存在（getDetail）
-
-/** 带 code 的业务错误（message 为面向用户的中文文案） */
-export class PurchaseServiceError extends Error {
-  constructor(readonly code: PurchaseErrorCode, message: string) {
-    super(message)
-    this.name = 'PurchaseServiceError'
-  }
-}
+// P1-2 分层修复：错误类下沉 common/errors（repo → common ← service，打断运行时环；
+// repo 事务内抛出同款——见 purchase.repo）
+import { PurchaseServiceError } from '../common/errors'
 
 /** 归一化备注：空串/全空白 → null（DB 可空列语义） */
 function normalizeNote(note: string | null | undefined): string | null {

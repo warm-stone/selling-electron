@@ -25,21 +25,8 @@ import type { Customer } from '../../shared/types'
 import { createCustomerRepo } from '../db/repositories/customer.repo'
 import type { CustomerPatch } from '../db/repositories/customer.repo'
 import { isValidMobilePhone, INVALID_PHONE_MESSAGE } from '../../shared/utils/phone'
-
-/** service 错误码（IPC 层透传 message 给 renderer） */
-export type CustomerErrorCode =
-  | 'CUSTOMER_PHONE_REQUIRED'
-  | 'CUSTOMER_PHONE_INVALID'
-  | 'CUSTOMER_PHONE_EXISTS'
-  | 'CUSTOMER_NOT_FOUND'
-
-/** 带 code 的业务错误（message 为面向用户的中文文案） */
-export class CustomerServiceError extends Error {
-  constructor(readonly code: CustomerErrorCode, message: string) {
-    super(message)
-    this.name = 'CustomerServiceError'
-  }
-}
+// P1-2 分层修复：错误类下沉 common/errors（repo 事务内也抛同款，见该文件头注释）
+import { CustomerServiceError } from '../common/errors'
 
 /** IpcChannels['customers:create'] req 形状（四字段原始输入——trim 是 service 职责） */
 export interface CustomerCreateInput {

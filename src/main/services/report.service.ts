@@ -10,17 +10,8 @@
 import type Database from 'better-sqlite3'
 import type { DailyReport, MonthlyReport } from '../../shared/types'
 import { createReportRepo } from '../db/repositories/report.repo'
-
-/** service 错误码（IPC 层透传 message 给 renderer） */
-export type ReportErrorCode = 'REPORT_INVALID_DATE' | 'REPORT_INVALID_MONTH'
-
-/** 带 code 的业务错误（message 为面向用户的中文文案） */
-export class ReportServiceError extends Error {
-  constructor(readonly code: ReportErrorCode, message: string) {
-    super(message)
-    this.name = 'ReportServiceError'
-  }
-}
+// P1-2 分层修复：错误类下沉 common/errors（见该文件头注释）
+import { ReportServiceError } from '../common/errors'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const MONTH_RE = /^\d{4}-\d{2}$/
