@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
+// omo 复核 #1 配套：print.service 的 logo 缺失诊断已从 console.warn 换 logWarn
+// （落盘取证），本文件 mock logger 以断言调用且不写真实日志
+vi.mock('../../../src/main/common/logger', () => ({
+  initLogger: vi.fn(),
+  getLogFilePath: vi.fn(() => null),
+  logError: vi.fn(),
+  logWarn: vi.fn()
+}))
+import { logWarn } from '../../../src/main/common/logger'
 import {
   appSettingsToPrintSettings,
   collectSectionLogoIds,
@@ -289,9 +298,9 @@ describe('buildReceiptPayload（vars + items display-ready 组装）', () => {
     expect(readLogoById).toHaveBeenCalledTimes(2)
   })
 
-  it('logo 读不到（行/文件缺失）→ console.warn 诊断且不进 logoBuffers，不影响组装', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    try {
+  it('logo 读不到（行/文件缺失）→ logWarn 诊断且不进 logoBuffers，不影响组装', async () => {
+    vi.mocked(logWarn).mockClear()
+    {
       const template: ReceiptTemplate = {
         ...DEFAULT_TEMPLATES['80mm'],
         header: [{ type: 'image', logoId: 42 }, ...DEFAULT_TEMPLATES['80mm'].header]
@@ -306,10 +315,8 @@ describe('buildReceiptPayload（vars + items display-ready 组装）', () => {
       const payload = await createPrintOrchestrator(deps).buildReceiptPayload(7)
 
       expect(payload.logoBuffers.size).toBe(0)
-      expect(warnSpy).toHaveBeenCalledWith('[print] 模板引用 logoId=42 但文件不可读，已跳过')
+      expect(logWarn).toHaveBeenCalledWith('print', '模板引用 logoId=42 但文件不可读，已跳过')
       expect(payload.vars.shopName).toBe('测试便利店')
-    } finally {
-      warnSpy.mockRestore()
     }
   })
 
@@ -447,10 +454,9 @@ describe('printSale（生成字节 → enqueuePrintJob）', () => {
 
     const job1 = orchestrator.printSale(7)
     const job2 = orchestrator.printSale(7)
-    await new Promise((r) => setTimeout(r, 20))
-
-    // job1 挂起未放行 → job2 必须还在等（串行证明）
-    expect(events).toEqual(['start:0'])
+    // omo 复核 #2：固定 sleep 改 vi.waitFor——waitFor 通过（events 恰为
+    // ['start:0']）即同时证明 job1 已启动且 job2 还在等（串行）
+    await vi.waitFor(() => expect(events).toEqual(['start:0']))
 
     releaseFirst?.()
     await job1

@@ -1,4 +1,5 @@
 import { isPrintChannelKind, type PrintChannel, type PrintChannelKind } from './channels/print-channel'
+import { logWarn } from '../common/logger'
 import { DriverChannel } from './channels/driver.channel'
 import { SerialChannel, DEFAULT_SERIAL_PORT } from './channels/serial.channel'
 import { SpoolerChannel } from './channels/spooler.channel'
@@ -301,7 +302,8 @@ export function createPrintOrchestrator(deps: PrintOrchestratorDeps) {
       if (buf) {
         logoBuffers.set(logoId, buf)
       } else {
-        console.warn(`[print] 模板引用 logoId=${logoId} 但文件不可读，已跳过`)
+        // omo 复核 #1：console.warn 不落盘 → 换 logWarn（P2-3「现场可取证」接线）
+        logWarn('print', `模板引用 logoId=${logoId} 但文件不可读，已跳过`)
       }
     }
 

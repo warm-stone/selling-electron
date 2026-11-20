@@ -24,6 +24,9 @@ import { createTemplateRepo } from '../db/repositories/template.repo'
 import { createLogoRepo } from '../db/repositories/logo.repo'
 import type { AppSettings, PrintTemplate, PrintTestRequest } from '../../shared/types'
 import { typedHandle } from './typed-handle'
+// omo 复核 #1：{ok:false} 分支落盘留痕（P2-3 业务侧接线——错误已回传 renderer
+// 展示，但现场取证需要日志文件里有同一事实；logger 未初始化时静默 no-op）
+import { logError, logWarn } from '../common/logger'
 // P1-3 分层修复：settings 纯映射住 service 层（不再横向 import 兄弟 ipc）
 import { rowsToAppSettings } from '../services/settings.service'
 
@@ -253,6 +256,7 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
       return { ok: true }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
+      logError('printing:testPrint', err)
       return { ok: false, error: `测试打印失败（${settings.printer_channel} 通道）：${detail}` }
     }
   })
@@ -265,6 +269,7 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
   typedHandle(ipcMain, 'printing:rawProbe', async (req) => {
     const settings = toPrintSettings(req)
     if (settings.printer_channel === 'driver') {
+      logWarn('printing:rawProbe', '编码探针被拒：当前通道为 driver（用户需先切 RAW 通道）')
       return {
         ok: false,
         error:
@@ -278,6 +283,7 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
       return { ok: true }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
+      logError('printing:rawProbe', err)
       return { ok: false, error: `编码探针打印失败（${settings.printer_channel} 通道）：${detail}` }
     }
   })
@@ -303,6 +309,8 @@ export function registerPrintingIpc(db: Database.Database): PrintOrchestrator {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
       const channel = currentSettings().printer_channel
+      // G3：打印失败不影响已落库销售——但失败本身必须落盘（现场取证）
+      logError('printing:print', err)
       return {
         ok: false,
         error: `打印失败（${channel} 通道）：${detail}。销售已保存，可稍后在销售记录中重打`

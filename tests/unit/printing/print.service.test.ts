@@ -121,11 +121,9 @@ describe('PrintQueue（串行队列 + 重试）', () => {
 
     const jobA = queue.enqueuePrintJob(new Uint8Array([0x1b, 0x40]))
     const jobB = queue.enqueuePrintJob(new Uint8Array([0x1d, 0x56, 0x42, 0x00]))
-    await Promise.resolve()
-    await new Promise((r) => setTimeout(r, 20))
-
-    // job1 尚未放行 → job2 必须还在等（串行证明）
-    expect(events).toEqual(['start:0:1b40'])
+    // omo 复核 #2：固定 sleep 改 vi.waitFor——waitFor 通过（events 恰为
+    // ['start:0:1b40']）即同时证明 job1 已启动且 job2 还在等（串行）
+    await vi.waitFor(() => expect(events).toEqual(['start:0:1b40']))
 
     gate.resolve()
     await jobA
@@ -274,9 +272,9 @@ describe('PrintQueue per-job 通道（P1-1：共享队列 + 各 job 走自己的
     const jobA = queue.enqueuePrintJob(new Uint8Array([0xaa]), channelA)
     const jobB = queue.enqueuePrintJob(new Uint8Array([0xbb]), channelB)
 
-    await new Promise((r) => setTimeout(r, 20))
+    // omo 复核 #2：固定 sleep 改 vi.waitFor（正向条件=A 已启动收到字节）
+    await vi.waitFor(() => expect(receivedA).toEqual(['aa']))
     // A 在途未放行 → B 必须还没启动（串行证明）；busy 对在途任务可见
-    expect(receivedA).toEqual(['aa'])
     expect(sendB).not.toHaveBeenCalled()
     expect(queue.busy).toBe(true)
 

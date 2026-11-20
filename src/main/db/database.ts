@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from './migrator'
+import { logError } from '../common/logger'
 
 const DB_FILENAME = 'pos.db'
 
@@ -24,7 +25,14 @@ export function initDatabase(dir?: string): Database.Database {
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  migrate(db)
+  // omo 复核 #1：migrate 失败落盘精确 scope（db-migrate）后再抛——此前只能靠
+  // 进程级 unhandledRejection 兜底，日志里看不出失败环节
+  try {
+    migrate(db)
+  } catch (error) {
+    logError('db-migrate', error)
+    throw error
+  }
 
   current = db
   currentPath = dbPath
