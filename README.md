@@ -17,26 +17,41 @@ Windows 桌面销存系统（POS / 进销存）：Electron + Vue 3 + TypeScript 
 ## 架构（文字版）
 
 ```
+shared/types/ipc.ts ── IPC 契约唯一真源（IpcChannels：通道名 + req + res）
+    │  main 侧 typedHandle 把 res 类型钉在装配入口（注册即收集，契约注册
+    │  完整性有运行时测试兜底）；renderer 侧 createTypedInvoke 按契约收窄调用
 renderer (Vue 3 + Element Plus, hash router)
+    │  views/* 页面编排壳 + components/*（cart/common/pos/products/purchases/
+    │  receipt/sales/scanner/settings/template-editor——受控组件 props+emits）
     │  window.api（typed invoke，无魔法字符串）
-preload (contextBridge 单一类型化 API surface)
+preload (contextBridge API surface——PosApi 由 IpcReq<K>/IpcRes<K> 从契约派生，
+    │    无手写重复声明)
     │  IPC（typed IpcChannels 契约）
 main (Electron 主进程)
-    ├── ipc/*          薄层：参数校验 + 调 service
-    ├── services/*     业务核心（纯 TS + DI，vitest 免 Electron 可测）
-    ├── repositories/*  DAL（纯 SQL）
+    ├── ipc/*          薄装配层：typedHandle 注册 + 参数校验 + 调 service
+    │                  （ipc 间禁止横向 import——ESLint 护栏）
+    ├── services/*     业务核心（纯 TS + DI，vitest 免 Electron 可测；
+    │                  settings 域已 service 化——纯映射/校验/Logo 文件助手）
+    ├── common/        跨层共享词汇：5 个 ServiceError 业务错误类
+    │                  （db 与 services 同引，打断 repo↔service 循环依赖）
     ├── db/            better-sqlite3（WAL + PRAGMA user_version 迁移）
-    ├── printing/      ★ 打印子系统
+    │     └── repositories/*  DAL（SQL + 领域错误；禁 import services/ipc——ESLint 护栏）
+    ├── printing/      ★ 打印子系统（全进程唯一串行队列，结账/测试打印/探针同队）
     │     ├── escpos/  ESC/POS 纯函数生成器（GBK 编码 + 生僻字降级 '?' + Logo 光栅钳制纸宽/8 点对齐）
     │     │            + 字符网格数学（58mm=32 列 / 80mm=48 列，三渲染同源）
     │     ├── driver/  收据 HTML 生成器（driver 通道载荷——驱动渲染兜底的第三渲染器）
     │     ├── channels/ spooler(主) / tcp(辅) / serial(备) / driver(驱动渲染兜底) + 串行队列
     │     └── diagnostics/ 打印机诊断（PowerShell 采集 → 规则引擎 17 条 → L1/L2 修复动作 → 渲染自检 → 三层报告导出）
+    │           └── collect/ 采集子模块（stdout 解析 / 打印机组装 / 状态映射 /
+    │                          应用段 / 原语——collect.runner 只留编排）
     ├── export/        txt / xlsx / docx 导出器
     └── scanner/       扫码枪检测器（纯函数状态机 + before-input-event 桥）
 
 模板 JSON（print_templates 表）是唯一事实源：
   同一模板 + 共享字符网格数学 → [ESC/POS 字节流] 与 [HTML 预览] 与 [driver 渲染 HTML] 三渲染同源
+
+架构护栏：ESLint no-restricted-imports 锁进程边界（renderer/preload/shared 禁反向依赖）
+  + main 内部分层（db ← services ← ipc 单向）+ max-lines 防巨型文件回潮——违例即 lint 报错
 ```
 
 数据模型（10 表）：`products`、`purchase_orders` + `purchase_items`、`sales` + `sale_items`、`customers` + `sale_extras`（1:1 订单附加：客户引用/国补/订单备注/销售人员）、`stock_movements`（审计链）、`print_templates`、`settings`。销售/进货明细行均含**商品快照字段**；客户信息为引用（改档案后历史订单显示最新）；商品删除为逻辑删除（软删行保留，`product_id` 引用持续有效），历史单据与审计链完整可读。
@@ -50,7 +65,8 @@ main (Electron 主进程)
 | 存储 | better-sqlite3 v13（N-API prebuilds，免 rebuild；WAL 模式；`PRAGMA user_version` 迁移） |
 | 打印 | node-thermal-printer（ESC/POS 指令生成，纯函数零 I/O） |
 | 导出 | exceljs（xlsx）/ docx（.docx）/ 原生 txt（UTF-8 BOM + CRLF） |
-| 测试 | vitest（单元 + golden 字节矩阵，1056 用例）+ Playwright `_electron`（E2E 103 场景，含打印机诊断 11 场景） |
+| 测试 | vitest（单元 + golden 字节矩阵，1064 用例）+ Playwright `_electron`（E2E 103 场景，含打印机诊断 11 场景） |
+| 质量护栏 | ESLint 10（vue3 recommended + TS recommended + no-restricted-imports 架构分层锁 + max-lines） |
 | 打包 | electron-builder 26（NSIS） |
 
 ## 开发
@@ -61,7 +77,8 @@ main (Electron 主进程)
 npm install        # postinstall 自动补齐 Electron 二进制（install-electron）
 npm run dev        # 启动开发（HMR）
 npm run typecheck  # 类型检查（node + web 两侧）
-npm test           # vitest 单元测试（1056 用例）
+npm run lint       # ESLint（vue3 + TS recommended + 架构分层/文件行数护栏）
+npm test           # vitest 单元测试（1064 用例）
 npm run test:e2e   # Playwright E2E（globalSetup 自动先构建 out/）
 npm run build      # 构建 out/（main/preload/renderer）
 ```
@@ -81,10 +98,12 @@ npx electron-builder --win nsis   # Linux 上产出未含 uninstaller 的 stub�
 
 CI（`.github/workflows/release.yml`）——**正式发布流程**：推送 `v*` tag（与 package.json 版本一致，如 `v0.3.0`）→ 全质量门 → 自动发布到 GitHub Releases：
 
-1. **test**（windows-latest）：typecheck → vitest → Playwright E2E（驱动真实 Electron 窗口，含 tcp mock 打印场景）
+1. **test**（windows-latest）：lint → typecheck → vitest → Playwright E2E（驱动真实 Electron 窗口，含 tcp mock 打印场景）
 2. **release**（windows-latest，依赖 test）：tag 与版本号防呆校验 → `npm run build` → `electron-builder --win nsis --publish never` 产包 → gh CLI 幂等发布（规避 electron-builder v26 双 draft 竞态）→ GitHub Releases 上架 `selling-electron-setup-<版本>.exe`（中文安装向导、可选安装目录）
 
-> 日常 push 验证的旧 ci.yml 已停用（`ci.yml.bak` 留档）；GitCode 镜像的同步发布为手动（GitHub Releases 下载 exe → GitCode Release 页上传）。
+> GitHub 侧日常 push 验证的旧 ci.yml 已停用（`ci.yml.bak` 留档）；日常快速反馈由 **GitCode 侧
+> ci.yml**（Linux）承担：push/PR 到 main 触发 lint → typecheck → vitest → build 秒级质量门。
+> GitCode 镜像的 Release 同步为手动（GitHub Releases 下载 exe → GitCode Release 页上传）。
 
 ## 数据位置与手动备份
 
