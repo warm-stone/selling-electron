@@ -1,83 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { IPC_CHANNEL_NAMES, createTypedInvoke } from '../../../src/shared/types/ipc'
-import type { IpcChannels } from '../../../src/shared/types/ipc'
+import { createTypedInvoke } from '../../../src/shared/types/ipc'
 
-// ── 编译期断言工具：通道常量与 IpcChannels 键集必须完全一致（多/漏一个都编译失败）──
-type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2)
-  ? true
-  : false
-type ChannelName = keyof IpcChannels
-type FromConst = (typeof IPC_CHANNEL_NAMES)[number]
-
-// ── 计划 Task 3 规定的通道清单（grep 断言的事实源）──
-const EXPECTED_CHANNELS = [
-  // 商品
-  'products:list',
-  'products:create',
-  'products:update',
-  'products:delete',
-  'products:updateStock',
-  'products:findSn',
-  'products:listSns',
-  'products:deleteSn',
-  // 客户（Task 2 契约：结账客户信息）
-  'customers:list',
-  'customers:create',
-  'customers:update',
-  // 销售
-  'sales:checkout',
-  'sales:void',
-  'sales:list',
-  'sales:detail',
-  'sales:updateExtra',
-  // 进货
-  'purchases:create',
-  'purchases:list',
-  // 报表
-  'reports:daily',
-  'reports:monthly',
-  'reports:export',
-  // 打印
-  'printing:printers',
-  'printing:testPrint',
-  'printing:rawProbe',
-  'printing:preview',
-  'printing:print',
-  // 打印诊断（printer-diagnostics T1 契约：诊断/修复/导出）
-  'printing:diagnose',
-  'printing:repair',
-  'printing:diagnoseExport',
-  // 模板
-  'templates:list',
-  'templates:create',
-  'templates:update',
-  'templates:delete',
-  'templates:setDefault',
-  // 设置
-  'settings:get',
-  'settings:set',
-  'settings:listLogos',
-  'settings:uploadLogo',
-  'settings:deleteLogo',
-  'settings:getRecentSalespersons'
-] as const
-
-describe('IPC 通道契约', () => {
-  it('IPC_CHANNEL_NAMES 与计划通道清单一一对应', () => {
-    expect([...IPC_CHANNEL_NAMES].sort()).toEqual([...EXPECTED_CHANNELS].sort())
-  })
-
-  it('通道常量与 IpcChannels 键集完全一致（编译期 Equal 已保证，运行时复核）', () => {
-    const bothDirectionsMatch: Equal<ChannelName, FromConst> = true
-    expect(bothDirectionsMatch).toBe(true)
-  })
-
-  it('通道名命名规范：<domain>:<action>（G8 typed surface，无魔法字符串）', () => {
-    for (const name of IPC_CHANNEL_NAMES) {
-      expect(name).toMatch(/^[a-z]+:[a-zA-Z]+$/)
-    }
-  })
-})
+// P0-3 了断：本文件原有的「IPC_CHANNEL_NAMES == 手抄 EXPECTED_CHANNELS」循环
+// 断言已删除（手抄清单 A == 手抄清单 B，抓不到任何真实漂移；IPC_CHANNEL_NAMES
+// 孤儿常量一并移除）。契约完整性保障换位：
+//  - 「注册了未声明的通道」→ typedHandle 的 K extends keyof IpcChannels 编译期挡死；
+//  - 「声明了但主进程没注册」→ tests/unit/ipc/channel-registration.test.ts
+//    驱动全部 register*Ipc 后断言 typedHandle 运行时注册集 == 契约键集。
 
 describe('createTypedInvoke（renderer 侧泛型封装）', () => {
   it('转发通道名与请求体到底层 invoke，并透传响应', async () => {

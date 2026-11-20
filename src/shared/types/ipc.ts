@@ -261,53 +261,6 @@ export type IpcReq<K extends keyof IpcChannels> = IpcChannels[K]['req']
 export type IpcRes<K extends keyof IpcChannels> = IpcChannels[K]['res']
 
 /**
- * 全部 IPC 通道名（satisfies 编译期保证每个常量都是合法通道键，
- * 测试用它做 grep 断言；preload/renderer 组装时也用它枚举注册）。
- */
-export const IPC_CHANNEL_NAMES = [
-  'products:list',
-  'products:create',
-  'products:update',
-  'products:delete',
-  'products:updateStock',
-  'products:findSn',
-  'products:listSns',
-  'products:deleteSn',
-  'customers:list',
-  'customers:create',
-  'customers:update',
-  'sales:checkout',
-  'sales:void',
-  'sales:list',
-  'sales:detail',
-  'sales:updateExtra',
-  'purchases:create',
-  'purchases:list',
-  'reports:daily',
-  'reports:monthly',
-  'reports:export',
-  'printing:printers',
-  'printing:testPrint',
-  'printing:rawProbe',
-  'printing:preview',
-  'printing:print',
-  'printing:diagnose',
-  'printing:repair',
-  'printing:diagnoseExport',
-  'templates:list',
-  'templates:create',
-  'templates:update',
-  'templates:delete',
-  'templates:setDefault',
-  'settings:get',
-  'settings:set',
-  'settings:listLogos',
-  'settings:uploadLogo',
-  'settings:deleteLogo',
-  'settings:getRecentSalespersons'
-] as const satisfies readonly (keyof IpcChannels)[]
-
-/**
  * renderer 侧 typedInvoke 泛型封装签名（G8 类型化 IPC surface）。
  * - req 非 void 通道：`typedInvoke('products:list', { keyword: '可乐' })`
  * - req 为 void 通道：`typedInvoke('settings:get')`（不传实参）

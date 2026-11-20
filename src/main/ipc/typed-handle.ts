@@ -24,6 +24,28 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { IpcChannels } from '../../shared/types/ipc'
 
 /**
+ * 运行时注册集（P0-3 契约测试了断）：typedHandle 是唯一装配入口，注册即
+ * 收集——契约测试驱动全部 register*Ipc 后断言「实际注册集 == IpcChannels
+ * 契约键集」，专抓编译期抓不到的方向：**契约声明了通道、主进程却没人注册**
+ * （反方向「注册了未声明的通道」已被 K extends keyof IpcChannels 编译期挡死）。
+ * 生产代码不消费本集合（零运行时开销之外的用途）。
+ */
+const registeredChannels = new Set<string>()
+
+/** 已经 typedHandle 注册的通道名集合（只读视图——契约测试消费） */
+export function getRegisteredChannels(): ReadonlySet<string> {
+  return registeredChannels
+}
+
+/**
+ * 清空注册集（仅测试隔离用）：同 worker 跨测试文件模块缓存复用，
+ * 不 reset 会累积前次注册造成假通过。
+ */
+export function resetRegisteredChannels(): void {
+  registeredChannels.clear()
+}
+
+/**
  * ipcMain 的最小结构子集。方法语法（而非属性箭头语法）保持参数双变——
  * electron 真实例（listener 返回 void、rest args any[]）与测试 fake
  * （listener 返回 unknown）均可赋值，无需 cast。
@@ -52,6 +74,7 @@ export function typedHandle<K extends keyof IpcChannels>(
     event: IpcMainInvokeEvent
   ) => IpcChannels[K]['res'] | Promise<IpcChannels[K]['res']>
 ): void {
+  registeredChannels.add(channel)
   ipcMain.handle(channel, (event, req) =>
     (listener as (r: unknown, e: unknown) => unknown)(req, event)
   )
